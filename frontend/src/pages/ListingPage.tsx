@@ -1,4 +1,4 @@
-import { useLocation, useParams } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 import type { Listing } from "../types/Listing";
 import RatingRing from "../components/RatingRing";
 import "./styles/ListingPage.css";
@@ -8,7 +8,7 @@ import { getHighResImage } from "../utils/imageHelpers";
 
 
 export default function ListingPage() {
-  const { id } = useParams();
+  
   const { state } = useLocation();
   const listing = state?.listing as Listing;
 

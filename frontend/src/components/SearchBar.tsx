@@ -1,13 +1,17 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import "./SearchBar.css";
 
 interface Props {
   onSearch: (query: string) => void;
+    initialQuery?: string;
 }
 
-export default function SearchBar({ onSearch }: Props) {
-  const [query, setQuery] = useState("");
+export default function SearchBar({ onSearch, initialQuery = "" }: Props) {
+  const [query, setQuery] = useState(initialQuery);
 
+  useEffect(() => {
+    setQuery(initialQuery);
+  }, [initialQuery]);
   return (
     <div className="search-bar">
       <input

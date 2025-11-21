@@ -1,0 +1,103 @@
+.listing-card {
+  background: linear-gradient(to bottom, #383838, #000000);
+  border: 1px solid rgba(107, 114, 128, 0.4);
+  border-radius: 1rem;
+  padding: 1rem;
+  transition: 0.3s ease;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+       
+  color: #e5e7eb;
+}
+
+.listing-overview {
+  font-size: 0.85rem;
+  line-height: 1.4;
+  color: #d1d5db;
+  margin-top: 0.75rem;
+  border-top: 1px solid rgba(75, 85, 99, 0.5);
+  padding-top: 0.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre-line;
+  max-height: 10rem;    /* ✅ prevent overflow */
+}
+.price-rating {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+/* Optional: hover effect */
+.rating-ring {
+  width: 50px;
+  height: 50px;
+}
+
+.rating-ring text {
+  font-family: sans-serif;
+}
+
+
+
+
+
+.listing-card:hover {
+  border-color: #3b82f6;
+  box-shadow: 0 0 10px rgba(59, 130, 246, 0.4);
+}
+
+
+
+.listing-title {
+  font-weight: 600;
+  margin-top: 0.75rem;
+  font-size: 1rem;
+  line-height: 1.3;
+  color: #fff;
+}
+
+.listing-price {
+  color: #34d399;
+  font-weight: bold;
+}
+
+.listing-condition {
+  font-size: 0.75rem;
+  color: #d1d5db;
+  background: rgba(55, 65, 81, 0.6);
+  border-radius: 9999px;
+  padding: 0.15rem 0.5rem;
+}
+
+.listing-feedback {
+  color: #fbbf24;
+  font-size: 0.85rem;
+  margin-top: 0.25rem;
+}
+
+.listing-overview {
+  color: #d1d5db;
+  font-size: 0.85rem;
+  margin-top: 0.75rem;
+  border-top: 1px solid rgba(75, 85, 99, 0.5);
+  padding-top: 0.5rem;
+  line-height: 1.4;
+}
+
+.listing-link {
+  margin-top: auto;
+  display: inline-block;
+  text-align: center;
+  background: #2563eb;
+  color: #fff;
+  font-weight: 600;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  text-decoration: none;
+}
+
+.listing-link:hover {
+  background: #1d4ed8;
+}

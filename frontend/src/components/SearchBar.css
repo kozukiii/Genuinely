@@ -1,0 +1,51 @@
+/* SearchBar.css */
+
+.search-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem; /* 12px */
+  padding: 0.5rem;
+  border-radius: 1rem;
+  backdrop-filter: blur(10px);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  transition: background 0.3s ease, transform 0.3s ease;
+}
+
+.search-bar:hover {
+  background: rgba(255, 255, 255, 0.15);
+  transform: scale(1.02);
+}
+
+.search-bar input {
+  flex-grow: 1;
+  padding: 0.75rem 1rem;
+  border: none;
+  border-radius: 0.75rem;
+  background: transparent;
+  color: #f3f4f6; /* light gray text */
+  font-size: 1rem;
+  outline: none;
+}
+
+.search-bar input::placeholder {
+  color: rgba(243, 244, 246, 0.6);
+}
+
+.search-bar button {
+  padding: 0.75rem 1.25rem;
+  border: none;
+  border-radius: 0.75rem;
+  background: rgba(59, 130, 246, 0.7); /* soft blue */
+  color: white;
+  font-weight: 500;
+  cursor: pointer;
+  /* backdrop-filter: blur(5px); */
+  transition: background 0.3s ease, box-shadow 0.3s ease;
+}
+
+.search-bar button:hover {
+  background: rgba(59, 130, 246, 0.9);
+  box-shadow: 0 0 15px rgba(59, 130, 246, 0.5);
+}

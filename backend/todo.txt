@@ -1,0 +1,4 @@
+get into having a more specific output for consistant displaying by sorting through string returned by openai. 
+make ring bigger on listingpage.
+make enter trigger a query
+Add shipping cost to price thats viewable. 

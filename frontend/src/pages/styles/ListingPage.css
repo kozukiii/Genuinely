@@ -1,0 +1,178 @@
+/* --- Page container --- */
+.listing-page {
+  width: 100%;
+  max-width: 1100px;
+  margin: 40px auto;
+  padding: 0 20px;
+  color: #e8e8e8;
+  font-family: system-ui, sans-serif;
+}
+
+/* --- Compact card-like layout (top block) --- */
+.listing-card-block {
+  display: flex;
+  gap: 2rem;
+  padding: 1.5rem;
+  background: #111;
+  border-radius: 14px;
+  box-shadow: 0 0 12px rgba(0,0,0,0.35);
+  margin-bottom: 2rem;
+}
+
+/* Left: Image */
+.page-image img {
+  width: 22rem;
+  border-radius: 12px;
+  object-fit: cover;
+}
+
+/* Right: Info column */
+.page-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+/* Title */
+.page-title {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #fff;
+  margin: 0;
+}
+
+/* Price + Meta */
+.price-meta-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.page-price {
+  color: #39ff9d;
+  font-size: 1.4rem;
+  font-weight: 700;
+}
+
+.page-condition {
+  background: #1e1e1e;
+  padding: 4px 10px;
+  border-radius: 8px;
+  width: fit-content;
+  color: #8cd1ff;
+  font-size: 0.85rem;
+}
+
+.page-seller {
+  font-size: 0.95rem;
+  color: #d1d5db;
+}
+
+/* --- Bigger rating ring --- */
+.page-rating-ring {
+  
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  }
+
+.page-rating-label {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #80ffa8;
+}
+
+/* --- View on eBay button --- */
+.external-ebay-link {
+  display: inline-block;
+  padding: 12px 18px;
+  background: #007aff;
+  color: #fff;
+  text-decoration: none;
+  border-radius: 8px;
+  font-weight: 600;
+  transition: 0.2s ease;
+}
+
+.external-ebay-link:hover {
+  background: #005fcc;
+}
+
+/* --- AI Analysis Block --- */
+.ai-analysis-box {
+  background: #111;
+  padding: 1.2rem 1.6rem;
+  border-radius: 14px;
+  box-shadow: 0 0 10px rgba(0,0,0,0.25);
+}
+
+.ai-analysis-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.ai-analysis-main {
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.ai-toggle-btn {
+  margin-top: 4px;
+  background: none;
+  border: none;
+  color: #4da6ff;
+  cursor: pointer;
+  font-size: 0.95rem;
+  text-decoration: underline;
+}
+
+.ai-overview-dropdown {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(255,255,255,0.1);
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: #dcdcdc;
+}
+
+/* --- Responsive --- */
+@media (max-width: 900px) {
+  .listing-card-block {
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .page-image img {
+    width: 100%;
+    max-width: 22rem;
+  }
+}
+.info-ring-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 2rem;
+}
+
+.info-column {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.page-rating-ring {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding-right: 8rem;
+}
+
+@media (max-width: 800px) {
+  .info-ring-row {
+    flex-direction: column;
+    align-items: center;
+  }
+}

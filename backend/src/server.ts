@@ -4,6 +4,7 @@ import express from "express";
 import cors from "cors";
 import fetch from "node-fetch";
 import ebayRoutes from "./routes/ebayRoutes";
+import { warmUpEbayAccessToken } from "./services/ebayTokenService";
 
 
 
@@ -34,6 +35,16 @@ app.get("/proxy-image", async (req, res) => {
 });
 
 const PORT = 3000;
-app.listen(PORT, () =>
-  console.log(`✅ Backend running on http://localhost:${PORT}`)
-);
+
+async function startServer() {
+  await warmUpEbayAccessToken();
+
+  app.listen(PORT, () =>
+    console.log(`✅ Backend running on http://localhost:${PORT}`)
+  );
+}
+
+startServer().catch((error) => {
+  console.error("Failed to start server", error);
+  process.exit(1);
+});

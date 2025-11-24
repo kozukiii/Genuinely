@@ -86,7 +86,7 @@ At the bottom, include a small "DEBUG INFO" section containing ONLY the fields y
 
         // Descriptions
         { type: "text", text: `Short Description: ${listing.description}` },
-        { type: "text", text: `Full Description: ${listing.fullDescription}` },
+        
 
         // Link
         { type: "text", text: `Listing URL: ${listing.link}` },

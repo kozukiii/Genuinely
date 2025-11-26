@@ -5,61 +5,55 @@ dotenv.config();
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
 
-// ------------------------------------------------------
-// ANALYZE LISTING WITH IMAGES — optimized for fast pipeline
-// ------------------------------------------------------
-export async function analyzeListingWithImage(listing: {
-  title: string;
-  price: string;
-  currency: string;
-  link: string;
-
-  seller?: string;
-  feedback?: string;
-  score?: string;
-
-  condition?: string;
-  conditionDescriptor?: string;
-
-  itemLocation?: {
-    city?: string;
-    stateOrProvince?: string;
-    country?: string;
-  };
-
-  buyingOptions?: string[];
-  shippingOptions?: any[];
-  marketingPrice?: {
-    originalPrice?: string;
-    discountPercentage?: string;
-  };
-
-  description?: string;
-  fullDescription?: string;
-
-  imageUrl?: string | string[];
-}) {
+export async function analyzeListingWithImage(listing: any) {
   const messages: any[] = [
     {
       role: "system",
-      content: `You are an expert AI specializing in evaluating online marketplace listings.
+      content: `
+You are an expert AI specializing in evaluating online marketplace listings.
 
-Evaluate:
-- price fairness
-- seller trustworthiness
-- condition honesty
-- location risk
-- shipping fairness
-- whether the listing is likely a good deal overall
+🎯 Your job:
+Analyze the listing and produce *numeric scores* for the following categories ONLY:
 
-If the listing is going to be rated above 80/100, check to see if they have >99% positive feedback and a high volume of ratings (1000+). If they do, promote to 100/100.
-follow a bell curve type of rating system where most listings are average (50-70) and only a few are excellent (>90) or terrible (<30).
+- priceFairness (0–100)
+- sellerTrust (0–100)
+- conditionHonesty (0–100)
+- shippingFairness (0–100)
+- locationRisk (0–100)
+- descriptionQuality (0–100)
 
-Output MUST follow this exact format:
+These should follow a reverse bell-curve:  
+• Most items → High or low.   
+• Rarely 50s unless justified.
+IMPORTANT:
+Never penalize the listing for missing data fields. 
+If any field (location, conditionDescriptor, shipping info, discount, etc.) is undefined or missing due to API limitations, treat that field as NEUTRAL (no deduction, no reward). Only evaluate based on information that IS present.
+Missing data should NEVER lower a score.
 
-(rating)/100 your reasoning text here...
 
-At the bottom, include a small "DEBUG INFO" section containing ONLY the fields you were given.`,
+🎯 Output Format **MUST ALWAYS BE EXACTLY LIKE THIS**:
+
+{
+  "scores": {
+    "priceFairness": <number>,
+    "sellerTrust": <number>,
+    "conditionHonesty": <number>,
+    "shippingFairness": <number>,
+    "locationRisk": <number>,
+    "descriptionQuality": <number>
+  },
+  "overview": "Short reasoning paragraph here."
+}
+
+After that JSON block, output:
+
+DEBUG INFO:
+<Only the raw fields the user sent>
+
+‼️ DO NOT include any scoring numbers inside the overview text.  
+‼️ DO NOT add extra fields to the JSON.  
+‼️ DO NOT wrap JSON in backticks.  
+`
     },
 
     {
@@ -68,36 +62,27 @@ At the bottom, include a small "DEBUG INFO" section containing ONLY the fields y
         { type: "text", text: `Title: ${listing.title}` },
         { type: "text", text: `Price: ${listing.price} ${listing.currency}` },
 
-        // Seller trust
         { type: "text", text: `Seller: ${listing.seller}` },
         { type: "text", text: `Feedback: ${listing.feedback}% (${listing.score} ratings)` },
 
-        // Condition
         { type: "text", text: `Condition: ${listing.condition}` },
         { type: "text", text: `Condition Descriptor: ${listing.conditionDescriptor}` },
 
-        // Location
-        { type: "text", text: `Item Location: ${listing.itemLocation?.city || ""}, ${listing.itemLocation?.stateOrProvince || ""}, ${listing.itemLocation?.country || ""}` },
+        { type: "text", text: `Item Location: ${listing.itemLocation?.city}, ${listing.itemLocation?.stateOrProvince}, ${listing.itemLocation?.country}` },
 
-        // Buying & shipping
         { type: "text", text: `Buying Options: ${listing.buyingOptions?.join(", ")}` },
         { type: "text", text: `Shipping Options: ${JSON.stringify(listing.shippingOptions)}` },
 
-        // Price metadata
-        { type: "text", text: `Original Price: ${listing.marketingPrice?.originalPrice || "N/A"}` },
-        { type: "text", text: `Discount: ${listing.marketingPrice?.discountPercentage || "N/A"}%` },
+        { type: "text", text: `Original Price: ${listing.marketingPrice?.originalPrice ?? "N/A"}` },
+        { type: "text", text: `Discount: ${listing.marketingPrice?.discountPercentage ?? "N/A"}%` },
 
-        // Descriptions
         { type: "text", text: `Short Description: ${listing.description}` },
-        
-
-        // Link
         { type: "text", text: `Listing URL: ${listing.link}` },
       ],
     },
   ];
 
-  // Attach images (all available images)
+  // Attach all images
   if (listing.imageUrl) {
     const imgs = Array.isArray(listing.imageUrl)
       ? listing.imageUrl
@@ -115,7 +100,7 @@ At the bottom, include a small "DEBUG INFO" section containing ONLY the fields y
   const response = await client.chat.completions.create({
     model: "gpt-4o-mini",
     messages,
-    max_tokens: 550,
+    max_tokens: 650,
     temperature: 0.2,
   });
 

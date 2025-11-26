@@ -1,6 +1,12 @@
 import { analyzeListingWithImage } from "../ai/ebayOverview";
 
-// Analyze a single item
+// Helper for safe average
+function average(nums: number[]) {
+  const valid = nums.filter(n => typeof n === "number" && !isNaN(n));
+  if (valid.length === 0) return null;
+  return Math.round(valid.reduce((a, b) => a + b, 0) / valid.length);
+}
+
 export async function analyzeItemWithAI(merged: any) {
   const analysis = await analyzeListingWithImage({
     title: merged.title,
@@ -8,7 +14,6 @@ export async function analyzeItemWithAI(merged: any) {
     currency: merged.currency,
     link: merged.url,
 
-    // Seller info (still comes from summary)
     seller: merged.seller,
     feedback: merged.feedback,
     score: merged.score,
@@ -16,40 +21,80 @@ export async function analyzeItemWithAI(merged: any) {
     condition: merged.condition,
     conditionDescriptor: merged.conditionDescriptor,
 
-    // Location (summary includes this if eBay provides it)
     itemLocation: merged.itemLocation,
 
-    // Only summary-level fields remain
     buyingOptions: merged.buyingOptions,
-    shippingOptions: merged.shippingOptions, // summary has some
+    shippingOptions: merged.shippingOptions,
 
-    // Summary-level price promos (sometimes included)
     marketingPrice: merged.marketingPrice,
 
-    // Our new optimized description
     description: merged.fullDescription || merged.description,
 
-    // Images (summary only)
     imageUrl: merged.allImages
   });
 
-  // Extract the AI rating (0–100)
-  let aiScore: number | null = null;
-  const match = analysis.match(/(\d{1,3})\s*\/\s*100/);
-  if (match) aiScore = Math.max(0, Math.min(100, parseInt(match[1])));
+  // ---------------------------------------
+  // Extract the JSON block ONLY (top section)
+  // ---------------------------------------
+  let jsonBlock = null;
 
+  try {
+    const jsonMatch = analysis.match(/^\s*\{[\s\S]*?\}\s*(?=DEBUG INFO:)/);
+
+    if (jsonMatch) {
+      jsonBlock = JSON.parse(jsonMatch[0]);
+    } else {
+      console.error("⚠ No JSON block found in AI response.");
+      console.log("RAW:", analysis);
+    }
+  } catch (err) {
+    console.error("Failed to parse AI JSON:", err);
+    console.log("RAW ANALYSIS:", analysis);
+  }
+
+  const scores = jsonBlock?.scores || {};
+
+  const {
+    priceFairness,
+    sellerTrust,
+    conditionHonesty,
+    shippingFairness,
+    
+    descriptionQuality
+  } = scores;
+
+  const aiScore = average([
+    priceFairness,
+    sellerTrust,
+    conditionHonesty,
+    shippingFairness,
+    
+    descriptionQuality
+  ]);
+
+  // Return ONLY AI-derived values
   return {
     aiScore,
-    overview: analysis
+    aiScores: scores,
+    overview: jsonBlock?.overview || "No overview.",
+    debugInfo: analysis.split("DEBUG INFO:")[1]?.trim() || "No debug info.",
+    rawAnalysis: analysis
   };
 }
 
-// Analyze an array of items
+// -----------------------------------------
+// Merge AI results back into the original item
+// -----------------------------------------
 export async function analyzeItemsWithAI(items: any[]) {
   const analyzed = await Promise.all(
     items.map(async (item) => {
       const ai = await analyzeItemWithAI(item);
-      return { ...item, ...ai };
+
+      // AI FIELDS LAST → AI ALWAYS WINS
+      return {
+        ...item,
+        ...ai
+      };
     })
   );
 

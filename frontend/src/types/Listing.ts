@@ -8,6 +8,20 @@ export interface Listing {
   seller?: string;
   feedback?: string;
   score?: number;
+
+  // AI scoring
   aiScore?: number;
-  overview?: string;
+
+  aiScores?: {
+    priceFairness?: number;
+    sellerTrust?: number;
+    conditionHonesty?: number;
+    shippingFairness?: number;
+    locationRisk?: number;
+    descriptionQuality?: number;
+  };
+
+  overview?: string;     // Summary reasoning only
+  debugInfo?: string;    // Debug info block
+  rawAnalysis?: string;  // Full AI output for dev
 }

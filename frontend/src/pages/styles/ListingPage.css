@@ -176,3 +176,54 @@
     align-items: center;
   }
 }
+.page-rating-ring .rating-ring {
+  width: 100px !important;
+  height: 100px !important;
+}
+.ai-score-grid {
+  margin-top: 1rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 1.2rem;
+  padding: 1rem 0;
+}
+
+.ai-score-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  color: #e5e5e5;
+}
+
+.score-label {
+  margin-top: 0.4rem;
+  font-size: 0.85rem;
+  text-align: center;
+}
+
+.debug-block {
+  margin-top: 1rem;
+  background: #0e0e0e;
+  padding: 1rem;
+  font-size: 0.75rem;
+  border-radius: 8px;
+  color: #8cffc1;
+  white-space: pre-wrap;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.ai-debug-toggle {
+  margin-top: 1rem;
+  border: none;
+  background: none;
+  color: #4da6ff;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.ring-title {
+  font-size: 0.85rem;
+  margin-bottom: 0.4rem;
+  text-align: center;
+  color: #e5e5e5;
+}

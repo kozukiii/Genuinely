@@ -20,7 +20,7 @@ export async function overviewSearch(req: Request, res: Response) {
 
     // Optional: allow ?limit= on the querystring, default to 8
     const limitParam = req.query.limit as string | undefined;
-    const limit = limitParam ? Math.min(parseInt(limitParam, 10) || 1, 20) : 8;
+    const limit = limitParam ? Math.min(parseInt(limitParam, 10) || 1, 20) : 1;
 
     // Step 1 — get up to `limit` items with full details
     const mergedItems = await getEbayItemsWithDetails(query, limit);

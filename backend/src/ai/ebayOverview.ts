@@ -52,6 +52,9 @@ Evaluate:
 - shipping fairness
 - whether the listing is likely a good deal overall
 
+If the listing is going to be rated above 80/100, check to see if they have >99% positive feedback and a high volume of ratings (1000+). If they do, promote to 100/100.
+follow a bell curve type of rating system where most listings are average (50-70) and only a few are excellent (>90) or terrible (<30).
+
 Output MUST follow this exact format:
 
 (rating)/100 your reasoning text here...

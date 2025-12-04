@@ -21,7 +21,7 @@ export async function analyzeItemWithAI(merged: any) {
     condition: merged.condition,
     conditionDescriptor: merged.conditionDescriptor,
 
-    itemLocation: merged.itemLocation,
+    
 
     buyingOptions: merged.buyingOptions,
     shippingOptions: merged.shippingOptions,

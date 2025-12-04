@@ -6,7 +6,7 @@ export function mapEbaySummary(item: any) {
     currency: item.price?.currency,
 
     condition: item.condition,
-    conditionDescriptor: item.conditionDescriptor,
+    
 
     url: item.itemWebUrl,
 
@@ -26,7 +26,7 @@ export function mapEbaySummary(item: any) {
 
     shippingOptions: item.shippingOptions || [],
     buyingOptions: item.buyingOptions || [],
-    itemLocation: item.itemLocation || {},
+    //itemLocation: item.itemLocation || {}, commented out because it continues to return undefined
 
     description: item.shortDescription || ""
   };

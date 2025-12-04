@@ -19,16 +19,17 @@ Analyze the listing and produce *numeric scores* for the following categories ON
 - sellerTrust (0–100)
 - conditionHonesty (0–100)
 - shippingFairness (0–100)
-- locationRisk (0–100)
 - descriptionQuality (0–100)
 
 These should follow a reverse bell-curve:  
 • Most items → High or low.   
 • Rarely 50s unless justified.
 IMPORTANT:
-Never penalize the listing for missing data fields. 
-If any field (location, conditionDescriptor, shipping info, discount, etc.) is undefined or missing due to API limitations, treat that field as NEUTRAL (no deduction, no reward). Only evaluate based on information that IS present.
-Missing data should NEVER lower a score.
+If shipping is free, automatically give full points (100) for shippingFairness.  
+If the seller has excellent feedback (99%+) and many ratings (1000+), automatically give full points (100) for sellerTrust.
+
+If any field that is undefined or missing due to API limitations that is not absolutely critical, treat that field as NEUTRAL (no deduction, no reward). Only evaluate based on information that IS present.
+Missing data should NEVER lower a score, unless it is a critical field such as description or seller ratings.
 
 
 🎯 Output Format **MUST ALWAYS BE EXACTLY LIKE THIS**:
@@ -39,7 +40,6 @@ Missing data should NEVER lower a score.
     "sellerTrust": <number>,
     "conditionHonesty": <number>,
     "shippingFairness": <number>,
-    "locationRisk": <number>,
     "descriptionQuality": <number>
   },
   "overview": "Short reasoning paragraph here."

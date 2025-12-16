@@ -100,7 +100,7 @@ DEBUG INFO:
   const response = await client.chat.completions.create({
     model: "gpt-4o-mini",
     messages,
-    max_tokens: 650,
+    max_tokens: 1000,
     temperature: 0.2,
   });
 

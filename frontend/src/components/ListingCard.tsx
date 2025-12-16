@@ -1,4 +1,4 @@
-import "./ListingCard.css";
+import "./styles/ListingCard.css";
 import RatingRing from "./RatingRing";
 import { Link } from "react-router-dom";
 import type { Listing } from "../types/Listing";

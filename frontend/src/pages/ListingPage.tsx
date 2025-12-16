@@ -33,7 +33,7 @@ export default function ListingPage() {
     sellerTrust: "Seller Trust",
     conditionHonesty: "Condition Honesty",
     shippingFairness: "Shipping Fairness",
-    descriptionQuality: "Description Quality"
+    descriptionQuality: "Description Detail"
   };
 
   return (

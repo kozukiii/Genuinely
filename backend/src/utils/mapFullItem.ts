@@ -9,7 +9,12 @@ export function mapFullItem(item: any) {
     paymentMethods: item.paymentMethods || [],
     pickupOptions: item.pickupOptions || [],
     handlingTime: item.handlingTime || null,
-    fullImages: item.additionalImages?.map((img: any) => img.imageUrl) || [],
+
+    images: [
+      item.image?.imageUrl,
+      ...(item.additionalImages?.map((img: any) => img.imageUrl) || [])
+    ].filter(Boolean),
+
     rating: item.rating || null
   };
 }

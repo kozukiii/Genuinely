@@ -17,7 +17,10 @@ export default function ListingPage() {
     return <p style={{ padding: 20 }}>No listing data found.</p>;
   }
 
-  const highResImage = getHighResImage(listing.image);
+  const [imageIndex, setImageIndex] = useState(0);
+
+  const images = listing.images ?? [];
+  const currentImage = getHighResImage(images[imageIndex]);
 
   // Remove locationRisk from UI
   const scores = {
@@ -25,7 +28,7 @@ export default function ListingPage() {
     sellerTrust: listing.aiScores?.sellerTrust,
     conditionHonesty: listing.aiScores?.conditionHonesty,
     shippingFairness: listing.aiScores?.shippingFairness,
-    descriptionQuality: listing.aiScores?.descriptionQuality
+    descriptionQuality: listing.aiScores?.descriptionQuality,
   };
 
   const readableLabels: Record<string, string> = {
@@ -33,17 +36,43 @@ export default function ListingPage() {
     sellerTrust: "Seller Trust",
     conditionHonesty: "Condition Honesty",
     shippingFairness: "Shipping Fairness",
-    descriptionQuality: "Description Detail"
+    descriptionQuality: "Description Detail",
   };
 
   return (
     <div className="listing-page">
-
       {/* TOP SECTION */}
       <div className="listing-card-block">
         <div className="page-image">
-          <img src={highResImage} alt={listing.title} />
-        </div>
+  <div className="image-frame">
+    <img src={currentImage} alt={listing.title} />
+  </div>
+
+  {images.length > 1 && (
+    <div className="image-nav">
+      <button
+        onClick={() =>
+          setImageIndex((i) => (i === 0 ? images.length - 1 : i - 1))
+        }
+      >
+        ‹
+      </button>
+
+      <span className="image-counter">
+        {imageIndex + 1} / {images.length}
+      </span>
+
+      <button
+        onClick={() =>
+          setImageIndex((i) => (i === images.length - 1 ? 0 : i + 1))
+        }
+      >
+        ›
+      </button>
+    </div>
+  )}
+</div>
+
 
         <div className="page-info">
           <h1 className="page-title">{listing.title}</h1>
@@ -98,7 +127,6 @@ export default function ListingPage() {
 
         {showOverview && (
           <div className="ai-overview-dropdown">
-
             {/* CATEGORY RINGS FIRST */}
             {listing.aiScores && (
               <div className="ai-score-grid">
@@ -127,9 +155,7 @@ export default function ListingPage() {
             </button>
 
             {showDebug && (
-              <pre className="debug-block">
-                {listing.debugInfo}
-              </pre>
+              <pre className="debug-block">{listing.debugInfo}</pre>
             )}
 
             {/* RAW OUTPUT TOGGLE */}
@@ -141,9 +167,7 @@ export default function ListingPage() {
             </button>
 
             {showRaw && (
-              <pre className="debug-block">
-                {listing.rawAnalysis}
-              </pre>
+              <pre className="debug-block">{listing.rawAnalysis}</pre>
             )}
           </div>
         )}

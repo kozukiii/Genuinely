@@ -30,7 +30,7 @@ export async function analyzeItemWithAI(merged: any) {
 
     description: merged.fullDescription || merged.description,
 
-    imageUrl: merged.allImages
+    imageUrl: merged.images
   });
 
   // ---------------------------------------

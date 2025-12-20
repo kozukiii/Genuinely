@@ -4,7 +4,7 @@ export interface Listing {
   price: string;
   condition: string;
   url: string;
-  image?: string;
+  images: string[];
   seller?: string;
   feedback?: string;
   score?: number;

@@ -4,11 +4,7 @@ import { mapEbaySummary } from "../utils/mapEbaySummary";
 const EBAY_SEARCH = "https://api.ebay.com/buy/browse/v1/item_summary/search";
 const EBAY_ITEM = "https://api.ebay.com/buy/browse/v1/item";
 
-// ---------------------------------------------------
-// Fast multi-item search
-// Pulls: summary + fullDescription ONLY
-// Skips all heavy full-item metadata
-// ---------------------------------------------------
+
 export async function getEbayItemsWithDetails(
   query: string,
   limit: number = 8
@@ -49,7 +45,7 @@ export async function getEbayItemsWithDetails(
       return {
         ...summary,
         fullDescription: description,
-        allImages: [
+        images: [
           summary.image,
           ...summary.additionalImages
         ].filter(Boolean)
@@ -60,10 +56,3 @@ export async function getEbayItemsWithDetails(
   return detailedItems;
 }
 
-// ---------------------------------------------------
-// Still available if you want single-item behavior
-// ---------------------------------------------------
-export async function getSingleEbayItem(query: string) {
-  const items = await getEbayItemsWithDetails(query, 1);
-  return items[0] ?? null;
-}

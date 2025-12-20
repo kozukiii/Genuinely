@@ -6,7 +6,9 @@ import { getHighResImage } from "../utils/imageHelpers";   // ← added
 
 export default function ListingCard({ data }: { data: Listing }) {
 
-  const proxiedImage = getHighResImage(data.image); 
+  const primaryImage = data.images?.[0];
+  const proxiedImage = getHighResImage(primaryImage);
+
   return (
     <div className="listing-card-wrapper">
       <Link

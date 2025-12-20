@@ -20,89 +20,10 @@
 }
 
 /* Left: Image */
-.page-image {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.75rem;
-}
-
-.image-carousel {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  align-items: center;
-  gap: 0.5rem;
-}
-
 .page-image img {
   width: 22rem;
   border-radius: 12px;
   object-fit: cover;
-  border: 1px solid rgba(255,255,255,0.08);
-  box-shadow: 0 8px 20px rgba(0,0,0,0.35);
-}
-
-.carousel-nav {
-  background: #1a1a1a;
-  border: 1px solid rgba(255,255,255,0.15);
-  color: #e8e8e8;
-  padding: 0.6rem 0.75rem;
-  border-radius: 10px;
-  cursor: pointer;
-  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
-}
-
-.carousel-nav:hover:not(:disabled),
-.carousel-nav:focus-visible {
-  background: #2a2a2a;
-  color: #7be9a5;
-  border-color: #7be9a5;
-  outline: none;
-}
-
-.carousel-nav:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.carousel-dots {
-  display: flex;
-  gap: 0.5rem;
-  justify-content: center;
-  width: 100%;
-}
-
-.carousel-dot {
-  width: 12px;
-  height: 12px;
-  border-radius: 999px;
-  border: 1px solid rgba(255,255,255,0.3);
-  background: rgba(255,255,255,0.12);
-  cursor: pointer;
-  transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
-}
-
-.carousel-dot.active {
-  background: linear-gradient(120deg, #39ff9d, #4da6ff);
-  border-color: #7be9a5;
-  transform: scale(1.05);
-}
-
-.carousel-dot:focus-visible {
-  outline: 2px solid #4da6ff;
-  outline-offset: 3px;
-}
-
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
 }
 
 /* Right: Info column */

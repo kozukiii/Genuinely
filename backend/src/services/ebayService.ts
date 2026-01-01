@@ -1,5 +1,7 @@
 import fetch from "node-fetch";
 import { mapEbaySummary } from "../utils/mapEbaySummary";
+import { getEbayToken } from "./ebayToken";
+
 
 const EBAY_SEARCH = "https://api.ebay.com/buy/browse/v1/item_summary/search";
 const EBAY_ITEM = "https://api.ebay.com/buy/browse/v1/item";
@@ -9,16 +11,14 @@ export async function getEbayItemsWithDetails(
   query: string,
   limit: number = 8
 ) {
-  const token = process.env.EBAY_PROD_TOKEN;
-  if (!token) {
-    throw new Error("EBAY_PROD_TOKEN is missing");
-  }
 
-  // STEP 1 — Fetch summary items
-  const searchRes = await fetch(
-    `${EBAY_SEARCH}?q=${encodeURIComponent(query)}&limit=${limit}`,
-    { headers: { Authorization: `Bearer ${token}` } }
-  );
+
+  const token = await getEbayToken();
+const searchRes = await fetch(
+  `${EBAY_SEARCH}?q=${encodeURIComponent(query)}&limit=${limit}`,
+  { headers: { Authorization: `Bearer ${token}` } }
+);
+
 
   const searchJson = await searchRes.json();
   const summariesRaw = searchJson.itemSummaries || [];

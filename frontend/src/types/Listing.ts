@@ -1,13 +1,33 @@
+export type ListingSource = "ebay" | "marketplace";
+
 export interface Listing {
   id: string;
+
+  // where it came from
+  source: ListingSource;
+
   title: string;
-  price: string;
-  condition: string;
+
+  // Normalize price to a NUMBER so sorting/scoring is sane
+  // (formatting happens in UI)
+  price: number;
+
+  currency?: string; // "USD" etc.
+
+  condition?: string;
+
   url: string;
+
+  // normalize naming (but keep backwards-compat support in code for now)
   images: string[];
+
+  // optional metadata (varies by source)
   seller?: string;
-  feedback?: string;
+  feedback?: string; // keep string if you want "99.6" etc
   score?: number;
+
+  location?: string;       // marketplace commonly provides
+  shippingPrice?: number;  // ebay commonly provides
 
   // AI scoring
   aiScore?: number;
@@ -21,7 +41,7 @@ export interface Listing {
     descriptionQuality?: number;
   };
 
-  overview?: string;     // Summary reasoning only
-  debugInfo?: string;    // Debug info block
-  rawAnalysis?: string;  // Full AI output for dev
+  overview?: string;
+  debugInfo?: string;
+  rawAnalysis?: string;
 }

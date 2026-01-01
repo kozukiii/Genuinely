@@ -1,4 +1,11 @@
 export function mapEbaySummary(item: any) {
+  const primary = item.image?.imageUrl || null;
+
+  const additional =
+    item.additionalImages?.map((img: any) => img?.imageUrl).filter(Boolean) || [];
+
+  const imageUrls = [primary, ...additional].filter(Boolean);
+
   return {
     id: item.itemId,
     title: item.title,
@@ -6,17 +13,20 @@ export function mapEbaySummary(item: any) {
     currency: item.price?.currency,
 
     condition: item.condition,
-    
 
     url: item.itemWebUrl,
 
-    image: item.image?.imageUrl,
-    additionalImages: item.additionalImages?.map((img: any) => img.imageUrl) || [],
+    // keep existing fields (UI)
+    image: primary,
+    additionalImages: additional,
+
+    // ✅ add what your AI expects
+    imageUrls,
 
     seller: item.seller?.username,
     feedback: item.seller?.feedbackPercentage,
     score: item.seller?.feedbackScore,
-    
+
     sellerAccountType: item.seller?.sellerAccountType,
 
     marketingPrice: {
@@ -26,8 +36,7 @@ export function mapEbaySummary(item: any) {
 
     shippingOptions: item.shippingOptions || [],
     buyingOptions: item.buyingOptions || [],
-    //itemLocation: item.itemLocation || {}, commented out because it continues to return undefined
 
-    description: item.shortDescription || ""
+    description: item.shortDescription || "",
   };
 }

@@ -88,16 +88,40 @@
 
 .listing-link {
   margin-top: auto;
-  display: inline-block;
-  text-align: center;
+
+  /* Reset button defaults */
   background: #2563eb;
+  border: none;
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+
+  /* Visuals (same as before) */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
   color: #fff;
   font-weight: 600;
+  font-size: 0.9rem;
   padding: 0.5rem 0.75rem;
   border-radius: 0.5rem;
-  text-decoration: none;
+
+  cursor: pointer;
+  user-select: none;
+
+  transition: background 0.15s ease, transform 0.05s ease;
 }
 
 .listing-link:hover {
   background: #1d4ed8;
+}
+
+.listing-link:active {
+  transform: translateY(1px);
+}
+
+.listing-link:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
 }

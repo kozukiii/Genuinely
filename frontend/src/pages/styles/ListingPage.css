@@ -298,3 +298,12 @@
   text-align: center;
   color: #e5e5e5;
 }
+.image-frame {
+  width: 100%;
+  max-width: 22rem;
+  height: 22rem;          /* ← THIS locks the layout */
+  
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}

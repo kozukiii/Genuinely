@@ -34,3 +34,5 @@ pnpm-debug.log*
 
 # --- OS STUFF ---
 Thumbs.db
+# runtime cache
+.cache/

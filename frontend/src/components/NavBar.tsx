@@ -34,6 +34,7 @@ export default function NavBar() {
           Cart
         </Link>
       </div>
+      
     </nav>
   );
 }

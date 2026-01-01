@@ -2,12 +2,22 @@ import "./styles/ListingCard.css";
 import RatingRing from "./RatingRing";
 import { Link } from "react-router-dom";
 import type { Listing } from "../types/Listing";
-import { getHighResImage } from "../utils/imageHelpers";   // ← added
+import { getHighResImage } from "../utils/imageHelpers";
+
+function sourceLabel(source: Listing["source"]) {
+  if (source === "marketplace") return "Marketplace";
+  return "eBay";
+}
 
 export default function ListingCard({ data }: { data: Listing }) {
-
   const primaryImage = data.images?.[0];
   const proxiedImage = getHighResImage(primaryImage);
+
+  const money = new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: data.currency ?? "USD",
+    maximumFractionDigits: 0,
+  }).format(data.price);
 
   return (
     <div className="listing-card-wrapper">
@@ -21,7 +31,7 @@ export default function ListingCard({ data }: { data: Listing }) {
           <img
             src={proxiedImage}
             alt={data.title}
-            onError={(e) => ((e.currentTarget.src = "/placeholder.jpg"))}
+            onError={(e) => (e.currentTarget.src = "/placeholder.jpg")}
             loading="lazy"
           />
         </div>
@@ -29,10 +39,10 @@ export default function ListingCard({ data }: { data: Listing }) {
         {/* TITLE */}
         <h3 className="listing-title">{data.title}</h3>
 
-        {/* PRICE + CONDITION + SELLER + RATING (2-column flex) */}
+        {/* PRICE + CONDITION + SELLER + RATING */}
         <div className="price-rating">
           <div className="left-side">
-            <p className="listing-price">${data.price}</p>
+            <p className="listing-price">{money}</p>
 
             {data.condition && (
               <span className="listing-condition">{data.condition}</span>
@@ -45,7 +55,6 @@ export default function ListingCard({ data }: { data: Listing }) {
             )}
           </div>
 
-          {/* RIGHT SIDE: RATING RING */}
           {data.aiScore !== undefined && (
             <div className="rating-ring">
               <RatingRing value={data.aiScore} />
@@ -53,15 +62,18 @@ export default function ListingCard({ data }: { data: Listing }) {
           )}
         </div>
 
-        {/* EBAY BUTTON INSIDE CARD */}
-        <a
+        {/* SOURCE BUTTON */}
+        <button
+          type="button"
           className="listing-link"
-          href={data.url}
-          target="_blank"
-          rel="noopener noreferrer"
+          onClick={(e) => {
+            e.preventDefault(); // prevents Link navigation
+            e.stopPropagation(); // prevents click bubbling to the card Link
+            window.open(data.url, "_blank", "noopener,noreferrer");
+          }}
         >
-          View on eBay →
-        </a>
+          View on {sourceLabel(data.source)} →
+        </button>
       </Link>
     </div>
   );

@@ -6,7 +6,7 @@ dotenv.config();
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
 
 export async function analyzeListingWithImages(listing: any) {
-  console.log("LISTING KEYS:", Object.keys(listing));
+  /*console.log("LISTING KEYS:", Object.keys(listing));
   console.log("listing.image:", listing.image);
   console.log("listing.additionalImages:", listing.additionalImages);
   console.log("listing.imageUrls:", listing.imageUrls);
@@ -16,7 +16,7 @@ export async function analyzeListingWithImages(listing: any) {
     "IMAGE COUNT:",
     Array.isArray(listing.imageUrls) ? listing.imageUrls.length : "not an array"
   );
-
+  */
   const messages: any[] = [
     {
       role: "system",

@@ -1,8 +1,10 @@
 import "./styles/ListingCard.css";
 import RatingRing from "./RatingRing";
 import { Link } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
 import type { Listing } from "../types/Listing";
 import { getHighResImage } from "../utils/imageHelpers";
+import { isSaved, toggleSaved } from "../utils/savedListings";
 
 function sourceLabel(source: Listing["source"]) {
   if (source === "marketplace") return "Marketplace";
@@ -10,8 +12,39 @@ function sourceLabel(source: Listing["source"]) {
 }
 
 export default function ListingCard({ data }: { data: Listing }) {
-  const primaryImage = data.images?.[0];
-  const proxiedImage = getHighResImage(primaryImage);
+  const images = data.images ?? [];
+  const [imageIndex, setImageIndex] = useState(0);
+  const intervalRef = useRef<number | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    // initialize saved status
+    setSaved(isSaved(data.id));
+
+    // keep in sync if saved changes elsewhere
+    const onChange = () => setSaved(isSaved(data.id));
+    window.addEventListener("saved:listings:changed", onChange);
+    return () => window.removeEventListener("saved:listings:changed", onChange);
+  }, [data.id]);
+
+  function startImageCycle() {
+    if (images.length <= 1) return;
+
+    intervalRef.current = window.setInterval(() => {
+      setImageIndex((prev) => (prev + 1) % images.length);
+    }, 900); // slow + premium feel
+  }
+
+  function stopImageCycle() {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+    setImageIndex(0);
+  }
+
+  const activeImage = images[imageIndex];
+  const proxiedImage = getHighResImage(activeImage);
 
   const money = new Intl.NumberFormat(undefined, {
     style: "currency",
@@ -27,7 +60,11 @@ export default function ListingCard({ data }: { data: Listing }) {
         className="listing-card"
       >
         {/* IMAGE */}
-        <div className="listing-image">
+        <div
+          className="listing-image"
+          onMouseEnter={startImageCycle}
+          onMouseLeave={stopImageCycle}
+        >
           <img
             src={proxiedImage}
             alt={data.title}
@@ -55,11 +92,30 @@ export default function ListingCard({ data }: { data: Listing }) {
             )}
           </div>
 
+                  {/* FIXED BADGES: ring + heart */}
+        <div className="card-badges">
           {data.aiScore !== undefined && (
-            <div className="rating-ring">
+            <div className="badge-ring">
               <RatingRing value={data.aiScore} />
             </div>
           )}
+
+          <button
+            type="button"
+            className="badge-heart"
+            aria-pressed={saved}
+            aria-label={saved ? "Unsave listing" : "Save listing"}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              const next = toggleSaved(data);
+              setSaved(next);
+            }}
+          >
+            {saved ? "♥" : "♡"}
+          </button>
+        </div>
+
         </div>
 
         {/* SOURCE BUTTON */}

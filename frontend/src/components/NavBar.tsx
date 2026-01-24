@@ -31,7 +31,7 @@ export default function NavBar() {
           to="/cart" 
           className={pathname === "/cart" ? "nav-item active" : "nav-item"}
         >
-          Cart
+          Saved
         </Link>
       </div>
       

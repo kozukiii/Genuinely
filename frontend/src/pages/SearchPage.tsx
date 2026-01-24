@@ -5,12 +5,15 @@ import ListingCard from "../components/ListingCard";
 import type { Listing } from "../types/Listing";
 import "./styles/HomePage.css";
 
-
 const SEARCH_QUERY_KEY = "search:query";
 const SEARCH_LISTINGS_KEY = "search:listings";
 const SEARCH_TIMESTAMP_KEY = "search:ts";
 const STALE_AFTER_MS = 5 * 60 * 1000; // 5 minutes
 
+// ✅ Use env var for mobile/LAN testing, fall back to localhost for normal dev
+const API_BASE =
+  (import.meta.env.VITE_API_BASE as string | undefined) ??
+  "http://localhost:3000";
 
 export default function HomePage() {
   const [listings, setListings] = useState<Listing[]>([]);
@@ -21,41 +24,33 @@ export default function HomePage() {
   const fetchListings = useCallback(async (query: string) => {
     if (!query) return;
 
-
-  
     setLoading(true);
     setError(null);
 
     try {
       const res = await fetch(
-        `http://localhost:3000/api/ebay/overview?query=${encodeURIComponent(
-          query
-        )}`
+        `${API_BASE}/api/ebay/overview?query=${encodeURIComponent(query)}`
       );
 
       if (!res.ok) throw new Error(`Server responded ${res.status}`);
 
-      const data = await res.json();
+      const data = (await res.json()) as Listing[];
       setListings(data);
+
       sessionStorage.setItem(SEARCH_QUERY_KEY, query);
       sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(data));
       sessionStorage.setItem(SEARCH_TIMESTAMP_KEY, Date.now().toString());
-
-
-
-
-
     } catch (err) {
       console.error(err);
       setError("Failed to load listings. Please try again.");
       setListings([]);
-       sessionStorage.removeItem(SEARCH_QUERY_KEY);
+      sessionStorage.removeItem(SEARCH_QUERY_KEY);
       sessionStorage.removeItem(SEARCH_LISTINGS_KEY);
       sessionStorage.removeItem(SEARCH_TIMESTAMP_KEY);
     } finally {
       setLoading(false);
     }
-     }, []);
+  }, []);
 
   useEffect(() => {
     try {
@@ -63,9 +58,7 @@ export default function HomePage() {
       const savedListingsRaw = sessionStorage.getItem(SEARCH_LISTINGS_KEY);
       const savedTimestamp = sessionStorage.getItem(SEARCH_TIMESTAMP_KEY);
 
-      if (savedQuery) {
-        setInitialQuery(savedQuery);
-      }
+      if (savedQuery) setInitialQuery(savedQuery);
 
       if (savedListingsRaw) {
         const parsed = JSON.parse(savedListingsRaw) as Listing[];
@@ -75,15 +68,11 @@ export default function HomePage() {
       const isStale =
         !savedTimestamp || Date.now() - Number(savedTimestamp) > STALE_AFTER_MS;
 
-      if (savedQuery && isStale) {
-        fetchListings(savedQuery);
-      }
+      if (savedQuery && isStale) fetchListings(savedQuery);
     } catch (err) {
       console.error("Failed to hydrate search data from sessionStorage", err);
     }
   }, [fetchListings]);
-
-  
 
   return (
     <div className="home-page">

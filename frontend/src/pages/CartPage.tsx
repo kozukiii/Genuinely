@@ -1,15 +1,16 @@
-// src/pages/CartPage.tsx
 import { useEffect, useMemo, useState } from "react";
 import ListingCard from "../components/ListingCard";
 import type { Listing } from "../types/Listing";
 import { getSavedListings, setSavedListings } from "../utils/savedListings";
+import "./styles/HomePage.css";
 import "./styles/CartPage.css";
+
+
 
 export default function CartPage() {
   const [saved, setSaved] = useState<Listing[]>([]);
   const [query, setQuery] = useState("");
 
-  // Load once + subscribe to changes
   useEffect(() => {
     const load = () => setSaved(getSavedListings());
     load();
@@ -39,12 +40,12 @@ export default function CartPage() {
     if (saved.length === 0) return;
     if (!confirm("Clear all saved listings?")) return;
     setSavedListings([]);
-    // local state updates via event, but do it immediately too:
     setSaved([]);
   }
 
   return (
-    <div className="cart-page">
+    // ✅ Use the same page wrapper class as SearchPage (optional but helps)
+    <div className="home-page">
       <div className="cart-header">
         <div className="cart-title-row">
           <h1 className="cart-title">Saved</h1>
@@ -89,7 +90,8 @@ export default function CartPage() {
           </div>
         </div>
       ) : (
-        <div className="cart-grid">
+        // ✅ EXACT same container class used on SearchPage
+        <div className="results-container">
           {filtered.map((listing) => (
             <ListingCard key={`${listing.source}:${listing.id}`} data={listing} />
           ))}

@@ -16,9 +16,10 @@ app.use("/api/ebay", ebayRoutes);
 app.use("/api/proxy-image", imageProxyRoutes);
 
 const PORT = 3000;
-app.listen(PORT, () => {
-  console.log(`✅ Backend running on http://localhost:${PORT}`);
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`✅ Backend running on port ${PORT}`);
 });
+
 app.get("/api/health", (req, res) => {
   res.json({ ok: true, time: new Date().toISOString() });
 });

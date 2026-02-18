@@ -1,6 +1,7 @@
 import { marketplaceRequest } from "../utils/marketplaceApiClient";
+import type { Listing } from "../types/listing"; // matches your backend types file name
 
-// You can align this with your frontend Listing shape
+// Keep this if other code still imports MarketplaceListing
 export type ListingSource = "marketplace";
 
 export interface MarketplaceListing {
@@ -22,7 +23,6 @@ export interface MarketplaceListing {
 function toNumberPrice(input: any): number {
   if (typeof input === "number") return input;
   if (typeof input === "string") {
-    // remove $, commas, etc.
     const cleaned = input.replace(/[^0-9.]/g, "");
     const n = Number(cleaned);
     return Number.isFinite(n) ? n : 0;
@@ -30,7 +30,7 @@ function toNumberPrice(input: any): number {
   return 0;
 }
 
-// TODO: replace this mapping once you paste marketplaceApiClient.ts response shape
+// TODO: replace this mapping once marketplaceApiClient.ts response shape is finalized
 function mapMarketplaceItem(raw: any): MarketplaceListing {
   return {
     id: String(raw.id ?? raw.listing_id ?? raw.itemId),
@@ -56,13 +56,48 @@ function mapMarketplaceItem(raw: any): MarketplaceListing {
   };
 }
 
+// Existing function (keep it so other imports don’t break)
 export async function searchMarketplace(query: string, limit = 12): Promise<MarketplaceListing[]> {
-  const res = await marketplaceRequest("/search", { q: query, limit });
+  try {
+    const res = await marketplaceRequest("/search", { q: query, limit });
 
-  const items: any[] = Array.isArray(res?.items) ? res.items
-    : Array.isArray(res?.results) ? res.results
-    : Array.isArray(res) ? res
-    : [];
+    const items: any[] = Array.isArray(res?.items) ? res.items
+      : Array.isArray(res?.results) ? res.results
+      : Array.isArray(res) ? res
+      : [];
 
-  return items.map(mapMarketplaceItem).filter(x => x.url && x.title);
+    return items.map(mapMarketplaceItem).filter(x => x.url && x.title);
+  } catch {
+    // Critical for aggregator fallback: marketplace failures should not crash the request
+    return [];
+  }
+}
+
+// Normalized wrapper for the future /api/search aggregator
+export async function searchMarketplaceNormalized(query: string, limit = 12): Promise<Listing[]> {
+  const items = await searchMarketplace(query, limit);
+
+  // Convert MarketplaceListing -> normalized Listing contract
+  return items.map((x) => ({
+    id: x.id,
+    source: "marketplace",
+    title: x.title,
+    price: x.price,
+    currency: x.currency,
+    condition: x.condition,
+    url: x.url,
+    images: x.images ?? [],
+    seller: x.seller,
+    location: x.location,
+
+    // leave ebay-ish fields undefined
+    shippingPrice: undefined,
+
+    // leave AI fields undefined (demo mode / no-token mode)
+    aiScore: undefined,
+    aiScores: undefined,
+    overview: undefined,
+    debugInfo: undefined,
+    rawAnalysis: undefined,
+  }));
 }

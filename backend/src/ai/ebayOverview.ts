@@ -5,18 +5,118 @@ dotenv.config();
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
 
-export async function analyzeListingWithImages(listing: any) {
-  /*console.log("LISTING KEYS:", Object.keys(listing));
-  console.log("listing.image:", listing.image);
-  console.log("listing.additionalImages:", listing.additionalImages);
-  console.log("listing.imageUrls:", listing.imageUrls);
+function clean(v: any): string | undefined {
+  if (v === undefined || v === null) return undefined;
+  const s = String(v).trim();
+  if (!s) return undefined;
+  const lower = s.toLowerCase();
+  if (lower === "undefined" || lower === "null" || lower === "n/a") return undefined;
+  if (/^undefined(\s*,\s*undefined)*$/i.test(s)) return undefined;
+  return s;
+}
 
-  console.log("IMAGE URLS:", listing.imageUrls);
-  console.log(
-    "IMAGE COUNT:",
-    Array.isArray(listing.imageUrls) ? listing.imageUrls.length : "not an array"
-  );
-  */
+function formatLocation(listing: any): string {
+  const loc = listing.itemLocation ?? listing.location;
+
+  // if it's already a string, use it
+  if (typeof loc === "string") return clean(loc) ?? "N/A";
+
+  // if it's an object (eBay itemLocation shape), build a readable string
+  if (loc && typeof loc === "object") {
+    const parts = [loc.city, loc.stateOrProvince, loc.postalCode, loc.country]
+      .map(clean)
+      .filter(Boolean) as string[];
+    return parts.length ? parts.join(", ") : "N/A";
+  }
+
+  return "N/A";
+}
+
+function formatBuyingOptions(v: any): string {
+  if (Array.isArray(v)) return v.map(String).map((x) => x.trim()).filter(Boolean).join(", ") || "N/A";
+  if (typeof v === "string") return clean(v) ?? "N/A";
+  return "N/A";
+}
+
+function formatShippingOptions(v: any): string {
+  if (v === undefined || v === null) return "N/A";
+
+  // if it's a JSON string, parse once so it doesn't look double-encoded
+  if (typeof v === "string") {
+    const s = clean(v);
+    if (!s) return "N/A";
+    try {
+      const parsed = JSON.parse(s);
+      return JSON.stringify(parsed);
+    } catch {
+      return s;
+    }
+  }
+
+  // object/array
+  try {
+    return JSON.stringify(v);
+  } catch {
+    return "N/A";
+  }
+}
+
+function formatFeedback(listing: any): string {
+  const fb = clean(listing.feedback);
+  const score = listing.score;
+
+  if (fb) {
+    const hasPercent = fb.includes("%");
+    const hasRatingsInText = fb.includes("(") || fb.toLowerCase().includes("rating");
+    if (hasRatingsInText) return fb; // already has rating count etc.
+    return `${fb}${hasPercent ? "" : "%"}${score != null ? ` (${score} ratings)` : ""}`;
+  }
+
+  return score != null ? `${score} ratings` : "N/A";
+}
+
+function formatOriginalPrice(marketingPrice: any): string {
+  const op = marketingPrice?.originalPrice;
+  if (!op) return "N/A";
+  // eBay often uses { value, currency }
+  const value = op?.value ?? op;
+  const currency = op?.currency ?? marketingPrice?.originalPriceCurrency;
+  const v = clean(value);
+  if (!v) return "N/A";
+  return currency ? `${v} ${currency}` : v;
+}
+
+function formatDiscount(marketingPrice: any): string {
+  const d = marketingPrice?.discountPercentage ?? marketingPrice?.discountPercent;
+  if (typeof d === "number" && Number.isFinite(d)) return `${d}%`;
+  const s = clean(d);
+  return s ? (s.includes("%") ? s : `${s}%`) : "N/A";
+}
+
+export async function analyzeListingWithImages(listing: any) {
+  const title = clean(listing.title) ?? "Untitled";
+  const currency = clean(listing.currency) ?? "USD";
+  const link = clean(listing.link ?? listing.url) ?? "";
+
+  const seller = clean(listing.seller) ?? "N/A";
+  const feedbackLine = formatFeedback(listing);
+
+  const condition = clean(listing.condition) ?? "N/A";
+  const conditionDescriptor = clean(listing.conditionDescriptor) ?? "N/A";
+
+  const itemLocation = formatLocation(listing);
+  const buyingOptions = formatBuyingOptions(listing.buyingOptions);
+  const shippingOptions = formatShippingOptions(listing.shippingOptions);
+
+  const shortDesc = clean(listing.shortDescription) ?? "";
+  const description = clean(listing.description ?? listing.fullDescription) ?? "";
+
+  const imageUrls: string[] = Array.isArray(listing.imageUrls)
+    ? listing.imageUrls.filter((u: any) => typeof u === "string" && u.trim())
+    : Array.isArray(listing.images)
+      ? listing.images.filter((u: any) => typeof u === "string" && u.trim())
+      : [];
+
   const messages: any[] = [
     {
       role: "system",
@@ -32,16 +132,11 @@ Analyze the listing and produce *numeric scores* for the following categories ON
 - shippingFairness (0–100) *is the shipping price reasonable for the item and location*
 - descriptionQuality (0–100) *is the description detailed, accurate, and well-written*
 
-These should follow a reverse bell-curve:  
-• Most items → High or low.   
-• Rarely 50s unless justified.
-IMPORTANT:
-If shipping is free, automatically give full points (100) for shippingFairness.  
+If shipping is free, automatically give full points (100) for shippingFairness.
 If the seller has excellent feedback (99%+) and many ratings (1000+), automatically give full points (100) for sellerTrust.
 
-If any field that is undefined or missing due to API limitations that is not absolutely critical, treat that field as NEUTRAL (no deduction, no reward). Only evaluate based on information that IS present.
-Missing data should NEVER lower a score, unless it is a critical field such as description or seller ratings.
-ALWAYS INCLUDE A DESCRIPTION OF THE IMAGES IN THE OVERVIEW SECTION (unless none were provided, then state that)
+If any field is missing/undefined, treat it as NEUTRAL (no deduction, no reward). Missing data should NEVER lower a score unless it's critical (e.g., description or seller ratings).
+ALWAYS INCLUDE A DESCRIPTION OF THE IMAGES IN THE OVERVIEW SECTION (unless none were provided).
 
 🎯 Output Format **MUST ALWAYS BE EXACTLY LIKE THIS**:
 
@@ -54,7 +149,6 @@ ALWAYS INCLUDE A DESCRIPTION OF THE IMAGES IN THE OVERVIEW SECTION (unless none 
     "descriptionQuality": <number>
   },
   "overview": "Short reasoning paragraph here."
-  
 }
 
 After that JSON block, output:
@@ -62,74 +156,42 @@ After that JSON block, output:
 DEBUG INFO:
 <Only the raw fields the user sent>
 
-‼️ DO NOT include any scoring numbers inside the overview text.  
-‼️ DO NOT add extra fields to the JSON.  
-‼️ DO NOT wrap JSON in backticks.  
+‼️ DO NOT include any scoring numbers inside the overview text.
+‼️ DO NOT add extra fields to the JSON.
+‼️ DO NOT wrap JSON in backticks.
 `,
     },
-
     {
       role: "user",
       content: [
-        { type: "text", text: `Title: ${listing.title}` },
-        { type: "text", text: `Price: ${listing.price} ${listing.currency}` },
+        { type: "text", text: `Title: ${title}` },
+        { type: "text", text: `Price: ${listing.price} ${currency}` },
 
-        { type: "text", text: `Seller: ${listing.seller}` },
-        {
-          type: "text",
-          text: `Feedback: ${listing.feedback}% (${listing.score} ratings)`,
-        },
+        { type: "text", text: `Seller: ${seller}` },
+        { type: "text", text: `Feedback: ${feedbackLine}` },
 
-        { type: "text", text: `Condition: ${listing.condition}` },
-        {
-          type: "text",
-          text: `Condition Descriptor: ${listing.conditionDescriptor}`,
-        },
+        { type: "text", text: `Condition: ${condition}` },
+        { type: "text", text: `Condition Descriptor: ${conditionDescriptor}` },
 
-        {
-          type: "text",
-          text: `Item Location: ${listing.itemLocation?.city}, ${listing.itemLocation?.stateOrProvince}, ${listing.itemLocation?.country}`,
-        },
+        { type: "text", text: `Item Location: ${itemLocation}` },
+        { type: "text", text: `Buying Options: ${buyingOptions}` },
+        { type: "text", text: `Shipping Options: ${shippingOptions}` },
 
-        {
-          type: "text",
-          text: `Buying Options: ${listing.buyingOptions?.join(", ")}`,
-        },
-        {
-          type: "text",
-          text: `Shipping Options: ${JSON.stringify(listing.shippingOptions)}`,
-        },
+        { type: "text", text: `Original Price: ${formatOriginalPrice(listing.marketingPrice)}` },
+        { type: "text", text: `Discount: ${formatDiscount(listing.marketingPrice)}` },
 
-        {
-          type: "text",
-          text: `Original Price: ${
-            listing.marketingPrice?.originalPrice ?? "N/A"
-          }`,
-        },
-        {
-          type: "text",
-          text: `Discount: ${
-            listing.marketingPrice?.discountPercentage ?? "N/A"
-          }%`,
-        },
+        { type: "text", text: `Short Description: ${shortDesc}` },
+        { type: "text", text: `Description: ${description}` },
 
-        { type: "text", text: `Short Description: ${listing.description}` },
-        { type: "text", text: `Listing URL: ${listing.link}` },
-        {
-          type: "text",
-          text: `Images Provided: ${
-            Array.isArray(listing.imageUrls) ? listing.imageUrls.length : 0
-          }`,
-        },
+        { type: "text", text: `Listing URL: ${link}` },
+        { type: "text", text: `Images Provided: ${imageUrls.length}` },
       ],
     },
   ];
 
   // Attach all images (explicit multi-image support)
-  if (Array.isArray(listing.imageUrls) && listing.imageUrls.length) {
-    for (const url of listing.imageUrls) {
-      if (typeof url !== "string" || !url.trim()) continue;
-
+  if (imageUrls.length) {
+    for (const url of imageUrls) {
       messages[1].content.push({
         type: "image_url",
         image_url: { url },
@@ -137,7 +199,6 @@ DEBUG INFO:
     }
   }
 
-  // GPT call
   const response = await client.chat.completions.create({
     model: "gpt-4o-mini",
     messages,

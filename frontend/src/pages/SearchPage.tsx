@@ -47,7 +47,7 @@ export default function SearchPage() {
 
       const url =
         `${API_BASE}/api/search?query=${encodeURIComponent(q)}` +
-        `&limit=64&sources=ebay,marketplace` +
+        `&limit=4&sources=ebay,marketplace` +
         `&analyze=${demoMode ? "0" : "1"}`;
 
       setDebug(`requesting ${url}`);

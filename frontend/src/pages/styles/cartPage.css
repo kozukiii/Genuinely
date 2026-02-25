@@ -1,124 +1,127 @@
 /* src/pages/styles/CartPage.css */
-.cart-page{
+.cart-page {
   width: 100%;
   max-width: 1200px;
   margin: 24px auto;
   padding: 0 20px;
-  color: rgba(245,245,245,0.92);
+  color: rgba(245, 245, 245, 0.92);
 }
 
-.cart-header{
+.cart-header {
   margin-bottom: 18px;
 }
 
-.cart-title-row{
+.cart-title-row {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 14px;
 }
 
-.cart-title{
+.cart-title {
   margin: 0;
   font-size: 1.55rem;
   font-weight: 700;
   letter-spacing: -0.02em;
 }
 
-.cart-meta{
+.cart-meta {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: rgba(209,213,219,0.78);
+  color: rgba(209, 213, 219, 0.78);
   font-size: 0.95rem;
 }
 
-.cart-meta .dot{
+.cart-meta .dot {
   opacity: 0.6;
 }
 
-.cart-controls{
+.cart-controls {
   margin-top: 12px;
   display: flex;
   gap: 10px;
   align-items: center;
 }
 
-.cart-search{
+.cart-search {
   flex: 1;
   min-width: 180px;
   padding: 10px 12px;
   border-radius: 12px;
 
-  background: rgba(255,255,255,0.06);
-  border: 1px solid rgba(255,255,255,0.12);
-  color: rgba(245,245,245,0.92);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: rgba(245, 245, 245, 0.92);
 
   outline: none;
 }
 
-.cart-search:focus{
-  border-color: rgba(77,166,255,0.45);
-  box-shadow: 0 0 0 3px rgba(77,166,255,0.12);
+.cart-search:focus {
+  border-color: rgba(77, 166, 255, 0.45);
+  box-shadow: 0 0 0 3px rgba(77, 166, 255, 0.12);
 }
 
-.cart-clear{
+.cart-clear {
   padding: 10px 12px;
   border-radius: 12px;
 
-  background: rgba(0,0,0,0.25);
-  border: 1px solid rgba(255,255,255,0.12);
-  color: rgba(245,245,245,0.90);
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: rgba(245, 245, 245, 0.9);
 
   cursor: pointer;
   user-select: none;
-  transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    background 160ms ease;
 }
 
-.cart-clear:hover{
+.cart-clear:hover {
   transform: translateY(-1px);
-  border-color: rgba(255,255,255,0.18);
-  background: rgba(255,255,255,0.06);
+  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.06);
 }
 
-.cart-clear:disabled{
+.cart-clear:disabled {
   opacity: 0.45;
   cursor: not-allowed;
   transform: none;
 }
 
-.cart-grid{
+.cart-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
   gap: 1rem;
 }
 
-.cart-empty{
+.cart-empty {
   margin-top: 26px;
   display: grid;
   place-items: center;
 }
 
-.cart-empty-card{
+.cart-empty-card {
   width: 100%;
   max-width: 520px;
   padding: 20px 18px;
   border-radius: 16px;
 
-  background: rgba(255,255,255,0.05);
-  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
 
-  box-shadow: 0 18px 44px rgba(0,0,0,0.45);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.45);
   text-align: center;
 }
 
-.cart-empty-title{
+.cart-empty-title {
   font-size: 1.15rem;
   font-weight: 700;
   margin-bottom: 6px;
 }
 
-.cart-empty-sub{
-  color: rgba(209,213,219,0.80);
+.cart-empty-sub {
+  color: rgba(209, 213, 219, 0.8);
   line-height: 1.4;
 }

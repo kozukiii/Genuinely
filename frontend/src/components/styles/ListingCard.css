@@ -2,32 +2,40 @@
    Listing Card — Premium Glass (single source of truth)
    ========================= */
 
-:root{
+:root {
   --bg: #07080a;
 
-  --panel: rgba(255,255,255,0.06);
-  --panel-2: rgba(255,255,255,0.03);
+  --panel: rgba(255, 255, 255, 0.06);
+  --panel-2: rgba(255, 255, 255, 0.03);
 
-  --border: rgba(255,255,255,0.12);
-  --border-strong: rgba(255,255,255,0.18);
+  --border: rgba(255, 255, 255, 0.12);
+  --border-strong: rgba(255, 255, 255, 0.18);
 
-  --text: rgba(245,245,245,0.92);
-  --muted: rgba(209,213,219,0.78);
+  --text: rgba(245, 245, 245, 0.92);
+  --muted: rgba(209, 213, 219, 0.78);
 
   --green: #39ff9d;
   --blue: #4da6ff;
 
-  --shadow: 0 18px 44px rgba(0,0,0,0.60);
-  --shadow-float: 0 26px 64px rgba(0,0,0,0.72);
+  --shadow: 0 18px 44px rgba(0, 0, 0, 0.6);
+  --shadow-float: 0 26px 64px rgba(0, 0, 0, 0.72);
 }
 
 /* Card surface */
-.listing-card{
+.listing-card {
   position: relative;
 
   background:
-    radial-gradient(520px 280px at 18% 12%, rgba(77,166,255,0.10), transparent 62%),
-    radial-gradient(520px 280px at 86% 18%, rgba(57,255,157,0.08), transparent 64%),
+    radial-gradient(
+      520px 280px at 18% 12%,
+      rgba(77, 166, 255, 0.1),
+      transparent 62%
+    ),
+    radial-gradient(
+      520px 280px at 86% 18%,
+      rgba(57, 255, 157, 0.08),
+      transparent 64%
+    ),
     linear-gradient(to bottom, var(--panel), var(--panel-2));
 
   border: 1px solid var(--border);
@@ -53,61 +61,67 @@
 }
 
 /* subtle inner sheen */
-.listing-card::before{
-  content:"";
-  position:absolute;
-  inset:0;
-  pointer-events:none;
+.listing-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
 
   background:
-    radial-gradient(900px 240px at 24% 0%, rgba(255,255,255,0.07), transparent 58%),
-    linear-gradient(to bottom, rgba(255,255,255,0.03), transparent 34%);
+    radial-gradient(
+      900px 240px at 24% 0%,
+      rgba(255, 255, 255, 0.07),
+      transparent 58%
+    ),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.03), transparent 34%);
 }
 
 /* Hover: lift + restrained bloom */
-.listing-card:hover{
+.listing-card:hover {
   transform: translateY(-3px);
   border-color: var(--border-strong);
   box-shadow:
     var(--shadow-float),
-    0 0 0 3px rgba(57,255,157,0.06),
-    0 0 0 6px rgba(77,166,255,0.04);
+    0 0 0 3px rgba(57, 255, 157, 0.06),
+    0 0 0 6px rgba(77, 166, 255, 0.04);
   filter: saturate(1.03);
 }
 
 /* =========================
    Image
    ========================= */
-.listing-image{
+.listing-image {
   position: relative;
   overflow: hidden;
 
   border-radius: 16px;
-  border: 1px solid rgba(255,255,255,0.10);
+  border: 1px solid rgba(255, 255, 255, 0.1);
 
-  background: rgba(0,0,0,0.26);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
+  background: rgba(0, 0, 0, 0.26);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
-.listing-image img{
+.listing-image img {
   width: 100%;
   height: 100%;
   object-fit: cover;
 
   transform: scale(1.02);
-  transition: transform 220ms ease, filter 220ms ease;
+  transition:
+    transform 220ms ease,
+    filter 220ms ease;
   filter: saturate(1.02) contrast(1.03);
 }
 
-.listing-card:hover .listing-image img{
+.listing-card:hover .listing-image img {
   transform: scale(1.055);
-  filter: saturate(1.10) contrast(1.06);
+  filter: saturate(1.1) contrast(1.06);
 }
 
 /* =========================
    Title / Price / Meta
    ========================= */
-.listing-title{
+.listing-title {
   margin-top: 0.85rem;
 
   font-size: 1.05rem;
@@ -115,25 +129,25 @@
   font-weight: 650;
   letter-spacing: -0.02em;
 
-  color: rgba(255,255,255,0.94);
+  color: rgba(255, 255, 255, 0.94);
 }
 
-.listing-price{
-  color: rgba(57,255,157,0.95);
+.listing-price {
+  color: rgba(57, 255, 157, 0.95);
   font-weight: 750;
   letter-spacing: -0.01em;
-  text-shadow: 0 0 16px rgba(57,255,157,0.14);
+  text-shadow: 0 0 16px rgba(57, 255, 157, 0.14);
 }
 
-.listing-condition{
+.listing-condition {
   width: fit-content;
   margin-top: 0.4rem;
 
   font-size: 0.75rem;
-  color: rgba(209,213,219,0.82);
+  color: rgba(209, 213, 219, 0.82);
 
-  background: rgba(0,0,0,0.18);
-  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(0, 0, 0, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 999px;
 
   padding: 0.18rem 0.55rem;
@@ -142,7 +156,7 @@
 /* =========================
    Price + Rating row
    ========================= */
-.price-rating{
+.price-rating {
   position: relative; /* enables anchored ring */
   display: flex;
   align-items: center;
@@ -150,19 +164,24 @@
 }
 
 /* Ring: default size + float shadow */
-.rating-ring{
+.rating-ring {
   width: 50px;
   height: 50px;
-  filter: drop-shadow(0 16px 20px rgba(0,0,0,0.65));
+  filter: drop-shadow(0 16px 20px rgba(0, 0, 0, 0.65));
 }
 
-.rating-ring text{
-  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+.rating-ring text {
+  font-family:
+    system-ui,
+    -apple-system,
+    Segoe UI,
+    Roboto,
+    sans-serif;
 }
 
 /* Seller feedback (space so ring never collides) */
-.listing-feedback{
-  color: rgba(251,191,36,0.92);
+.listing-feedback {
+  color: rgba(251, 191, 36, 0.92);
   font-size: 0.85rem;
   margin-top: 0.55rem;
 }
@@ -170,7 +189,7 @@
 /* =========================
    Overview
    ========================= */
-.listing-overview{
+.listing-overview {
   margin-top: 0.75rem;
   padding-top: 0.65rem;
 
@@ -178,7 +197,7 @@
   line-height: 1.5;
   color: var(--muted);
 
-  border-top: 1px solid rgba(255,255,255,0.10);
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
 
   overflow: hidden;
   text-overflow: ellipsis;
@@ -189,12 +208,12 @@
 /* =========================
    CTA Button
    ========================= */
-.listing-link{
+.listing-link {
   margin-top: auto;
 
   /* button reset */
-  border: 1px solid rgba(77,166,255,0.35);
-  background: rgba(0,0,0,0.20);
+  border: 1px solid rgba(77, 166, 255, 0.35);
+  background: rgba(0, 0, 0, 0.2);
   outline: none;
   appearance: none;
   -webkit-appearance: none;
@@ -203,7 +222,7 @@
   align-items: center;
   justify-content: center;
 
-  color: rgba(230,245,255,0.94);
+  color: rgba(230, 245, 255, 0.94);
   font-weight: 650;
   font-size: 0.92rem;
 
@@ -213,7 +232,7 @@
   cursor: pointer;
   user-select: none;
 
-  box-shadow: 0 12px 28px rgba(0,0,0,0.55);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.55);
 
   transition:
     transform 160ms ease,
@@ -223,33 +242,33 @@
     filter 160ms ease;
 }
 
-.listing-link:hover{
+.listing-link:hover {
   transform: translateY(-2px);
-  background: rgba(77,166,255,0.10);
-  border-color: rgba(77,166,255,0.60);
+  background: rgba(77, 166, 255, 0.1);
+  border-color: rgba(77, 166, 255, 0.6);
   box-shadow:
-    0 20px 52px rgba(0,0,0,0.70),
-    0 0 0 3px rgba(77,166,255,0.10);
+    0 20px 52px rgba(0, 0, 0, 0.7),
+    0 0 0 3px rgba(77, 166, 255, 0.1);
   filter: saturate(1.05);
 }
 
-.listing-link:active{
+.listing-link:active {
   transform: translateY(-1px) scale(0.99);
 }
 
-.listing-link:focus-visible{
+.listing-link:focus-visible {
   outline: none;
   box-shadow:
-    0 20px 52px rgba(0,0,0,0.70),
-    0 0 0 3px rgba(77,166,255,0.22),
-    0 0 0 6px rgba(77,166,255,0.10);
+    0 20px 52px rgba(0, 0, 0, 0.7),
+    0 0 0 3px rgba(77, 166, 255, 0.22),
+    0 0 0 6px rgba(77, 166, 255, 0.1);
 }
 
 /* =========================
    Optional: if ring overlaps content on small cards
    ========================= */
-@media (max-width: 520px){
-  .price-rating .rating-ring{
+@media (max-width: 520px) {
+  .price-rating .rating-ring {
     right: 4px;
     transform: translateY(-60%);
   }
@@ -261,36 +280,36 @@
    ========================================================= */
 
 /* 1) Make card a stable positioning context */
-.listing-card{
+.listing-card {
   position: relative;
 }
 
 /* 2) Force title to a consistent height so the meta block
       (price/condition/seller) starts at the same vertical point */
-.listing-title{
+.listing-title {
   display: -webkit-box;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;          /* 2 or 3; keep consistent */
+  -webkit-line-clamp: 3; /* 2 or 3; keep consistent */
   overflow: hidden;
 
   line-height: 1.22;
-  min-height: calc(1.22em * 3);   /* match clamp */
+  min-height: calc(1.22em * 3); /* match clamp */
 }
 
 /* 3) Turn price-rating into a fixed “anchor zone”
       so badges always land in the same place */
-.price-rating{
+.price-rating {
   position: relative;
-  padding-right: 96px;   /* reserve space for ring + heart */
+  padding-right: 96px; /* reserve space for ring + heart */
   padding-bottom: 6px;
 
   /* this makes the block height consistent across cards */
-  min-height: 92px;      /* tune if needed (80–110 range) */
+  min-height: 92px; /* tune if needed (80–110 range) */
 }
 
 /* 4) Hard-lock the badge cluster to a single coordinate
       inside the price-rating anchor zone */
-.price-rating .card-badges{
+.price-rating .card-badges {
   position: absolute;
 
   /* THESE TWO NUMBERS control “exactly like first card” */
@@ -305,15 +324,15 @@
 }
 
 /* 5) Ring: fixed size */
-.price-rating .badge-ring .rating-ring{
+.price-rating .badge-ring .rating-ring {
   width: 50px !important;
   height: 50px !important;
   pointer-events: none;
-  filter: drop-shadow(0 16px 20px rgba(0,0,0,0.65));
+  filter: drop-shadow(0 16px 20px rgba(0, 0, 0, 0.65));
 }
 
 /* 6) Heart: glass button */
-.price-rating .badge-heart{
+.price-rating .badge-heart {
   width: 40px;
   height: 40px;
   border-radius: 12px;
@@ -321,44 +340,47 @@
   display: grid;
   place-items: center;
 
-  background: rgba(0,0,0,0.22);
-  border: 1px solid rgba(255,255,255,0.14);
-  box-shadow: 0 12px 28px rgba(0,0,0,0.55);
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.55);
 
-  color: rgba(245,245,245,0.92);
+  color: rgba(245, 245, 245, 0.92);
   font-size: 1.1rem;
   line-height: 1;
 
   cursor: pointer;
   user-select: none;
 
-  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease,
+    border-color 160ms ease;
 }
 
-.price-rating .badge-heart:hover{
+.price-rating .badge-heart:hover {
   transform: translateY(-2px);
-  border-color: rgba(57,255,157,0.28);
+  border-color: rgba(57, 255, 157, 0.28);
   box-shadow:
-    0 18px 48px rgba(0,0,0,0.70),
-    0 0 0 3px rgba(57,255,157,0.08);
+    0 18px 48px rgba(0, 0, 0, 0.7),
+    0 0 0 3px rgba(57, 255, 157, 0.08);
 }
 
-.price-rating .badge-heart:active{
+.price-rating .badge-heart:active {
   transform: translateY(-1px) scale(0.98);
 }
 
-.price-rating .badge-heart[aria-pressed="true"]{
-  color: rgba(255,160,200,0.95);
-  border-color: rgba(255,120,170,0.45);
+.price-rating .badge-heart[aria-pressed="true"] {
+  color: rgba(255, 160, 200, 0.95);
+  border-color: rgba(255, 120, 170, 0.45);
 }
 
 /* 7) Mobile: keep it clean */
-@media (max-width: 520px){
-  .price-rating{
+@media (max-width: 520px) {
+  .price-rating {
     padding-right: 88px;
     min-height: 88px;
   }
-  .price-rating .card-badges{
+  .price-rating .card-badges {
     right: 12px;
     bottom: 6px;
   }

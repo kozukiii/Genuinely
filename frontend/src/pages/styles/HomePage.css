@@ -157,3 +157,96 @@ h1, h2, h3, h4, h5, h6 {
 ::-webkit-scrollbar-thumb:hover {
   background-color: #64748b;
 }
+/* =========================
+   Search controls row (limit selector polish)
+   ========================= */
+.home-page .search-controls{
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.home-page .demo-toggle{
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  color: rgba(229,231,235,0.92);
+  font-size: 0.95rem;
+}
+
+/* Limit control: premium glass chip */
+.home-page .limit-control{
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+
+  padding: 8px 10px;
+  border-radius: 14px;
+
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.12);
+  box-shadow: 0 10px 28px rgba(0,0,0,0.35);
+
+  color: rgba(245,245,245,0.90);
+}
+
+.home-page .limit-label{
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: rgba(255,255,255,0.90);
+}
+
+.home-page .limit-input{
+  width: 92px;
+  height: 38px;
+
+  border-radius: 12px;
+  padding: 0 10px;
+
+  background: rgba(0,0,0,0.22);
+  border: 1px solid rgba(255,255,255,0.14);
+  color: rgba(245,245,245,0.92);
+
+  font-size: 0.95rem;
+  font-weight: 650;
+
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
+
+  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease, background 160ms ease;
+}
+
+.home-page .limit-input:hover{
+  border-color: rgba(77,166,255,0.35);
+}
+
+.home-page .limit-input:focus{
+  outline: none;
+  border-color: rgba(57,255,157,0.35);
+  box-shadow:
+    0 18px 48px rgba(0,0,0,0.55),
+    0 0 0 3px rgba(57,255,157,0.10);
+  background: rgba(0,0,0,0.28);
+}
+
+.home-page .limit-hint{
+  font-size: 0.82rem;
+  color: rgba(209,213,219,0.72);
+}
+
+.home-page .api-base-note{
+  font-size: 12px;
+  opacity: 0.7;
+  margin: 0;
+}
+
+/* Remove ugly number spinners (optional) */
+.home-page .limit-input::-webkit-outer-spin-button,
+.home-page .limit-input::-webkit-inner-spin-button{
+  -webkit-appearance: none;
+  margin: 0;
+}
+.home-page .limit-input[type="number"]{
+  -moz-appearance: textfield;
+}

@@ -2,8 +2,11 @@ import { useLocation } from "react-router-dom";
 import type { Listing } from "../types/Listing";
 import RatingRing from "../components/RatingRing";
 import "./styles/ListingPage.css";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { getHighResImage } from "../utils/imageHelpers";
+
+// NEW
+import { isSaved, toggleSaved } from "../utils/savedListings";
 
 function sourceLabel(source?: Listing["source"]) {
   if (source === "marketplace") return "Marketplace";
@@ -21,6 +24,21 @@ export default function ListingPage() {
   const [showRaw, setShowRaw] = useState(false);
   const [imageIndex, setImageIndex] = useState(0);
 
+  // NEW: saved state
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    if (!listing?.id) return;
+
+    // initialize saved status
+    setSaved(isSaved(listing.id));
+
+    // keep in sync if saved changes elsewhere
+    const onChange = () => setSaved(isSaved(listing.id));
+    window.addEventListener("saved:listings:changed", onChange);
+    return () => window.removeEventListener("saved:listings:changed", onChange);
+  }, [listing?.id]);
+
   if (!listing) {
     return (
       <p style={{ padding: 20 }}>
@@ -30,7 +48,10 @@ export default function ListingPage() {
   }
 
   const images = listing.images ?? [];
-  const safeIndex = Math.min(Math.max(imageIndex, 0), Math.max(images.length - 1, 0));
+  const safeIndex = Math.min(
+    Math.max(imageIndex, 0),
+    Math.max(images.length - 1, 0),
+  );
   const currentImage = getHighResImage(images[safeIndex] ?? "");
 
   const money = useMemo(() => {
@@ -89,6 +110,8 @@ export default function ListingPage() {
               alt={listing.title}
               onError={(e) => (e.currentTarget.src = "/placeholder.jpg")}
             />
+
+            
           </div>
 
           {images.length > 1 && (
@@ -121,7 +144,24 @@ export default function ListingPage() {
 
           <div className="info-ring-row">
             <div className="info-column">
-              <p className="page-price">{money}</p>
+              <div className="price-heart-row">
+                <p className="page-price">{money}</p>
+
+                <button
+                  type="button"
+                  className="page-heart-inline"
+                  aria-pressed={saved}
+                  aria-label={saved ? "Unsave listing" : "Save listing"}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const next = toggleSaved(listing);
+                    setSaved(next);
+                  }}
+                >
+                  {saved ? "♥" : "♡"}
+                </button>
+              </div>
 
               {listing.condition && (
                 <span className="page-condition">{listing.condition}</span>
@@ -194,7 +234,9 @@ export default function ListingPage() {
                 {showDebug ? "Hide debug ↑" : "Show debug info ↓"}
               </button>
 
-              {showDebug && <pre className="debug-block">{listing.debugInfo}</pre>}
+              {showDebug && (
+                <pre className="debug-block">{listing.debugInfo}</pre>
+              )}
 
               <button
                 className="ai-debug-toggle"

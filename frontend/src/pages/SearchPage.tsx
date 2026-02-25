@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigationType } from "react-router-dom";
 import SearchBar from "../components/SearchBar";
 import ListingCard from "../components/ListingCard";
@@ -9,14 +9,35 @@ const SEARCH_QUERY_KEY = "search:query";
 const SEARCH_LISTINGS_KEY = "search:listings";
 const SEARCH_TIMESTAMP_KEY = "search:ts";
 
+// NEW
+const SEARCH_LIMIT_KEY = "search:limit";
+
 const API_BASE = "";
 
-function hydrateSearch(setInitialQuery: (s: string) => void, setListings: (l: Listing[]) => void) {
+const LIMIT_MIN = 1;
+const LIMIT_MAX = 64;
+
+function clampInt(n: number, min: number, max: number) {
+  if (!Number.isFinite(n)) return min;
+  return Math.max(min, Math.min(max, Math.trunc(n)));
+}
+
+// UPDATED: hydrate also loads limit (optional)
+function hydrateSearch(
+  setInitialQuery: (s: string) => void,
+  setListings: (l: Listing[]) => void,
+  setLimitText: (s: string) => void
+) {
   try {
     const savedQuery = sessionStorage.getItem(SEARCH_QUERY_KEY) ?? "";
     const savedListingsRaw = sessionStorage.getItem(SEARCH_LISTINGS_KEY);
 
+    // NEW
+    const savedLimit = sessionStorage.getItem(SEARCH_LIMIT_KEY);
+
     if (savedQuery) setInitialQuery(savedQuery);
+
+    if (savedLimit) setLimitText(savedLimit);
 
     if (savedListingsRaw) {
       const parsed = JSON.parse(savedListingsRaw) as Listing[];
@@ -37,6 +58,16 @@ export default function SearchPage() {
   const [error, setError] = useState<string | null>(null);
   const [initialQuery, setInitialQuery] = useState("");
 
+  // NEW: limit textbox state (string so user can type freely)
+  const [limitText, setLimitText] = useState<string>("64");
+
+  // NEW: computed, clamped limit used for requests
+  const limit = useMemo(() => {
+    const n = Number(limitText);
+    if (!Number.isFinite(n)) return 64;
+    return clampInt(n, LIMIT_MIN, LIMIT_MAX);
+  }, [limitText]);
+
   const fetchListings = useCallback(
     async (query: string) => {
       const q = query.trim();
@@ -47,7 +78,7 @@ export default function SearchPage() {
 
       const url =
         `${API_BASE}/api/search?query=${encodeURIComponent(q)}` +
-        `&limit=4&sources=ebay,marketplace` +
+        `&limit=${limit}&sources=ebay,marketplace` +
         `&analyze=${demoMode ? "0" : "1"}`;
 
       setDebug(`requesting ${url}`);
@@ -65,67 +96,86 @@ export default function SearchPage() {
 
         setListings(data);
 
-        // ✅ persist both query + listings
+        // ✅ persist query + listings + limit
         sessionStorage.setItem(SEARCH_QUERY_KEY, q);
         sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(data));
         sessionStorage.setItem(SEARCH_TIMESTAMP_KEY, Date.now().toString());
+        sessionStorage.setItem(SEARCH_LIMIT_KEY, String(limit));
       } catch (err) {
         const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
         setError(`Failed to load listings: ${msg}`);
-
-        // ✅ DO NOT clear listings on error (prevents “Back = blank”)
-        // ✅ DO NOT remove sessionStorage on error
       } finally {
         setLoading(false);
       }
     },
-    [demoMode]
+    [demoMode, limit]
   );
 
   // Initial mount hydration
   useEffect(() => {
-    hydrateSearch(setInitialQuery, setListings);
+    hydrateSearch(setInitialQuery, setListings, setLimitText);
   }, []);
 
   // When user hits Back/Forward (POP), rehydrate again
   useEffect(() => {
     if (navType === "POP") {
-      hydrateSearch(setInitialQuery, setListings);
+      hydrateSearch(setInitialQuery, setListings, setLimitText);
     }
   }, [navType]);
 
-  return (
-    <div className="home-page">
-      <SearchBar onSearch={fetchListings} initialQuery={initialQuery} />
+  // ...everything above stays the same
 
-      <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 10 }}>
-        <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <input
-            type="checkbox"
-            checked={demoMode}
-            onChange={(e) => setDemoMode(e.target.checked)}
-          />
-          Demo mode 
-        </label>
+return (
+  <div className="home-page">
+    <SearchBar onSearch={fetchListings} initialQuery={initialQuery} />
 
-        <p style={{ fontSize: 12, opacity: 0.7 }}>
-          API_BASE: {API_BASE || "(same-origin / vite proxy)"}
-        </p>
-      </div>
+    <div className="search-controls">
+      <label className="demo-toggle">
+        <input
+          type="checkbox"
+          checked={demoMode}
+          onChange={(e) => setDemoMode(e.target.checked)}
+        />
+        Demo mode
+      </label>
 
-      {loading && <p className="mt-4">Loading results...</p>}
-      {error && <p className="mt-4 text-red-400">{error}</p>}
-      {debug && <p className="mt-2" style={{ fontSize: 12, opacity: 0.7 }}>{debug}</p>}
+      <label className="limit-control">
+        <span className="limit-label">Limit</span>
+        <input
+          className="limit-input"
+          type="number"
+          min={LIMIT_MIN}
+          max={LIMIT_MAX}
+          step={1}
+          value={limitText}
+          onChange={(e) => setLimitText(e.target.value)}
+          onBlur={() => setLimitText(String(limit))}
+        />
+        <span className="limit-hint">(1–64)</span>
+      </label>
 
-      <div className="results-container">
-        {listings.map((item) => (
-          <ListingCard key={`${item.source}:${item.id}`} data={item} />
-        ))}
-      </div>
-
-      {!loading && !error && listings.length === 0 && (
-        <p className="mt-8 text-gray-400">Enter a search above to begin.</p>
-      )}
+      <p className="api-base-note">
+        API_BASE: {API_BASE || "(same-origin / vite proxy)"} | using limit: {limit}
+      </p>
     </div>
-  );
+
+    {loading && <p className="mt-4">Loading results...</p>}
+    {error && <p className="mt-4 text-red-400">{error}</p>}
+    {debug && (
+      <p className="mt-2" style={{ fontSize: 12, opacity: 0.7 }}>
+        {debug}
+      </p>
+    )}
+
+    <div className="results-container">
+      {listings.map((item) => (
+        <ListingCard key={`${item.source}:${item.id}`} data={item} />
+      ))}
+    </div>
+
+    {!loading && !error && listings.length === 0 && (
+      <p className="mt-8 text-gray-400">Enter a search above to begin.</p>
+    )}
+  </div>
+);
 }

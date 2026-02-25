@@ -439,3 +439,119 @@
     align-items: center;
   }
 }
+/* =========================
+   Save Heart (ListingPage)
+   ========================= */
+
+/* make the image frame an anchor */
+.image-frame{
+  position: relative;
+}
+
+/* premium glass heart button */
+.page-heart{
+  position: absolute;
+  top: 14px;
+  right: 14px;
+
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+
+  display: grid;
+  place-items: center;
+
+  background: rgba(0,0,0,0.22);
+  border: 1px solid rgba(255,255,255,0.14);
+  box-shadow: var(--shadow-soft);
+
+  color: rgba(245,245,245,0.92);
+  font-size: 1.2rem;
+  line-height: 1;
+
+  cursor: pointer;
+  user-select: none;
+
+  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+  z-index: 10;
+}
+
+.page-heart:hover{
+  transform: translateY(-2px);
+  border-color: rgba(57,255,157,0.28);
+  box-shadow:
+    var(--shadow-float),
+    0 0 0 3px rgba(57,255,157,0.08);
+}
+
+.page-heart:active{
+  transform: translateY(-1px) scale(0.98);
+}
+
+.page-heart:focus-visible{
+  outline: none;
+  box-shadow:
+    var(--shadow-float),
+    0 0 0 3px rgba(77,166,255,0.18);
+  border-color: rgba(77,166,255,0.45);
+}
+
+.page-heart[aria-pressed="true"]{
+  color: rgba(255,160,200,0.95);
+  border-color: rgba(255,120,170,0.45);
+}
+/* Price + Heart inline row */
+.price-heart-row{
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* Inline heart button (glass) */
+.page-heart-inline{
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+
+  display: grid;
+  place-items: center;
+
+  background: rgba(0,0,0,0.22);
+  border: 1px solid rgba(255,255,255,0.14);
+  box-shadow: var(--shadow-soft);
+
+  color: rgba(245,245,245,0.92);
+  font-size: 1.2rem;
+  line-height: 1;
+
+  cursor: pointer;
+  user-select: none;
+
+  transform: translateY(2px); /* small optical alignment with Playfair price */
+  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+}
+
+.page-heart-inline:hover{
+  transform: translateY(0px);
+  border-color: rgba(57,255,157,0.28);
+  box-shadow:
+    var(--shadow-float),
+    0 0 0 3px rgba(57,255,157,0.08);
+}
+
+.page-heart-inline:active{
+  transform: translateY(1px) scale(0.98);
+}
+
+.page-heart-inline:focus-visible{
+  outline: none;
+  box-shadow:
+    var(--shadow-float),
+    0 0 0 3px rgba(77,166,255,0.18);
+  border-color: rgba(77,166,255,0.45);
+}
+
+.page-heart-inline[aria-pressed="true"]{
+  color: rgba(255,160,200,0.95);
+  border-color: rgba(255,120,170,0.45);
+}

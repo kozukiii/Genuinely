@@ -30,7 +30,7 @@ export async function searchAll(req: Request, res: Response) {
   const query = String(req.query.query ?? "").trim();
   if (!query) return res.status(400).json({ error: "Missing query" });
 
-  const limit = clampInt(Number(req.query.limit ?? 8), 1, 4);
+  const limit = clampInt(Number(req.query.limit ?? 64), 1, 64);
 
   // ✅ analyze=1 runs AI, analyze=0 skips (demo mode)
   const analyze = parseAnalyzeFlag(req.query.analyze);

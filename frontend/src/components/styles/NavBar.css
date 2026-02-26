@@ -1,49 +1,8 @@
-.navbar {
-  display: flex;
-  flex-direction: column;
-  align-items: center;      /* center everything horizontally */
-  padding: 1rem 0;
-  background: #0f0f0f;
-  border-bottom: 1px solid #222;
-}
-
-/* Centered logo */
-.nav-logo {
-  font-size: 1.8rem;        /* slightly larger to feel like a title */
-  font-weight: bold;
-  color: #fff;
-  text-decoration: none;
-  margin-bottom: 0.5rem;    /* space above nav */
-}
-
-/* Centered nav row */
-.nav-right {
-  display: flex;
-  gap: 2rem;
-  justify-content: center;
-}
-
-.nav-item {
-  color: #cfcfcf;
-  text-decoration: none;
-  font-size: 1.1rem;
-  transition: color 0.2s ease;
-}
-
-.nav-item:hover {
-  color: #fff;
-}
-
-.nav-item.active {
-  color: #4ade80;
-  border-bottom: 2px solid #4ade80;
-  padding-bottom: 3px;
-}
 /* =========================
    Navbar — light outline aesthetic
    ========================= */
 
-.navbar{
+.navbar {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -55,39 +14,47 @@
   background: transparent;
 
   /* one clean outline + faint bloom */
-  border-bottom: 1px solid rgba(255,255,255,0.14);
-  box-shadow: 0 14px 36px rgba(0,0,0,0.35);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.35);
 
   /* subtle top bloom */
   background:
-    radial-gradient(900px 240px at 50% 0%, rgba(77,166,255,0.10), transparent 60%),
-    radial-gradient(800px 240px at 18% 0%, rgba(57,255,157,0.10), transparent 60%);
+    radial-gradient(
+      900px 240px at 50% 0%,
+      rgba(77, 166, 255, 0.1),
+      transparent 60%
+    ),
+    radial-gradient(
+      800px 240px at 18% 0%,
+      rgba(57, 255, 157, 0.1),
+      transparent 60%
+    );
 }
 
 /* Logo: Playfair, classy, slightly airy */
-.nav-logo{
+.nav-logo {
   font-family: "Playfair Display", serif;
   font-size: 1.9rem;
   font-weight: 600;
   letter-spacing: -0.02em;
 
-  color: rgba(255,255,255,0.92);
+  color: rgba(255, 255, 255, 0.92);
   text-decoration: none;
 
   padding: 0.25rem 0.6rem;
   border-radius: 999px;
-  border: 1px solid rgba(255,255,255,0.10);
-  background: rgba(0,0,0,0.14);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.14);
 
-  box-shadow: 0 10px 28px rgba(0,0,0,0.35);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
 }
 
-.nav-logo:hover{
-  border-color: rgba(255,255,255,0.18);
+.nav-logo:hover {
+  border-color: rgba(255, 255, 255, 0.18);
 }
 
 /* Nav row: more “intentional” spacing */
-.nav-right{
+.nav-right {
   display: flex;
   gap: 1.8rem;
   justify-content: center;
@@ -95,13 +62,13 @@
 
   padding: 0.25rem 0.9rem 0.35rem;
   border-radius: 999px;
-  border: 1px solid rgba(255,255,255,0.10);
-  background: rgba(0,0,0,0.10);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.1);
 }
 
 /* Links: minimal + clean */
-.nav-item{
-  color: rgba(209,213,219,0.78);
+.nav-item {
+  color: rgba(209, 213, 219, 0.78);
   text-decoration: none;
   font-size: 1.05rem;
   letter-spacing: 0.01em;
@@ -111,18 +78,18 @@
   transition: color 160ms ease;
 }
 
-.nav-item:hover{
-  color: rgba(255,255,255,0.92);
+.nav-item:hover {
+  color: rgba(255, 255, 255, 0.92);
 }
 
 /* Active: thin underline glow, not chunky */
-.nav-item.active{
-  color: rgba(57,255,157,0.95);
+.nav-item.active {
+  color: rgba(57, 255, 157, 0.95);
   border-bottom: none;
   padding-bottom: 0.35rem;
 }
 
-.nav-item.active::after{
+.nav-item.active::after {
   content: "";
   position: absolute;
   left: 0;
@@ -131,28 +98,28 @@
 
   height: 2px;
   border-radius: 999px;
-  background: rgba(57,255,157,0.85);
-  box-shadow: 0 0 12px rgba(57,255,157,0.22);
+  background: rgba(57, 255, 157, 0.85);
+  box-shadow: 0 0 12px rgba(57, 255, 157, 0.22);
 }
 
 /* Keyboard focus that matches your vibe */
 .nav-item:focus-visible,
-.nav-logo:focus-visible{
+.nav-logo:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px rgba(77,166,255,0.22);
+  box-shadow: 0 0 0 3px rgba(77, 166, 255, 0.22);
   border-radius: 10px;
 }
 
 /* Mobile: slightly tighter */
-@media (max-width: 600px){
-  .nav-right{
+@media (max-width: 600px) {
+  .nav-right {
     gap: 1.2rem;
     padding: 0.25rem 0.6rem 0.35rem;
   }
-  .nav-logo{
+  .nav-logo {
     font-size: 1.65rem;
   }
-  .nav-item{
-    font-size: 1.0rem;
+  .nav-item {
+    font-size: 1rem;
   }
 }

@@ -1,11 +1,18 @@
 /* --- Global app background + typography (safe globally) --- */
-html, body {
+html,
+body {
   margin: 0;
   padding: 0;
   min-height: 100%;
   background-color: #1f1f1f;
   color: #e5e7eb;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family:
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
 }
 
 /* --- HOMEPAGE WRAPPER (scopes all homepage-only styling) --- */
@@ -16,11 +23,15 @@ html, body {
   min-height: 100vh;
   background-color: #1f1f1f;
   text-align: left;
-  
 }
 
 /* --- Headings (safe globally) --- */
-h1, h2, h3, h4, h5, h6 {
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
   color: #fff;
   margin: 0;
 }
@@ -28,7 +39,7 @@ h1, h2, h3, h4, h5, h6 {
 /* --- Results Grid (scoped) --- */
 .home-page .results-container {
   display: grid;
-  
+
   grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
 
   /* Equal-height cards */
@@ -39,11 +50,9 @@ h1, h2, h3, h4, h5, h6 {
   align-items: stretch;
 
   margin-top: 2rem;
-  
+
   max-width: 100%;
   margin: 1rem 2rem auto auto;
-
-  
 }
 
 /* --- Card Wrappers (scoped) --- */
@@ -64,14 +73,16 @@ h1, h2, h3, h4, h5, h6 {
   flex-grow: 1;
 
   box-shadow: 0 0 15px rgba(0, 0, 0, 0.25);
-  transition: transform .15s ease, box-shadow .15s ease;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease;
   text-decoration: none;
   color: inherit;
 }
 
 .home-page .listing-card:hover {
   transform: translateY(-4px);
-  box-shadow: 0 0 22px rgba(0,0,0,0.35);
+  box-shadow: 0 0 22px rgba(0, 0, 0, 0.35);
 }
 
 /* --- Card Image Area (uniform height) --- */
@@ -133,7 +144,6 @@ h1, h2, h3, h4, h5, h6 {
   margin-bottom: 0.75rem;
 }
 
-
 .home-page .listing-link:hover {
   background: #005fcc;
   transform: translateY(-2px);
@@ -160,7 +170,7 @@ h1, h2, h3, h4, h5, h6 {
 /* =========================
    Search controls row (limit selector polish)
    ========================= */
-.home-page .search-controls{
+.home-page .search-controls {
   display: flex;
   gap: 12px;
   align-items: center;
@@ -168,16 +178,16 @@ h1, h2, h3, h4, h5, h6 {
   flex-wrap: wrap;
 }
 
-.home-page .demo-toggle{
+.home-page .demo-toggle {
   display: inline-flex;
   gap: 8px;
   align-items: center;
-  color: rgba(229,231,235,0.92);
+  color: rgba(229, 231, 235, 0.92);
   font-size: 0.95rem;
 }
 
 /* Limit control: premium glass chip */
-.home-page .limit-control{
+.home-page .limit-control {
   display: inline-flex;
   align-items: center;
   gap: 10px;
@@ -185,57 +195,61 @@ h1, h2, h3, h4, h5, h6 {
   padding: 8px 10px;
   border-radius: 14px;
 
-  background: rgba(255,255,255,0.05);
-  border: 1px solid rgba(255,255,255,0.12);
-  box-shadow: 0 10px 28px rgba(0,0,0,0.35);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
 
-  color: rgba(245,245,245,0.90);
+  color: rgba(245, 245, 245, 0.9);
 }
 
-.home-page .limit-label{
+.home-page .limit-label {
   font-weight: 650;
   letter-spacing: -0.01em;
-  color: rgba(255,255,255,0.90);
+  color: rgba(255, 255, 255, 0.9);
 }
 
-.home-page .limit-input{
+.home-page .limit-input {
   width: 92px;
   height: 38px;
 
   border-radius: 12px;
   padding: 0 10px;
 
-  background: rgba(0,0,0,0.22);
-  border: 1px solid rgba(255,255,255,0.14);
-  color: rgba(245,245,245,0.92);
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: rgba(245, 245, 245, 0.92);
 
   font-size: 0.95rem;
   font-weight: 650;
 
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
 
-  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease, background 160ms ease;
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease,
+    border-color 160ms ease,
+    background 160ms ease;
 }
 
-.home-page .limit-input:hover{
-  border-color: rgba(77,166,255,0.35);
+.home-page .limit-input:hover {
+  border-color: rgba(77, 166, 255, 0.35);
 }
 
-.home-page .limit-input:focus{
+.home-page .limit-input:focus {
   outline: none;
-  border-color: rgba(57,255,157,0.35);
+  border-color: rgba(57, 255, 157, 0.35);
   box-shadow:
-    0 18px 48px rgba(0,0,0,0.55),
-    0 0 0 3px rgba(57,255,157,0.10);
-  background: rgba(0,0,0,0.28);
+    0 18px 48px rgba(0, 0, 0, 0.55),
+    0 0 0 3px rgba(57, 255, 157, 0.1);
+  background: rgba(0, 0, 0, 0.28);
 }
 
-.home-page .limit-hint{
+.home-page .limit-hint {
   font-size: 0.82rem;
-  color: rgba(209,213,219,0.72);
+  color: rgba(209, 213, 219, 0.72);
 }
 
-.home-page .api-base-note{
+.home-page .api-base-note {
   font-size: 12px;
   opacity: 0.7;
   margin: 0;
@@ -243,10 +257,10 @@ h1, h2, h3, h4, h5, h6 {
 
 /* Remove ugly number spinners (optional) */
 .home-page .limit-input::-webkit-outer-spin-button,
-.home-page .limit-input::-webkit-inner-spin-button{
+.home-page .limit-input::-webkit-inner-spin-button {
   -webkit-appearance: none;
   margin: 0;
 }
-.home-page .limit-input[type="number"]{
+.home-page .limit-input[type="number"] {
   -moz-appearance: textfield;
 }

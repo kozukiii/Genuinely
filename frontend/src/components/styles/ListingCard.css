@@ -122,10 +122,16 @@
    Title / Price / Meta
    ========================= */
 .listing-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+
   margin-top: 0.85rem;
 
   font-size: 1.05rem;
   line-height: 1.22;
+  min-height: calc(1.22em * 3);
   font-weight: 650;
   letter-spacing: -0.02em;
 
@@ -161,6 +167,9 @@
   display: flex;
   align-items: center;
   gap: 0.85rem;
+  padding-right: 96px;
+  padding-bottom: 6px;
+  min-height: 92px;
 }
 
 /* Ring: default size + float shadow */
@@ -264,50 +273,12 @@
     0 0 0 6px rgba(77, 166, 255, 0.1);
 }
 
-/* =========================
-   Optional: if ring overlaps content on small cards
-   ========================= */
-@media (max-width: 520px) {
-  .price-rating .rating-ring {
-    right: 4px;
-    transform: translateY(-60%);
-  }
-}
 /* =========================================================
    FIX: Badge cluster locked to the same spot on every card
    (works even if .card-badges stays INSIDE .price-rating)
-   Paste at VERY BOTTOM of ListingCard.css
    ========================================================= */
 
-/* 1) Make card a stable positioning context */
-.listing-card {
-  position: relative;
-}
-
-/* 2) Force title to a consistent height so the meta block
-      (price/condition/seller) starts at the same vertical point */
-.listing-title {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3; /* 2 or 3; keep consistent */
-  overflow: hidden;
-
-  line-height: 1.22;
-  min-height: calc(1.22em * 3); /* match clamp */
-}
-
-/* 3) Turn price-rating into a fixed “anchor zone”
-      so badges always land in the same place */
-.price-rating {
-  position: relative;
-  padding-right: 96px; /* reserve space for ring + heart */
-  padding-bottom: 6px;
-
-  /* this makes the block height consistent across cards */
-  min-height: 92px; /* tune if needed (80–110 range) */
-}
-
-/* 4) Hard-lock the badge cluster to a single coordinate
+/* Hard-lock the badge cluster to a single coordinate
       inside the price-rating anchor zone */
 .price-rating .card-badges {
   position: absolute;
@@ -323,7 +294,7 @@
   z-index: 20;
 }
 
-/* 5) Ring: fixed size */
+/* Ring: fixed size */
 .price-rating .badge-ring .rating-ring {
   width: 50px !important;
   height: 50px !important;
@@ -331,7 +302,7 @@
   filter: drop-shadow(0 16px 20px rgba(0, 0, 0, 0.65));
 }
 
-/* 6) Heart: glass button */
+/* Heart: glass button */
 .price-rating .badge-heart {
   width: 40px;
   height: 40px;
@@ -374,7 +345,7 @@
   border-color: rgba(255, 120, 170, 0.45);
 }
 
-/* 7) Mobile: keep it clean */
+/* Mobile: keep it clean */
 @media (max-width: 520px) {
   .price-rating {
     padding-right: 88px;

@@ -75,6 +75,7 @@
 
 /* Fixed image footprint (prevents layout jump) */
 .image-frame {
+  position: relative;
   width: 100%;
   max-width: 22rem;
   height: 22rem;
@@ -467,11 +468,6 @@
 /* =========================
    Save Heart (ListingPage)
    ========================= */
-
-/* make the image frame an anchor */
-.image-frame {
-  position: relative;
-}
 
 /* premium glass heart button */
 .page-heart {

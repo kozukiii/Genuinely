@@ -66,6 +66,32 @@ export default function ListingPage() {
     }
   }, [listing.price, listing.currency]);
 
+  const shipping = typeof listing.shippingPrice === "number" ? listing.shippingPrice : 0;
+
+  const totalMoney = useMemo(() => {
+    try {
+      return new Intl.NumberFormat(undefined, {
+        style: "currency",
+        currency: listing.currency ?? "USD",
+        maximumFractionDigits: 0,
+      }).format((listing.price ?? 0) + shipping);
+    } catch {
+      return `$${(listing.price ?? 0) + shipping}`;
+    }
+  }, [listing.price, listing.currency, shipping]);
+
+  const shippingMoney = useMemo(() => {
+    try {
+      return new Intl.NumberFormat(undefined, {
+        style: "currency",
+        currency: listing.currency ?? "USD",
+        maximumFractionDigits: 0,
+      }).format(shipping);
+    } catch {
+      return `$${shipping}`;
+    }
+  }, [listing.currency, shipping]);
+
   const scores = {
     priceFairness: listing.aiScores?.priceFairness,
     sellerTrust: listing.aiScores?.sellerTrust,
@@ -145,7 +171,7 @@ export default function ListingPage() {
           <div className="info-ring-row">
             <div className="info-column">
               <div className="price-heart-row">
-                <p className="page-price">{money}</p>
+                <p className="page-price">{totalMoney}</p>
 
                 <button
                   type="button"
@@ -163,6 +189,10 @@ export default function ListingPage() {
                 </button>
               </div>
 
+              <p className="page-subprice">
+                {shipping > 0 ? `${money} + ${shippingMoney} shipping` : `${money} + Free shipping`}
+              </p>
+
               {listing.condition && (
                 <span className="page-condition">{listing.condition}</span>
               )}
@@ -172,7 +202,7 @@ export default function ListingPage() {
 
             {listing.aiScore != null && (
               <div className="page-rating-ring">
-                <RatingRing value={listing.aiScore} size={80} />
+                <RatingRing value={listing.aiScore} size={100} />
                 <p className="page-rating-label">{listing.aiScore}/100</p>
               </div>
             )}
@@ -193,7 +223,7 @@ export default function ListingPage() {
       {listing.aiScore != null && (
         <div className="ai-analysis-box">
           <div className="ai-analysis-header">
-            <RatingRing value={listing.aiScore} size={80} />
+            <RatingRing value={listing.aiScore} size={100} />
             <div>
               <p className="ai-analysis-main">
                 Our AI analysis rated this listing {listing.aiScore}/100.
@@ -217,7 +247,7 @@ export default function ListingPage() {
                     return (
                       <div key={key} className="ai-score-item">
                         <p className="ring-title">{readableLabels[key]}</p>
-                        <RatingRing value={value} size={65} />
+                        <RatingRing value={value} size={75} />
                       </div>
                     );
                   })}

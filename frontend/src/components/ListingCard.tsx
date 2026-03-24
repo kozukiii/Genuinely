@@ -46,17 +46,11 @@ export default function ListingCard({ data }: { data: Listing }) {
   const activeImage = images[imageIndex];
   const proxiedImage = getHighResImage(activeImage);
 
-  const formatMoney = (value: number) =>
-    new Intl.NumberFormat(undefined, {
-      style: "currency",
-      currency: data.currency ?? "USD",
-      maximumFractionDigits: 0,
-    }).format(value);
-
-  const money = formatMoney(data.price);
-
-  const shipping = typeof data.shippingPrice === "number" ? data.shippingPrice : 0;
-  const totalMoney = formatMoney(data.price + shipping);
+  const money = new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: data.currency ?? "USD",
+    maximumFractionDigits: 0,
+  }).format(data.price);
 
   return (
     <div className="listing-card-wrapper">
@@ -85,12 +79,7 @@ export default function ListingCard({ data }: { data: Listing }) {
         {/* PRICE + CONDITION + SELLER + RATING */}
         <div className="price-rating">
           <div className="left-side">
-            <p className="listing-price">{totalMoney}</p>
-            <p className="listing-subprice">
-              {shipping > 0
-                ? `${money} + ${formatMoney(shipping)} shipping`
-                : `${money} + Free shipping`}
-            </p>
+            <p className="listing-price">{money}</p>
 
             {data.condition && (
               <span className="listing-condition">{data.condition}</span>

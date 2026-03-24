@@ -227,12 +227,6 @@
   text-shadow: 0 0 18px rgba(57, 255, 157, 0.16);
 }
 
-.page-subprice {
-  font-size: 0.95rem;
-  color: var(--muted);
-  margin: 0.1rem 0 0;
-}
-
 .page-condition {
   width: fit-content;
   padding: 4px 10px;

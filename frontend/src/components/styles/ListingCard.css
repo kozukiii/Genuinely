@@ -145,12 +145,6 @@
   text-shadow: 0 0 16px rgba(57, 255, 157, 0.14);
 }
 
-.listing-subprice {
-  margin-top: 0.3rem;
-  font-size: 0.8rem;
-  color: rgba(209, 213, 219, 0.8);
-}
-
 .listing-condition {
   width: fit-content;
   margin-top: 0.4rem;

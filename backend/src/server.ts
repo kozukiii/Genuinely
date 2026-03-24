@@ -6,9 +6,14 @@ import cors from "cors";
 import searchRoutes from "./routes/searchRoutes";
 import ebayRoutes from "./routes/ebayRoutes";
 import imageProxyRoutes from "./routes/imageProxyRoutes";
+import marketplaceRoutes from "./routes/marketplaceRoutes";
+
+
 
 const app = express();
 app.disable("x-powered-by");
+
+
 
 app.use(cors());
 app.use(express.json());
@@ -24,6 +29,7 @@ api.get("/health", (req, res) => {
 // Feature route groups
 api.use("/search", searchRoutes);
 api.use("/ebay", ebayRoutes);
+api.use("/marketplace", marketplaceRoutes);
 api.use("/proxy-image", imageProxyRoutes);
 
 // Mount all API routes under /api

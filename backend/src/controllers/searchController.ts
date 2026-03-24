@@ -31,11 +31,8 @@ export async function searchAll(req: Request, res: Response) {
   if (!query) return res.status(400).json({ error: "Missing query" });
 
   const limit = clampInt(Number(req.query.limit ?? 64), 1, 64);
-
-  // ✅ analyze=1 runs AI, analyze=0 skips (demo mode)
   const analyze = parseAnalyzeFlag(req.query.analyze);
 
-  // ✅ parse sources=ebay,marketplace (defaults to both)
   const sourcesRaw = String(req.query.sources ?? "ebay,marketplace")
     .split(",")
     .map((s) => s.trim().toLowerCase())
@@ -44,7 +41,6 @@ export async function searchAll(req: Request, res: Response) {
   const wantsEbay = sourcesRaw.includes("ebay");
   const wantsMarketplace = sourcesRaw.includes("marketplace");
 
-  // If caller passes junk (or nothing valid), default to ebay
   const useEbay = wantsEbay || (!wantsEbay && !wantsMarketplace);
   const useMarketplace = wantsMarketplace;
 
@@ -52,11 +48,17 @@ export async function searchAll(req: Request, res: Response) {
   const perSource = Math.floor(limit / sourceCount);
 
   const ebayTarget = useEbay ? perSource : 0;
-  const marketplaceTarget = useMarketplace ? (limit - ebayTarget) : 0;
+  const marketplaceTarget = useMarketplace ? limit - ebayTarget : 0;
+
+  const location = String(req.query.location ?? "Eau Claire").trim();
 
   const [marketplace, ebay] = await Promise.all([
     useMarketplace
-      ? searchMarketplaceNormalized(query, marketplaceTarget).catch(() => [])
+      ? searchMarketplaceNormalized({
+          query,
+          location,
+          limit: marketplaceTarget || 10,
+        }).catch(() => [])
       : Promise.resolve([]),
     useEbay
       ? searchEbayNormalized(query, ebayTarget).catch(() => [])
@@ -65,7 +67,6 @@ export async function searchAll(req: Request, res: Response) {
 
   let merged = dedupe([...ebay, ...marketplace]);
 
-  // fallback-fill with ebay if we’re short (only if ebay enabled)
   if (merged.length < limit && useEbay) {
     const need = limit - merged.length;
     const extra = await searchEbayNormalized(query, ebayTarget + need).catch(() => []);
@@ -74,7 +75,6 @@ export async function searchAll(req: Request, res: Response) {
 
   const finalItems = merged.slice(0, limit);
 
-  // ✅ Only burn tokens if analyze is true
   if (analyze) {
     const analyzed = await analyzeItemsWithAI(finalItems);
     return res.json(analyzed);

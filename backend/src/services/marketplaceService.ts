@@ -1,103 +1,119 @@
-import { marketplaceRequest } from "../utils/marketplaceApiClient";
-import type { Listing } from "../types/listing"; // matches your backend types file name
+import fetch from "node-fetch";
 
-// Keep this if other code still imports MarketplaceListing
-export type ListingSource = "marketplace";
+const GRAPHQL_URL = "https://www.facebook.com/api/graphql/";
 
-export interface MarketplaceListing {
-  id: string;
-  source: ListingSource;
+async function getLatLng(location: string) {
+  const body = new URLSearchParams({
+    variables: JSON.stringify({
+      params: {
+        caller: "MARKETPLACE",
+        page_category: ["CITY", "SUBCITY", "NEIGHBORHOOD", "POSTAL_CODE"],
+        query: location,
+      },
+    }),
+    doc_id: "5585904654783609",
+  });
 
-  title: string;
-  price: number;
-  currency: string;
+  const res = await fetch(GRAPHQL_URL, {
+    method: "POST",
+    headers: {
+      "user-agent": "Mozilla/5.0",
+      "content-type": "application/x-www-form-urlencoded",
+    },
+    body,
+  });
 
-  condition?: string;
-  url: string;
-  images: string[];
+  const json = await res.json();
 
-  seller?: string;
-  location?: string;
-}
+  const first =
+    json?.data?.city_street_search?.street_results?.edges?.[0]?.node;
 
-function toNumberPrice(input: any): number {
-  if (typeof input === "number") return input;
-  if (typeof input === "string") {
-    const cleaned = input.replace(/[^0-9.]/g, "");
-    const n = Number(cleaned);
-    return Number.isFinite(n) ? n : 0;
-  }
-  return 0;
-}
-
-// TODO: replace this mapping once marketplaceApiClient.ts response shape is finalized
-function mapMarketplaceItem(raw: any): MarketplaceListing {
   return {
-    id: String(raw.id ?? raw.listing_id ?? raw.itemId),
-    source: "marketplace",
-
-    title: String(raw.title ?? raw.name ?? "Untitled"),
-    price: toNumberPrice(raw.price ?? raw.amount ?? raw.list_price),
-    currency: String(raw.currency ?? "USD"),
-
-    condition: raw.condition ? String(raw.condition) : undefined,
-
-    url: String(raw.url ?? raw.permalink ?? raw.link ?? ""),
-    images: Array.isArray(raw.images)
-      ? raw.images.map((x: any) => (typeof x === "string" ? x : x?.url)).filter(Boolean)
-      : Array.isArray(raw.imageUrls)
-        ? raw.imageUrls
-        : raw.primaryImage
-          ? [raw.primaryImage]
-          : [],
-
-    seller: raw.seller?.name ?? raw.seller_name,
-    location: raw.location?.city ?? raw.location_name ?? raw.location,
+    lat: first?.location?.latitude,
+    lng: first?.location?.longitude,
   };
 }
 
-// Existing function (keep it so other imports don’t break)
-export async function searchMarketplace(query: string, limit = 12): Promise<MarketplaceListing[]> {
-  try {
-    const res = await marketplaceRequest("/search", { q: query, limit });
+export async function searchMarketplaceListings({
+  query,
+  location,
+  limit = 10,
+}: {
+  query: string;
+  location: string;
+  limit?: number;
+}) {
+  const { lat, lng } = await getLatLng(location);
 
-    const items: any[] = Array.isArray(res?.items) ? res.items
-      : Array.isArray(res?.results) ? res.results
-      : Array.isArray(res) ? res
-      : [];
-
-    return items.map(mapMarketplaceItem).filter(x => x.url && x.title);
-  } catch {
-    // Critical for aggregator fallback: marketplace failures should not crash the request
-    return [];
+  if (lat == null || lng == null) {
+    throw new Error("Location lookup failed");
   }
+
+  const variables = {
+    count: limit,
+    params: {
+      bqf: {
+        callsite: "COMMERCE_MKTPLACE_WWW",
+        query,
+      },
+      browse_request_params: {
+        filter_location_latitude: lat,
+        filter_location_longitude: lng,
+        filter_radius_km: 16,
+      },
+      custom_request_params: {
+        surface: "SEARCH",
+      },
+    },
+  };
+
+  const body = new URLSearchParams({
+    variables: JSON.stringify(variables),
+    doc_id: "7111939778879383",
+  });
+
+  const res = await fetch(GRAPHQL_URL, {
+    method: "POST",
+    headers: {
+      "user-agent": "Mozilla/5.0",
+      "content-type": "application/x-www-form-urlencoded",
+    },
+    body,
+  });
+
+  const json = await res.json();
+
+  const edges = json?.data?.marketplace_search?.feed_units?.edges ?? [];
+  console.dir(edges?.[0]?.node?.listing, { depth: null });
+
+  return edges.map((edge: any) => {
+    const listing = edge?.node?.listing;
+
+    return {
+      id: String(listing?.id ?? ""),
+      source: "marketplace",
+      title: listing?.marketplace_listing_title ?? "Untitled listing",
+      price: Number(
+        String(listing?.listing_price?.formatted_amount ?? "0").replace(
+          /[^0-9.]/g,
+          ""
+        ) || 0
+      ),
+      currency: "USD",
+      url: listing?.id
+        ? `https://www.facebook.com/marketplace/item/${listing.id}`
+        : "",
+      images: listing?.primary_listing_photo?.image?.uri
+        ? [listing.primary_listing_photo.image.uri]
+        : [],
+      location: [
+        listing?.location?.reverse_geocode?.city,
+        listing?.location?.reverse_geocode?.state,
+      ]
+        .filter(Boolean)
+        .join(", "),
+    };
+  });
 }
 
-// Normalized wrapper for the future /api/search aggregator
-export async function searchMarketplaceNormalized(query: string, limit = 12): Promise<Listing[]> {
-  const items = await searchMarketplace(query, limit);
-
-  // Convert MarketplaceListing -> normalized Listing contract
-  return items.map((x) => ({
-    id: x.id,
-    source: "marketplace",
-    title: x.title,
-    price: x.price,
-    currency: x.currency,
-    condition: x.condition,
-    url: x.url,
-    images: x.images ?? [],
-    seller: x.seller,
-    location: x.location,
-
-    // leave ebay-ish fields undefined
-    shippingPrice: undefined,
-
-    // leave AI fields undefined (demo mode / no-token mode)
-    aiScore: undefined,
-    aiScores: undefined,
-    overview: undefined,
-    debugInfo: undefined,
-    rawAnalysis: undefined,
-  }));
-}
+export const searchMarketplaceNormalized = searchMarketplaceListings;

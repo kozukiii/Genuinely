@@ -1,5 +1,5 @@
 import "./styles/HomePage.css";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import ListingCard from "../components/ListingCard";
 import type { Listing } from "../types/Listing";
 
@@ -73,7 +73,6 @@ export default function HomePage() {
   const [loadingGrid, setLoadingGrid] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // duplicate for seamless loop
   const bannerLoopItems = useMemo(() => {
     if (bannerItems.length === 0) return [];
     return [...bannerItems, ...bannerItems];
@@ -101,7 +100,6 @@ export default function HomePage() {
     setLoadingGrid(true);
     setError(null);
 
-    // pull 3 topics, mix, shuffle
     const topics = shuffle(GRID_TOPICS).slice(0, 3);
     setGridLabel(`Mix: ${topics.join(" · ")}`);
 
@@ -119,9 +117,12 @@ export default function HomePage() {
   }, []);
 
   const loadAll = useCallback(async () => {
-    // run in parallel
     await Promise.all([loadBanner(), loadGrid()]);
   }, [loadBanner, loadGrid]);
+
+  useEffect(() => {
+    void loadAll();
+  }, [loadAll]);
 
   return (
     <div className="home-page">
@@ -129,30 +130,20 @@ export default function HomePage() {
       <p className="tagline">Your AI-powered secondhand marketplace guide.</p>
 
       <div className="home-actions">
-        <button className="home-btn" onClick={loadAll} disabled={loadingBanner || loadingGrid}>
-          {bannerItems.length === 0 && gridItems.length === 0 ? "Load featured" : "Refresh featured"}
-        </button>
-
-        <span className="home-note">
-          eBay only · analyze=0 · no token burn
-        </span>
+        <span className="home-note">eBay only · analyze=0</span>
       </div>
 
       {error && <p className="mt-4 text-red-400">{error}</p>}
 
-      {/* BANNER */}
       <section className="hero-banner">
         <div className="section-head">
-          <h2>Save on {bannerTopic}</h2>
-          <p className="section-sub">
-            {bannerTopic ? `Topic: ${bannerTopic}` : "Pick a topic and scroll it."}
-          </p>
+          <h2>{bannerTopic ? `Save on ${bannerTopic}` : "Featured Picks"}</h2>
         </div>
 
         {loadingBanner && <p className="mt-4">Loading banner…</p>}
 
         {!loadingBanner && bannerItems.length === 0 && (
-          <p className="section-empty">Click “Load featured” to populate the banner.</p>
+          <p className="section-empty">No banner items found.</p>
         )}
 
         {bannerItems.length > 0 && (
@@ -168,7 +159,6 @@ export default function HomePage() {
         )}
       </section>
 
-      {/* GRID */}
       <section className="featured-grid-section">
         <div className="section-head">
           <h2>Featured Deals</h2>
@@ -178,7 +168,7 @@ export default function HomePage() {
         {loadingGrid && <p className="mt-4">Loading grid…</p>}
 
         {!loadingGrid && gridItems.length === 0 && (
-          <p className="section-empty">Click “Load featured” to populate the grid.</p>
+          <p className="section-empty">No grid items found.</p>
         )}
 
         {gridItems.length > 0 && (

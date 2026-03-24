@@ -1,8 +1,8 @@
 import { analyzeListingWithImages } from "../ai/ebayOverview";
 
 // Helper for safe average
-function average(nums: number[]) {
-  const valid = nums.filter((n) => typeof n === "number" && !isNaN(n));
+function average(nums: Array<number | undefined>) {
+  const valid = nums.filter((n): n is number => typeof n === "number" && !isNaN(n));
   if (valid.length === 0) return null;
   return Math.round(valid.reduce((a, b) => a + b, 0) / valid.length);
 }
@@ -46,6 +46,58 @@ function normalizeShippingOptions(v: any): unknown {
   }
 
   return v;
+}
+
+function extractFirstJsonObject(raw: string): string | null {
+  const start = raw.indexOf("{");
+  if (start === -1) return null;
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = start; i < raw.length; i++) {
+    const ch = raw[i];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (ch === "\\") {
+        escaped = true;
+        continue;
+      }
+      if (ch === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (ch === "\"") {
+      inString = true;
+      continue;
+    }
+
+    if (ch === "{") depth++;
+    if (ch === "}") {
+      depth--;
+      if (depth === 0) {
+        return raw.slice(start, i + 1);
+      }
+    }
+  }
+
+  return null;
+}
+
+function normalizeScore(v: unknown): number | undefined {
+  if (typeof v === "number" && !Number.isNaN(v)) return v;
+  if (typeof v === "string") {
+    const n = Number(v);
+    if (!Number.isNaN(n)) return n;
+  }
+  return undefined;
 }
 
 export async function analyzeItemWithAI(merged: any) {
@@ -110,10 +162,9 @@ export async function analyzeItemWithAI(merged: any) {
   let jsonBlock: any = null;
 
   try {
-    const jsonMatch = analysis.match(/^\s*\{[\s\S]*?\}\s*(?=DEBUG INFO:)/);
-
-    if (jsonMatch) {
-      jsonBlock = JSON.parse(jsonMatch[0]);
+    const extracted = extractFirstJsonObject(analysis);
+    if (extracted) {
+      jsonBlock = JSON.parse(extracted);
     } else {
       console.error("⚠ No JSON block found in AI response.");
       console.log("RAW:", analysis);
@@ -123,7 +174,15 @@ export async function analyzeItemWithAI(merged: any) {
     console.log("RAW ANALYSIS:", analysis);
   }
 
-  const scores = jsonBlock?.scores || {};
+  const rawScores = jsonBlock?.scores || {};
+  const scores = {
+    priceFairness: normalizeScore(rawScores.priceFairness),
+    sellerTrust: normalizeScore(rawScores.sellerTrust),
+    conditionHonesty: normalizeScore(rawScores.conditionHonesty),
+    shippingFairness: normalizeScore(rawScores.shippingFairness),
+    locationRisk: normalizeScore(rawScores.locationRisk),
+    descriptionQuality: normalizeScore(rawScores.descriptionQuality),
+  };
 
   const {
     priceFairness,

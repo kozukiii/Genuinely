@@ -6,7 +6,7 @@ import FiltersSidebar, { type FilterState } from "../components/FiltersSidebar";
 import type { Listing } from "../types/Listing";
 import "./styles/HomePage.css";
 
-const PAGE_SIZE = 15;
+const PAGE_SIZE = 12;
 const PRELOAD_SIZE = PAGE_SIZE * 2; // always fetch 2 pages up-front
 const API_BASE = "";
 

@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 export interface FilterState {
   minPrice: string;
   maxPrice: string;
@@ -13,6 +15,10 @@ interface Props {
 }
 
 export default function FiltersSidebar({ filters, onChange }: Props) {
+  const [collapsed, setCollapsed] = useState(
+    () => typeof window !== "undefined" && window.innerWidth < 768
+  );
+
   function set<K extends keyof FilterState>(key: K, value: FilterState[K]) {
     onChange({ ...filters, [key]: value });
   }
@@ -22,7 +28,17 @@ export default function FiltersSidebar({ filters, onChange }: Props) {
   }
 
   return (
-    <aside className="filters-sidebar">
+    <aside className={`filters-sidebar${collapsed ? " collapsed" : ""}`}>
+      <button
+        className="sidebar-toggle"
+        onClick={() => setCollapsed((c) => !c)}
+        title={collapsed ? "Show filters" : "Hide filters"}
+      >
+        {collapsed ? "Filters" : "◀"}
+      </button>
+
+      {!collapsed && (
+      <div className="sidebar-inner">
       <h2 className="filters-title">Filters</h2>
 
       {/* Sort */}
@@ -126,6 +142,8 @@ export default function FiltersSidebar({ filters, onChange }: Props) {
       >
         Reset filters
       </button>
+      </div>
+      )}
     </aside>
   );
 }

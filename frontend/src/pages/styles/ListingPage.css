@@ -71,6 +71,8 @@
   display: flex;
   flex-direction: column;
   align-items: center;
+  width: 22rem;
+  flex-shrink: 0;
 }
 
 /* Fixed image footprint (prevents layout jump) */
@@ -79,6 +81,7 @@
   width: 100%;
   max-width: 22rem;
   height: 22rem;
+  aspect-ratio: 1 / 1;
 
   display: flex;
   align-items: center;
@@ -581,4 +584,24 @@
 .page-heart-inline[aria-pressed="true"] {
   color: rgba(255, 160, 200, 0.95);
   border-color: rgba(255, 120, 170, 0.45);
+}
+
+.image-loading-badge {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  background: rgba(0, 0, 0, 0.55);
+  color: rgba(245, 245, 245, 0.85);
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line-soft);
+  pointer-events: none;
+}
+
+.page-description {
+  font-size: 0.95rem;
+  color: var(--muted);
+  line-height: 1.6;
+  margin: 0;
 }

@@ -1,4 +1,5 @@
 import fetch from "node-fetch";
+import type { Listing } from "../types/listing";
 
 const GRAPHQL_URL = "https://www.facebook.com/api/graphql/";
 
@@ -65,6 +66,82 @@ function extractMarketplaceImages(listing: any): string[] {
   }
 
   return Array.from(urls);
+}
+
+function extractImagesFromHtml(html: string, _listingId: string): string[] {
+  const byFilename = new Map<string, string>();
+  const addUri = (raw: string) => {
+    const url = raw.replace(/\\u0025/g, "%").replace(/\\\//g, "/").replace(/&amp;/g, "&");
+    if (!url.startsWith("http")) return;
+    if (!url.includes("scontent")) return;
+    const fnMatch = url.match(/\/(\d+_[^/?#"\\]+\.(?:jpg|jpeg|png|webp))/i);
+    const key = fnMatch ? fnMatch[1] : url;
+    if (!byFilename.has(key)) byFilename.set(key, url);
+  };
+
+  // Listing photos are in 178px-tall containers; "Today's picks" thumbnails are 174px.
+  // Checking the 80 chars before each <img> reliably separates them.
+  const imgPattern = /<img[^>]+src="(https?:\/\/[^"]*scontent[^"]*)"/gi;
+  let m;
+  while ((m = imgPattern.exec(html)) !== null) {
+    const before = html.slice(Math.max(0, m.index - 80), m.index);
+    if (before.includes("height:174px")) continue; // related listing thumbnail
+    addUri(m[1]);
+  }
+
+  // og:image gives the highest-quality primary — always first
+  const ogMatch = html.match(/<meta[^>]+property="og:image"\s+content="(https:\/\/[^"]*scontent[^"]*)"/);
+  const primary = ogMatch ? ogMatch[1].replace(/&amp;/g, "&") : undefined;
+
+  const results = Array.from(byFilename.values());
+  console.log("extractImagesFromHtml: listing imgs:", results.length, "primary:", !!primary);
+
+  if (primary) {
+    const base = primary.split("?")[0];
+    return [primary, ...results.filter(u => !u.startsWith(base))];
+  }
+  return results;
+}
+
+function extractDescriptionFromHtml(html: string): string | undefined {
+  const m = html.match(/"redacted_description"\s*:\s*\{\s*"text"\s*:\s*"([^"]+)"/);
+  if (m) return m[1].replace(/\\n/g, "\n");
+  const m2 = html.match(/"description"\s*:\s*\{\s*"text"\s*:\s*"([^"]+)"/);
+  if (m2) return m2[1].replace(/\\n/g, "\n");
+  return undefined;
+}
+
+export async function getMarketplaceListing(listingId: string): Promise<Partial<Listing>> {
+  try {
+    const cookie = [
+      `c_user=${process.env.FB_C_USER}`,
+      `xs=${decodeURIComponent(process.env.FB_XS ?? "")}`,
+      `datr=${process.env.FB_DATR}`,
+      `sb=${process.env.FB_SB}`,
+    ].join("; ");
+
+    const res = await fetch(`https://mbasic.facebook.com/marketplace/item/${listingId}/`, {
+      method: "GET",
+      headers: {
+        "user-agent": "Mozilla/5.0 (Linux; Android 9; SM-G960F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.157 Mobile Safari/537.36",
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "accept-language": "en-US,en;q=0.9",
+        cookie,
+      },
+    });
+
+    const html = await res.text();
+    console.log("fetching listing:", listingId, "status:", res.status, "size:", html.length);
+if (res.status !== 200) return {};
+
+    const images = extractImagesFromHtml(html, listingId);
+    const description = extractDescriptionFromHtml(html);
+    console.log("images:", images.length, images[0]?.slice(0, 80));
+    return { images, description, fullDescription: description };
+  } catch (err) {
+    console.error("getMarketplaceListing error:", err);
+    return {};
+  }
 }
 
 export async function searchMarketplaceListings({

@@ -1,5 +1,20 @@
 import { Request, Response } from "express";
-import { searchMarketplaceListings } from "../services/marketplaceService";
+import { searchMarketplaceListings, getMarketplaceListing } from "../services/marketplaceService";
+
+export async function getMarketplaceItem(req: Request, res: Response) {
+  const { id } = req.params;
+  if (!id || !/^\d+$/.test(id)) {
+    return res.status(400).json({ error: "Invalid listing id" });
+  }
+
+  try {
+    const data = await getMarketplaceListing(id);
+    res.json(data);
+  } catch (err: any) {
+    console.error("Marketplace item error:", err.message);
+    res.status(500).json({ error: "Failed to fetch listing detail" });
+  }
+}
 
 export async function searchMarketplace(req: Request, res: Response) {
   try {

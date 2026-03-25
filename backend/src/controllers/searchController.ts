@@ -2,7 +2,7 @@ import type { Request, Response } from "express";
 import type { Listing } from "../types/listing";
 
 import { searchEbayNormalized } from "../services/ebayService";
-import { searchMarketplaceNormalized } from "../services/marketplaceService";
+import { searchMarketplaceNormalized, getMarketplaceListing } from "../services/marketplaceService";
 import { scoreListings } from "../services/scoring/scoreListing";
 
 function clampInt(n: number, min: number, max: number) {
@@ -65,7 +65,17 @@ export async function searchAll(req: Request, res: Response) {
       : Promise.resolve([]),
   ]);
 
-  let merged = dedupe([...ebay, ...marketplace]);
+  // Enrich marketplace listings with full image galleries in parallel
+  const enrichedMarketplace = await Promise.all(
+    marketplace.map(async (listing: Listing) => {
+      const detail = await getMarketplaceListing(listing.id).catch(() => ({} as Partial<Listing>));
+      if (detail.images && detail.images.length > 0) listing.images = detail.images;
+      if (detail.description) listing.description = detail.description;
+      return listing;
+    })
+  );
+
+  let merged = dedupe([...ebay, ...enrichedMarketplace]);
 
   if (merged.length < limit && useEbay) {
     const need = limit - merged.length;

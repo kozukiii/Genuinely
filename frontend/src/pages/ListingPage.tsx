@@ -20,6 +20,9 @@ export default function ListingPage() {
   const [showRaw, setShowRaw] = useState(false);
   const [imageIndex, setImageIndex] = useState(0);
   const [saved, setSaved] = useState(false);
+  const [enrichedImages, setEnrichedImages] = useState<string[] | null>(null);
+  const [enrichedDescription, setEnrichedDescription] = useState<string | null>(null);
+  const [enrichLoading, setEnrichLoading] = useState(false);
 
   useEffect(() => {
     if (!listing?.id) return;
@@ -31,6 +34,21 @@ export default function ListingPage() {
     return () => window.removeEventListener("saved:listings:changed", onChange);
   }, [listing?.id]);
 
+  useEffect(() => {
+    if (listing?.source !== "marketplace" || !listing?.id) return;
+    setEnrichLoading(true);
+    fetch(`/api/marketplace/item/${listing.id}`)
+      .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+      .then((data) => {
+        if (Array.isArray(data.images) && data.images.length > 0) setEnrichedImages(data.images);
+        if (typeof data.description === "string" && data.description.trim()) {
+          setEnrichedDescription(data.description.trim());
+        }
+      })
+      .catch((err) => console.warn("Marketplace enrichment failed:", err))
+      .finally(() => setEnrichLoading(false));
+  }, [listing?.id, listing?.source]);
+
   if (!listing) {
     return (
       <p style={{ padding: 20 }}>
@@ -39,7 +57,10 @@ export default function ListingPage() {
     );
   }
 
-  const images = listing.images ?? [];
+  const images =
+    enrichedImages !== null && enrichedImages.length > 0
+      ? enrichedImages
+      : listing.images ?? [];
   const safeIndex = Math.min(
     Math.max(imageIndex, 0),
     Math.max(images.length - 1, 0)
@@ -120,6 +141,9 @@ export default function ListingPage() {
               alt={listing.title}
               onError={(e) => (e.currentTarget.src = "/placeholder.jpg")}
             />
+            {enrichLoading && listing.source === "marketplace" && (
+              <span className="image-loading-badge">Loading gallery…</span>
+            )}
           </div>
 
           {images.length > 1 && (
@@ -185,6 +209,10 @@ export default function ListingPage() {
               </div>
             )}
           </div>
+
+          {(enrichedDescription || listing.description) && (
+            <p className="page-description">{enrichedDescription || listing.description}</p>
+          )}
 
           <a
             className="external-ebay-link"

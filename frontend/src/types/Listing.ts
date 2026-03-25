@@ -28,6 +28,8 @@ export interface Listing {
 
   location?: string;       // marketplace commonly provides
   shippingPrice?: number;  // ebay commonly provides
+  description?: string;
+  fullDescription?: string;
 
   // AI scoring
   aiScore?: number;

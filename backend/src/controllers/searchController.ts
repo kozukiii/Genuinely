@@ -30,7 +30,7 @@ export async function searchAll(req: Request, res: Response) {
   const query = String(req.query.query ?? "").trim();
   if (!query) return res.status(400).json({ error: "Missing query" });
 
-  const limit = clampInt(Number(req.query.limit ?? 64), 1, 64);
+  const limit = clampInt(Number(req.query.limit ?? 15), 1, 200);
   const analyze = parseAnalyzeFlag(req.query.analyze);
 
   const sourcesRaw = String(req.query.sources ?? "ebay,marketplace")

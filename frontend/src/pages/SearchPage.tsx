@@ -1,51 +1,79 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigationType } from "react-router-dom";
 import SearchBar from "../components/SearchBar";
 import ListingCard from "../components/ListingCard";
+import FiltersSidebar, { type FilterState } from "../components/FiltersSidebar";
 import type { Listing } from "../types/Listing";
 import "./styles/HomePage.css";
+
+const PAGE_SIZE = 15;
+const PRELOAD_SIZE = PAGE_SIZE * 2; // always fetch 2 pages up-front
+const API_BASE = "";
 
 const SEARCH_QUERY_KEY = "search:query";
 const SEARCH_LISTINGS_KEY = "search:listings";
 const SEARCH_TIMESTAMP_KEY = "search:ts";
+const SEARCH_PAGE_KEY = "search:page";
 
-// NEW
-const SEARCH_LIMIT_KEY = "search:limit";
+const DEFAULT_FILTERS: FilterState = {
+  minPrice: "",
+  maxPrice: "",
+  condition: "any",
+  sources: { ebay: true, marketplace: true },
+  freeShippingOnly: false,
+  sortBy: "default",
+};
 
-const API_BASE = "";
+async function fetchFromApi(
+  query: string,
+  targetTotal: number,
+  sources: { ebay: boolean; marketplace: boolean },
+  analyze: boolean
+): Promise<Listing[]> {
+  const activeSources =
+    (["ebay", "marketplace"] as const).filter((s) => sources[s]).join(",") ||
+    "ebay,marketplace";
 
-const LIMIT_MIN = 1;
-const LIMIT_MAX = 64;
+  const url =
+    `${API_BASE}/api/search?query=${encodeURIComponent(query)}` +
+    `&limit=${targetTotal}&sources=${activeSources}` +
+    `&analyze=${analyze ? "1" : "0"}`;
 
-function clampInt(n: number, min: number, max: number) {
-  if (!Number.isFinite(n)) return min;
-  return Math.max(min, Math.min(max, Math.trunc(n)));
+  const res = await fetch(url);
+  const text = await res.text();
+  if (!res.ok) throw new Error(`HTTP ${res.status} | ${text.slice(0, 200)}`);
+
+  const data = JSON.parse(text);
+  if (!Array.isArray(data)) throw new Error("Response was not an array");
+  return data as Listing[];
 }
 
-// UPDATED: hydrate also loads limit (optional)
-function hydrateSearch(
-  setInitialQuery: (s: string) => void,
-  setListings: (l: Listing[]) => void,
-  setLimitText: (s: string) => void
-) {
-  try {
-    const savedQuery = sessionStorage.getItem(SEARCH_QUERY_KEY) ?? "";
-    const savedListingsRaw = sessionStorage.getItem(SEARCH_LISTINGS_KEY);
+function applyFilters(listings: Listing[], filters: FilterState): Listing[] {
+  let result = listings.slice();
 
-    // NEW
-    const savedLimit = sessionStorage.getItem(SEARCH_LIMIT_KEY);
+  const minP = filters.minPrice !== "" ? Number(filters.minPrice) : null;
+  const maxP = filters.maxPrice !== "" ? Number(filters.maxPrice) : null;
+  if (minP !== null && Number.isFinite(minP)) result = result.filter((l) => l.price >= minP);
+  if (maxP !== null && Number.isFinite(maxP)) result = result.filter((l) => l.price <= maxP);
 
-    if (savedQuery) setInitialQuery(savedQuery);
-
-    if (savedLimit) setLimitText(savedLimit);
-
-    if (savedListingsRaw) {
-      const parsed = JSON.parse(savedListingsRaw) as Listing[];
-      if (Array.isArray(parsed)) setListings(parsed);
-    }
-  } catch (err) {
-    console.error("Failed to hydrate search data from sessionStorage", err);
+  if (filters.condition !== "any") {
+    result = result.filter((l) => {
+      const c = (l.condition ?? "").toLowerCase();
+      return filters.condition === "new" ? c.startsWith("new") : !c.startsWith("new");
+    });
   }
+
+  if (filters.freeShippingOnly) {
+    result = result.filter((l) => l.shippingPrice === 0 || l.shippingPrice == null);
+  }
+
+  if (filters.sortBy === "price_asc") result.sort((a, b) => a.price - b.price);
+  else if (filters.sortBy === "price_desc") result.sort((a, b) => b.price - a.price);
+  else if (filters.sortBy === "ai_score") {
+    result.sort((a, b) => (b.aiScore ?? -1) - (a.aiScore ?? -1));
+  }
+
+  return result;
 }
 
 export default function SearchPage() {
@@ -53,119 +81,246 @@ export default function SearchPage() {
 
   const [demoMode, setDemoMode] = useState(true);
   const [listings, setListings] = useState<Listing[]>([]);
+  const [hasMore, setHasMore] = useState(false);
+  const [page, setPage] = useState(1);
+  const [currentQuery, setCurrentQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [initialQuery, setInitialQuery] = useState("");
+  const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
 
-  // NEW: limit textbox state (string so user can type freely)
-  const [limitText, setLimitText] = useState<string>("64");
+  // Keep a stable ref so effects can read the latest query/sources without re-running
+  const queryRef = useRef(currentQuery);
+  queryRef.current = currentQuery;
+  const sourcesRef = useRef(filters.sources);
+  sourcesRef.current = filters.sources;
+  const prefetchingRef = useRef(false);
+  const scrollIntentRef = useRef<"top" | "bottom" | null>(null);
 
-  // NEW: computed, clamped limit used for requests
-  const limit = useMemo(() => {
-    const n = Number(limitText);
-    if (!Number.isFinite(n)) return 64;
-    return clampInt(n, LIMIT_MIN, LIMIT_MAX);
-  }, [limitText]);
+  const filtered = useMemo(
+    () => applyFilters(listings, filters),
+    [listings, filters]
+  );
 
-  const fetchListings = useCallback(
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const canGoPrev = page > 1;
+  const canGoNext = page < totalPages || hasMore;
+
+  const pageItems = useMemo(
+    () => filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+    [filtered, page]
+  );
+
+  // ── Initial search (new query) ──────────────────────────────────────────
+  const handleSearch = useCallback(
     async (query: string) => {
       const q = query.trim();
       if (!q) return;
 
       setLoading(true);
       setError(null);
-
-      const url =
-        `${API_BASE}/api/search?query=${encodeURIComponent(q)}` +
-        `&limit=${limit}&sources=ebay,marketplace` +
-        `&analyze=${demoMode ? "0" : "1"}`;
-
+      setCurrentQuery(q);
+      setPage(1);
 
       try {
-        const res = await fetch(url);
-        const text = await res.text();
-
-        if (!res.ok) {
-          throw new Error(`HTTP ${res.status} ${res.statusText} | body: ${text.slice(0, 200)}`);
-        }
-
-        const data = JSON.parse(text) as Listing[];
-        if (!Array.isArray(data)) throw new Error("Response was not an array");
-
+        const data = await fetchFromApi(q, PRELOAD_SIZE, filters.sources, !demoMode);
         setListings(data);
+        setHasMore(data.length >= PRELOAD_SIZE);
 
-        // ✅ persist query + listings + limit
         sessionStorage.setItem(SEARCH_QUERY_KEY, q);
         sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(data));
         sessionStorage.setItem(SEARCH_TIMESTAMP_KEY, Date.now().toString());
-        sessionStorage.setItem(SEARCH_LIMIT_KEY, String(limit));
+        sessionStorage.setItem(SEARCH_PAGE_KEY, "1");
       } catch (err) {
-        const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
-        setError(`Failed to load listings: ${msg}`);
+        setError(`Failed to load listings: ${err instanceof Error ? err.message : String(err)}`);
       } finally {
         setLoading(false);
       }
     },
-    [demoMode, limit]
+    [demoMode, filters.sources]
   );
 
-  // Initial mount hydration
-  useEffect(() => {
-    hydrateSearch(setInitialQuery, setListings, setLimitText);
-  }, []);
+  // ── Next page ───────────────────────────────────────────────────────────
+  const handleNextPage = useCallback(async () => {
+    if (!canGoNext || loading) return;
 
-  // When user hits Back/Forward (POP), rehydrate again
-  useEffect(() => {
-    if (navType === "POP") {
-      hydrateSearch(setInitialQuery, setListings, setLimitText);
+    const nextPage = page + 1;
+    const needed = nextPage * PAGE_SIZE;
+
+    if (filtered.length < needed && hasMore) {
+      setLoading(true);
+      try {
+        const data = await fetchFromApi(
+          queryRef.current,
+          needed + PAGE_SIZE, // fetch a page ahead so next-next doesn't stall
+          sourcesRef.current,
+          !demoMode
+        );
+        setListings(data);
+        setHasMore(data.length >= needed + PAGE_SIZE);
+
+        sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(data));
+      } catch (err) {
+        setError(`Failed to load more listings: ${err instanceof Error ? err.message : String(err)}`);
+        return;
+      } finally {
+        setLoading(false);
+      }
     }
-  }, [navType]);
 
-  // ...everything above stays the same
+    setPage(nextPage);
+    sessionStorage.setItem(SEARCH_PAGE_KEY, String(nextPage));
+    scrollIntentRef.current = "top";
+  }, [canGoNext, loading, page, filtered.length, hasMore, demoMode]);
 
-return (
-  <div className="home-page">
-    <SearchBar onSearch={fetchListings} initialQuery={initialQuery} />
+  // ── Prev page ───────────────────────────────────────────────────────────
+  const handlePrevPage = useCallback(() => {
+    if (!canGoPrev || loading) return;
+    const prevPage = page - 1;
+    setPage(prevPage);
+    sessionStorage.setItem(SEARCH_PAGE_KEY, String(prevPage));
+    scrollIntentRef.current = "bottom";
+  }, [canGoPrev, loading, page]);
 
-    <div className="search-controls">
-      <label className="demo-toggle">
-        <input
-          type="checkbox"
-          checked={demoMode}
-          onChange={(e) => setDemoMode(e.target.checked)}
-        />
-        Demo mode
-      </label>
+  // ── Re-fetch when sources change (reset to page 1) ──────────────────────
+  useEffect(() => {
+    const q = queryRef.current;
+    if (!q) return;
 
-      <label className="limit-control">
-        <span className="limit-label">Limit</span>
-        <input
-          className="limit-input"
-          type="number"
-          min={LIMIT_MIN}
-          max={LIMIT_MAX}
-          step={1}
-          value={limitText}
-          onChange={(e) => setLimitText(e.target.value)}
-          onBlur={() => setLimitText(String(limit))}
-        />
-        <span className="limit-hint">(1–64)</span>
-      </label>
+    setLoading(true);
+    setError(null);
+    setPage(1);
 
+    fetchFromApi(q, PRELOAD_SIZE, filters.sources, !demoMode)
+      .then((data) => {
+        setListings(data);
+        setHasMore(data.length >= PRELOAD_SIZE);
+        sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(data));
+        sessionStorage.setItem(SEARCH_PAGE_KEY, "1");
+      })
+      .catch((err) =>
+        setError(`Failed to load listings: ${err instanceof Error ? err.message : String(err)}`)
+      )
+      .finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters.sources]);
+
+  // ── Scroll after page change renders ────────────────────────────────────
+  useEffect(() => {
+    const intent = scrollIntentRef.current;
+    if (!intent) return;
+    scrollIntentRef.current = null;
+    if (intent === "top") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } else {
+      window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+    }
+  }, [pageItems]);
+
+  // ── Background prefetch: silently load next page while user reads current ──
+  useEffect(() => {
+    const nextNeeded = (page + 1) * PAGE_SIZE;
+    if (!currentQuery || !hasMore || listings.length >= nextNeeded || loading || prefetchingRef.current) return;
+
+    prefetchingRef.current = true;
+    fetchFromApi(currentQuery, nextNeeded, filters.sources, !demoMode)
+      .then((data) => {
+        setListings(data);
+        setHasMore(data.length >= nextNeeded);
+        sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(data));
+      })
+      .catch(() => {})
+      .finally(() => { prefetchingRef.current = false; });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, hasMore, listings.length, loading]);
+
+  // ── Hydrate from sessionStorage ─────────────────────────────────────────
+  function hydrate() {
+    try {
+      const savedQuery = sessionStorage.getItem(SEARCH_QUERY_KEY) ?? "";
+      const savedRaw = sessionStorage.getItem(SEARCH_LISTINGS_KEY);
+      const savedPage = sessionStorage.getItem(SEARCH_PAGE_KEY);
+
+      if (savedQuery) { setInitialQuery(savedQuery); setCurrentQuery(savedQuery); }
+      if (savedPage) setPage(Number(savedPage) || 1);
+      if (savedRaw) {
+        const parsed = JSON.parse(savedRaw) as Listing[];
+        if (Array.isArray(parsed)) setListings(parsed);
+      }
+    } catch {}
+  }
+
+  useEffect(() => { hydrate(); }, []);
+  useEffect(() => { if (navType === "POP") hydrate(); }, [navType]);
+
+  return (
+    <div className="home-page">
+      <SearchBar onSearch={handleSearch} initialQuery={initialQuery} />
+
+      <div className="search-controls">
+        <label className="demo-toggle">
+          <input
+            type="checkbox"
+            checked={demoMode}
+            onChange={(e) => setDemoMode(e.target.checked)}
+          />
+          Demo mode
+        </label>
+
+        {listings.length > 0 && (
+          <span className="results-count">
+            {filtered.length} result{filtered.length !== 1 ? "s" : ""}
+          </span>
+        )}
+      </div>
+
+      {loading && <p className="mt-4">Loading results...</p>}
+      {error && <p className="mt-4 text-red-400">{error}</p>}
+
+      <div className="search-layout">
+        {listings.length > 0 && (
+          <FiltersSidebar filters={filters} onChange={setFilters} />
+        )}
+
+        <div className="search-main">
+          <div className="results-container">
+            {pageItems.map((item) => (
+              <ListingCard key={`${item.source}:${item.id}`} data={item} />
+            ))}
+            {!loading && listings.length > 0 && pageItems.length === 0 && (
+              <p className="empty-message">No listings match the current filters.</p>
+            )}
+          </div>
+
+          {listings.length > 0 && (
+            <div className="page-nav">
+              <button
+                className="page-btn"
+                onClick={handlePrevPage}
+                disabled={!canGoPrev || loading}
+              >
+                ← Prev
+              </button>
+
+              <span className="page-indicator">
+                Page {page}{totalPages > 1 ? ` of ${totalPages}` : ""}
+              </span>
+
+              <button
+                className="page-btn"
+                onClick={handleNextPage}
+                disabled={!canGoNext || loading}
+              >
+                Next →
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {!loading && !error && listings.length === 0 && (
+        <p className="mt-8 text-gray-400">Enter a search above to begin.</p>
+      )}
     </div>
-
-    {loading && <p className="mt-4">Loading results...</p>}
-    {error && <p className="mt-4 text-red-400">{error}</p>}
-
-    <div className="results-container">
-      {listings.map((item) => (
-        <ListingCard key={`${item.source}:${item.id}`} data={item} />
-      ))}
-    </div>
-
-    {!loading && !error && listings.length === 0 && (
-      <p className="mt-8 text-gray-400">Enter a search above to begin.</p>
-    )}
-  </div>
-);
+  );
 }

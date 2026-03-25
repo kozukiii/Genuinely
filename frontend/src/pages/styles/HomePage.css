@@ -52,7 +52,8 @@ h6 {
 .home-page .results-container {
   display: grid;
 
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(250px, 380px));
+  justify-content: start;
 
   /* Equal-height cards */
   grid-auto-rows: 1fr;
@@ -591,4 +592,227 @@ h6 {
    ========================= */
 .home-page .banner-track{
   animation-duration: 55s; /* was 42s — slower */
+}
+
+/* =========================
+   Search layout (sidebar + results)
+   ========================= */
+.home-page .search-layout {
+  display: flex;
+  gap: 1.5rem;
+  align-items: flex-start;
+  margin-top: 1.5rem;
+}
+
+/* =========================
+   Filters sidebar
+   ========================= */
+.filters-sidebar {
+  flex: 0 0 220px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 18px;
+  padding: 1.25rem 1rem;
+  position: sticky;
+  top: 1rem;
+}
+
+.filters-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.9);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  margin-bottom: 1rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 1.1rem;
+}
+
+.filter-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: rgba(209, 213, 219, 0.8);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.filter-select,
+.filter-input {
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  color: rgba(245, 245, 245, 0.92);
+  font-size: 0.88rem;
+  padding: 7px 10px;
+  width: 100%;
+  box-sizing: border-box;
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.filter-select:focus,
+.filter-input:focus {
+  outline: none;
+  border-color: rgba(57, 255, 157, 0.35);
+  background: rgba(0, 0, 0, 0.30);
+}
+
+.filter-price-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.filter-price-row .filter-input {
+  width: 0;
+  flex: 1;
+}
+
+.filter-price-sep {
+  font-size: 0.85rem;
+  color: rgba(209, 213, 219, 0.6);
+  flex-shrink: 0;
+}
+
+.filter-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.88rem;
+  color: rgba(245, 245, 245, 0.85);
+  cursor: pointer;
+  user-select: none;
+}
+
+.filter-check input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 15px;
+  height: 15px;
+  border-radius: 5px;
+  border: 1px solid rgba(57, 255, 157, 0.4);
+  background: rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+  position: relative;
+  flex-shrink: 0;
+  transition: background 160ms ease, border-color 160ms ease;
+}
+
+.filter-check input[type="checkbox"]:checked {
+  background: rgba(57, 255, 157, 0.22);
+  border-color: rgba(57, 255, 157, 0.7);
+}
+
+.filter-check input[type="checkbox"]:checked::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 1px;
+  width: 5px;
+  height: 8px;
+  border: 2px solid rgba(57, 255, 157, 0.9);
+  border-top: none;
+  border-left: none;
+  transform: rotate(45deg);
+}
+
+.filter-reset {
+  width: 100%;
+  margin-top: 0.25rem;
+  padding: 7px 0;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(209, 213, 219, 0.75);
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease, color 160ms ease;
+}
+
+.filter-reset:hover {
+  border-color: rgba(255, 100, 100, 0.4);
+  background: rgba(255, 100, 100, 0.06);
+  color: rgba(255, 160, 160, 0.9);
+}
+
+/* Results count pill */
+.home-page .results-count {
+  font-size: 0.82rem;
+  color: rgba(209, 213, 219, 0.65);
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+/* Remove number spinners from price inputs */
+.filter-input::-webkit-outer-spin-button,
+.filter-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.filter-input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+/* search-main wraps results grid + page nav */
+.home-page .search-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+/* Remove the top margin from results-container when inside search-layout */
+.home-page .search-layout .results-container {
+  margin-top: 0;
+}
+
+/* =========================
+   Page navigation
+   ========================= */
+.home-page .page-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  padding: 0.5rem 0 1rem;
+}
+
+.home-page .page-btn {
+  padding: 8px 20px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(245, 245, 245, 0.9);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+}
+
+.home-page .page-btn:hover:not(:disabled) {
+  border-color: rgba(57, 255, 157, 0.45);
+  background: rgba(57, 255, 157, 0.07);
+  transform: translateY(-1px);
+}
+
+.home-page .page-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.home-page .page-indicator {
+  font-size: 0.85rem;
+  color: rgba(209, 213, 219, 0.7);
+  min-width: 80px;
+  text-align: center;
 }

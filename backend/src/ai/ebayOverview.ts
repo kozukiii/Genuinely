@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 import dotenv from "dotenv";
 
-dotenv.config();
+dotenv.config({ quiet: true });
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
 
@@ -207,4 +207,135 @@ DEBUG INFO:
   });
 
   return response.choices[0].message.content?.trim() || "No analysis.";
+}
+
+// ---------------------------------------------------------------------------
+// Batch analysis — analyzes multiple listings in a single API call
+// ---------------------------------------------------------------------------
+
+const EBAY_BATCH_SIZE = 8;
+
+const EBAY_BATCH_SYSTEM_PROMPT = `
+You are an expert AI specializing in evaluating online marketplace listings.
+
+You will receive multiple eBay listings numbered 1 through N (each wrapped in === LISTING N === / === END LISTING N ===).
+Analyze ALL of them and return results as a JSON array.
+
+SCORING RULES (apply to every listing):
+- priceFairness (0–100): compare to recent similar listings
+- sellerTrust (0–100): based on feedback score and rating count; auto 100 if 99%+ feedback and 1000+ ratings
+- conditionHonesty (0–100): does description match images and stated condition
+- shippingFairness (0–100): is shipping reasonable; auto 100 if shipping is free
+- descriptionQuality (0–100): is the description detailed, accurate, and well-written
+
+Missing data = NEUTRAL (no deduction unless truly critical).
+ALWAYS describe the images in the overview if they were provided.
+DO NOT include numeric scores inside the overview text.
+DO NOT add extra JSON fields.
+
+OUTPUT FORMAT — return ONLY a JSON array (no markdown, no backticks):
+[
+  {
+    "listingIndex": 0,
+    "scores": { "priceFairness": <n>, "sellerTrust": <n>, "conditionHonesty": <n>, "shippingFairness": <n>, "descriptionQuality": <n> },
+    "overview": "Short reasoning paragraph."
+  },
+  ...one entry per listing, zero-indexed
+]
+`.trim();
+
+async function _runEbayBatch(listings: any[]): Promise<string[]> {
+  const contentParts: any[] = [];
+
+  for (let i = 0; i < listings.length; i++) {
+    const listing = listings[i];
+    const title = clean(listing.title) ?? "Untitled";
+    const currency = clean(listing.currency) ?? "USD";
+    const link = clean(listing.link ?? listing.url) ?? "";
+    const seller = clean(listing.seller) ?? "N/A";
+    const feedbackLine = formatFeedback(listing);
+    const condition = clean(listing.condition) ?? "N/A";
+    const conditionDescriptor = clean(listing.conditionDescriptor) ?? "N/A";
+    const itemLocation = formatLocation(listing);
+    const buyingOptions = formatBuyingOptions(listing.buyingOptions);
+    const shippingOptions = formatShippingOptions(listing.shippingOptions);
+    const shortDesc = clean(listing.shortDescription) ?? "";
+    const description = clean(listing.description ?? listing.fullDescription) ?? "";
+
+    const imageUrls: string[] = Array.isArray(listing.imageUrls)
+      ? listing.imageUrls.filter((u: any) => typeof u === "string" && u.trim())
+      : Array.isArray(listing.images)
+        ? listing.images.filter((u: any) => typeof u === "string" && u.trim())
+        : [];
+
+    contentParts.push({ type: "text", text: `=== LISTING ${i + 1} ===` });
+    contentParts.push({ type: "text", text: `Title: ${title}` });
+    contentParts.push({ type: "text", text: `Price: ${listing.price} ${currency}` });
+    contentParts.push({ type: "text", text: `Seller: ${seller}` });
+    contentParts.push({ type: "text", text: `Feedback: ${feedbackLine}` });
+    contentParts.push({ type: "text", text: `Condition: ${condition}` });
+    contentParts.push({ type: "text", text: `Condition Descriptor: ${conditionDescriptor}` });
+    contentParts.push({ type: "text", text: `Item Location: ${itemLocation}` });
+    contentParts.push({ type: "text", text: `Buying Options: ${buyingOptions}` });
+    contentParts.push({ type: "text", text: `Shipping Options: ${shippingOptions}` });
+    contentParts.push({ type: "text", text: `Original Price: ${formatOriginalPrice(listing.marketingPrice)}` });
+    contentParts.push({ type: "text", text: `Discount: ${formatDiscount(listing.marketingPrice)}` });
+    contentParts.push({ type: "text", text: `Short Description: ${shortDesc}` });
+    contentParts.push({ type: "text", text: `Description: ${description}` });
+    contentParts.push({ type: "text", text: `Listing URL: ${link}` });
+    contentParts.push({ type: "text", text: `Images Provided: ${imageUrls.length}` });
+
+    if (imageUrls.length) {
+      contentParts.push({ type: "text", text: `[Images for Listing ${i + 1}]` });
+      for (const url of imageUrls) {
+        contentParts.push({ type: "image_url", image_url: { url } });
+      }
+    }
+
+    contentParts.push({ type: "text", text: `=== END LISTING ${i + 1} ===` });
+  }
+
+  let rawResponse: string;
+  try {
+    const response = await client.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: EBAY_BATCH_SYSTEM_PROMPT },
+        { role: "user", content: contentParts },
+      ],
+      max_tokens: Math.min(listings.length * 800, 16000),
+      temperature: 0.2,
+    });
+    rawResponse = response.choices[0].message.content?.trim() ?? "[]";
+  } catch (err) {
+    console.error("eBay batch API call failed, falling back to individual calls:", err);
+    return Promise.all(listings.map(analyzeListingWithImages));
+  }
+
+  try {
+    const parsed = JSON.parse(rawResponse);
+    if (!Array.isArray(parsed)) throw new Error("Response was not a JSON array");
+
+    return listings.map((_, i) => {
+      const item = parsed.find((x: any) => x.listingIndex === i) ?? parsed[i];
+      if (!item?.scores) return "No analysis.\nDEBUG INFO:\n(batch item missing)";
+      const jsonStr = JSON.stringify({ scores: item.scores, overview: item.overview ?? "" });
+      return `${jsonStr}\nDEBUG INFO:\n(batched with ${listings.length} items)`;
+    });
+  } catch (err) {
+    console.error("eBay batch response parse failed, falling back to individual calls:", err);
+    return Promise.all(listings.map(analyzeListingWithImages));
+  }
+}
+
+export async function batchAnalyzeListingsWithImages(listings: any[]): Promise<string[]> {
+  if (listings.length === 0) return [];
+
+  const results: string[] = [];
+  for (let start = 0; start < listings.length; start += EBAY_BATCH_SIZE) {
+    const chunk = listings.slice(start, start + EBAY_BATCH_SIZE);
+    const chunkResults = await _runEbayBatch(chunk);
+    results.push(...chunkResults);
+  }
+  return results;
 }

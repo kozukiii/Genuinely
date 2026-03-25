@@ -2,7 +2,7 @@ import OpenAI from "openai";
 import dotenv from "dotenv";
 import fetch from "node-fetch";
 
-dotenv.config();
+dotenv.config({ quiet: true });
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
 
@@ -309,4 +309,137 @@ Do NOT wrap JSON in backticks.
   });
 
   return response.choices[0].message.content?.trim() || "No analysis.";
+}
+
+// ---------------------------------------------------------------------------
+// Batch analysis — analyzes multiple listings in a single API call
+// ---------------------------------------------------------------------------
+
+const MARKETPLACE_BATCH_SIZE = 4;
+const MARKETPLACE_BATCH_IMAGES_PER_LISTING = 2;
+
+const MARKETPLACE_BATCH_SYSTEM_PROMPT = `
+You are an expert AI specializing in evaluating Facebook Marketplace listings.
+
+You will receive multiple listings numbered 1 through N (each wrapped in === LISTING N === / === END LISTING N ===).
+Analyze ALL of them using the scoring rules below and return results as a JSON array.
+
+IMPORTANT: Marketplace listings often have sparse data. Score them FAIRLY without over-penalizing missing metadata.
+
+SCORING RULES (apply to every listing):
+- priceFairness (0–100): judge price for the specific inferred item; be confident and specific, not generic
+- sellerTrust (0–100): interpret as LISTING CONFIDENCE — active listing + real image + plausible title = 70–85 baseline
+- conditionHonesty (0–100): images and title align well = 70–90; neutral/unclear = 55–70
+- shippingFairness (0–100): standard local pickup = 75–90; multiple options = 85–95
+- descriptionQuality (0–100): clear specific title + context = 70–90; vague = 30–50
+
+CRITICAL:
+- Missing data = NEUTRAL (not negative)
+- Infer specific item identity from title + images; speak as if that ID is correct
+- NEVER use vague phrases like "similar items" or "this category"
+- DO NOT include numeric scores inside the overview text
+- DO NOT add extra JSON fields
+
+OUTPUT FORMAT — return ONLY a JSON array (no markdown, no backticks):
+[
+  {
+    "listingIndex": 0,
+    "scores": { "priceFairness": <n>, "sellerTrust": <n>, "conditionHonesty": <n>, "shippingFairness": <n>, "descriptionQuality": <n> },
+    "overview": "Short confident reasoning paragraph."
+  },
+  ...one entry per listing, zero-indexed
+]
+`.trim();
+
+async function _runMarketplaceBatch(listings: any[], allDataUrls: string[][]): Promise<string[]> {
+  const contentParts: any[] = [];
+
+  for (let i = 0; i < listings.length; i++) {
+    const listing = listings[i];
+    const title = clean(listing.title) ?? "Untitled";
+    const currency = clean(listing.currency) ?? "USD";
+    const link = clean(listing.link ?? listing.url) ?? "";
+    const location = formatLocation(listing);
+    const deliveryTypes = formatDeliveryTypes(listing.delivery_types ?? listing.raw?.delivery_types);
+    const availability = formatAvailability(listing);
+    const dataUrls = allDataUrls[i];
+
+    contentParts.push({ type: "text", text: `=== LISTING ${i + 1} ===` });
+    contentParts.push({ type: "text", text: `Title: ${title}` });
+    contentParts.push({ type: "text", text: `Price: ${listing.price} ${currency}` });
+    contentParts.push({ type: "text", text: `Location: ${location}` });
+    contentParts.push({ type: "text", text: `Delivery Types: ${deliveryTypes}` });
+    contentParts.push({ type: "text", text: `Availability: ${availability}` });
+    contentParts.push({ type: "text", text: `Listing URL: ${link}` });
+    contentParts.push({ type: "text", text: `Images Attached: ${dataUrls.length}` });
+
+    if (dataUrls.length) {
+      contentParts.push({ type: "text", text: `[Images for Listing ${i + 1}]` });
+      for (const dataUrl of dataUrls) {
+        contentParts.push({ type: "image_url", image_url: { url: dataUrl } });
+      }
+    }
+
+    contentParts.push({ type: "text", text: `=== END LISTING ${i + 1} ===` });
+  }
+
+  let rawResponse: string;
+  try {
+    const response = await client.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: MARKETPLACE_BATCH_SYSTEM_PROMPT },
+        { role: "user", content: contentParts },
+      ],
+      max_tokens: Math.min(listings.length * 800, 16000),
+      temperature: 0.2,
+    });
+    rawResponse = response.choices[0].message.content?.trim() ?? "[]";
+  } catch (err) {
+    console.error("Marketplace batch API call failed, falling back to individual calls:", err);
+    return Promise.all(listings.map(analyzeMarketplaceListingWithImages));
+  }
+
+  try {
+    const parsed = JSON.parse(rawResponse);
+    if (!Array.isArray(parsed)) throw new Error("Response was not a JSON array");
+
+    return listings.map((_, i) => {
+      const item = parsed.find((x: any) => x.listingIndex === i) ?? parsed[i];
+      if (!item?.scores) return "No analysis.\nDEBUG INFO:\n(batch item missing)";
+      const jsonStr = JSON.stringify({ scores: item.scores, overview: item.overview ?? "" });
+      return `${jsonStr}\nDEBUG INFO:\n(batched with ${listings.length} items)`;
+    });
+  } catch (err) {
+    console.error("Marketplace batch response parse failed, falling back to individual calls:", err);
+    return Promise.all(listings.map(analyzeMarketplaceListingWithImages));
+  }
+}
+
+export async function batchAnalyzeMarketplaceListingsWithImages(listings: any[]): Promise<string[]> {
+  if (listings.length === 0) return [];
+
+  const results: string[] = [];
+  for (let start = 0; start < listings.length; start += MARKETPLACE_BATCH_SIZE) {
+    const chunk = listings.slice(start, start + MARKETPLACE_BATCH_SIZE);
+
+    // Fetch all images for this chunk in parallel
+    const allDataUrls = await Promise.all(
+      chunk.map(async (listing) => {
+        const imageUrls: string[] = Array.isArray(listing.imageUrls)
+          ? listing.imageUrls.filter((u: any) => typeof u === "string" && u.trim())
+          : Array.isArray(listing.images)
+            ? listing.images.filter((u: any) => typeof u === "string" && u.trim())
+            : [];
+        const fetched = await Promise.all(
+          imageUrls.slice(0, MARKETPLACE_BATCH_IMAGES_PER_LISTING).map(fetchImageAsDataUrl)
+        );
+        return fetched.filter(Boolean) as string[];
+      })
+    );
+
+    const chunkResults = await _runMarketplaceBatch(chunk, allDataUrls);
+    results.push(...chunkResults);
+  }
+  return results;
 }

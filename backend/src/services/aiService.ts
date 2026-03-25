@@ -1,4 +1,4 @@
-import { analyzeListingWithImages } from "../ai/ebayOverview";
+import { analyzeListingWithImages, batchAnalyzeListingsWithImages } from "../ai/ebayOverview";
 
 // Helper for safe average
 function average(nums: number[]) {
@@ -7,141 +7,25 @@ function average(nums: number[]) {
   return Math.round(valid.reduce((a, b) => a + b, 0) / valid.length);
 }
 
-// --- sanitizers (prevents "undefined" strings + double-JSON shipping options) ---
-function cleanString(v: any): string | undefined {
-  if (v === undefined || v === null) return undefined;
-  const s = String(v).trim();
-  if (!s) return undefined;
 
-  const lower = s.toLowerCase();
-  if (lower === "undefined" || lower === "null" || lower === "n/a") return undefined;
-
-  // special case: "undefined, undefined, undefined"
-  if (/^undefined(\s*,\s*undefined)*$/i.test(s)) return undefined;
-
-  return s;
-}
-
-function normalizeBuyingOptions(v: any): string[] | undefined {
-  if (Array.isArray(v)) return v.map(String).map((x) => x.trim()).filter(Boolean);
-  if (typeof v === "string") {
-    const parts = v.split(",").map((x) => x.trim()).filter(Boolean);
-    return parts.length ? parts : undefined;
-  }
-  return undefined;
-}
-
-function normalizeShippingOptions(v: any): unknown {
-  if (v === undefined || v === null) return undefined;
-
-  // If a JSON string got passed through, parse it once
-  if (typeof v === "string") {
-    const s = v.trim();
-    if (!s) return undefined;
-    try {
-      return JSON.parse(s);
-    } catch {
-      return s; // not JSON, keep as string
-    }
-  }
-
-  return v;
-}
-
-export async function analyzeItemWithAI(merged: any) {
-  // Normalize image input
-  const images: string[] =
-    Array.isArray(merged.images) ? merged.images :
-    Array.isArray(merged.imageUrls) ? merged.imageUrls :
-    [];
-
-  const imageUrls = images.filter(Boolean);
-  const imageUrl = imageUrls[0] ?? "";
-
-  // sanitize fields so we don't feed "undefined" into the prompt
-  const title = cleanString(merged.title) ?? "Untitled";
-  const currency = cleanString(merged.currency) ?? "USD";
-  const link = cleanString(merged.link ?? merged.url) ?? "";
-
-  const seller = cleanString(merged.seller);
-  const feedback = cleanString(merged.feedback);
-
-  const condition = cleanString(merged.condition);
-  const conditionDescriptor = cleanString(merged.conditionDescriptor);
-
-  // prefer itemLocation if you add it later; fallback to location
-  const location = cleanString(merged.itemLocation ?? merged.location);
-
-  const buyingOptions = normalizeBuyingOptions(merged.buyingOptions);
-  const shippingOptions = normalizeShippingOptions(merged.shippingOptions);
-
-  const description =
-    cleanString(merged.fullDescription) ??
-    cleanString(merged.description) ??
-    "";
-
-  const analysis = await analyzeListingWithImages({
-    title,
-    price: merged.price,
-    currency,
-    link,
-
-    seller,
-    feedback,
-    score: merged.score,
-
-    condition,
-    conditionDescriptor,
-
-    buyingOptions,
-    shippingOptions,
-    shippingPrice: typeof merged.shippingPrice === "number" ? merged.shippingPrice : undefined,
-    location,
-
-    marketingPrice: merged.marketingPrice,
-
-    description,
-
-    imageUrl,
-    imageUrls,
-  });
-
-  // Extract JSON block ONLY (top section)
+function parseAIAnalysis(analysis: string) {
   let jsonBlock: any = null;
 
   try {
     const jsonMatch = analysis.match(/^\s*\{[\s\S]*?\}\s*(?=DEBUG INFO:)/);
-
     if (jsonMatch) {
       jsonBlock = JSON.parse(jsonMatch[0]);
     } else {
       console.error("⚠ No JSON block found in AI response.");
-      console.log("RAW:", analysis);
     }
   } catch (err) {
     console.error("Failed to parse AI JSON:", err);
-    console.log("RAW ANALYSIS:", analysis);
   }
 
   const scores = jsonBlock?.scores || {};
+  const { priceFairness, sellerTrust, conditionHonesty, shippingFairness, locationRisk, descriptionQuality } = scores;
 
-  const {
-    priceFairness,
-    sellerTrust,
-    conditionHonesty,
-    shippingFairness,
-    locationRisk,
-    descriptionQuality,
-  } = scores;
-
-  const aiScore = average([
-    priceFairness,
-    sellerTrust,
-    conditionHonesty,
-    shippingFairness,
-    locationRisk,
-    descriptionQuality,
-  ]);
+  const aiScore = average([priceFairness, sellerTrust, conditionHonesty, shippingFairness, locationRisk, descriptionQuality]);
 
   return {
     aiScore,
@@ -152,16 +36,24 @@ export async function analyzeItemWithAI(merged: any) {
   };
 }
 
-export async function analyzeItemsWithAI(items: any[]) {
-  const analyzed = await Promise.all(
-    items.map(async (item) => {
-      const ai = await analyzeItemWithAI(item);
-      return {
-        ...item,
-        ...ai,
-      };
-    })
-  );
+export async function analyzeItemWithAI(merged: any) {
+  const analysis = await analyzeListingWithImages(merged);
+  return parseAIAnalysis(analysis);
+}
 
-  return analyzed;
+export async function analyzeItemsWithAI(items: any[]) {
+  if (items.length === 0) return [];
+
+  const BATCH_SIZE = 8;
+  const results: any[] = [];
+
+  for (let start = 0; start < items.length; start += BATCH_SIZE) {
+    const chunk = items.slice(start, start + BATCH_SIZE);
+    const rawStrings = await batchAnalyzeListingsWithImages(chunk);
+    for (let i = 0; i < chunk.length; i++) {
+      results.push({ ...chunk[i], ...parseAIAnalysis(rawStrings[i]) });
+    }
+  }
+
+  return results;
 }

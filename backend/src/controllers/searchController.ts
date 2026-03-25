@@ -3,7 +3,7 @@ import type { Listing } from "../types/listing";
 
 import { searchEbayNormalized } from "../services/ebayService";
 import { searchMarketplaceNormalized } from "../services/marketplaceService";
-import { analyzeItemsWithAI } from "../services/aiService";
+import { scoreListings } from "../services/scoring/scoreListing";
 
 function clampInt(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
@@ -76,7 +76,7 @@ export async function searchAll(req: Request, res: Response) {
   const finalItems = merged.slice(0, limit);
 
   if (analyze) {
-    const analyzed = await analyzeItemsWithAI(finalItems);
+    const analyzed = await scoreListings(finalItems);
     return res.json(analyzed);
   }
 

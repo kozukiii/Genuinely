@@ -34,6 +34,39 @@ async function getLatLng(location: string) {
   };
 }
 
+function extractMarketplaceImages(listing: any): string[] {
+  const urls = new Set<string>();
+
+  const pushIfValid = (url: any) => {
+    if (typeof url === "string" && url.trim().startsWith("http")) {
+      urls.add(url.trim());
+    }
+  };
+
+  pushIfValid(listing?.primary_listing_photo?.image?.uri);
+
+  const possibleArrays = [
+    listing?.listing_photos,
+    listing?.photos,
+    listing?.all_photos,
+    listing?.additional_photos,
+    listing?.media,
+    listing?.images,
+  ];
+
+  for (const arr of possibleArrays) {
+    if (!Array.isArray(arr)) continue;
+
+    for (const item of arr) {
+      pushIfValid(item?.image?.uri);
+      pushIfValid(item?.uri);
+      pushIfValid(item?.url);
+    }
+  }
+
+  return Array.from(urls);
+}
+
 export async function searchMarketplaceListings({
   query,
   location,
@@ -103,15 +136,20 @@ export async function searchMarketplaceListings({
       url: listing?.id
         ? `https://www.facebook.com/marketplace/item/${listing.id}`
         : "",
-      images: listing?.primary_listing_photo?.image?.uri
-        ? [listing.primary_listing_photo.image.uri]
-        : [],
+      images: extractMarketplaceImages(listing),
       location: [
         listing?.location?.reverse_geocode?.city,
         listing?.location?.reverse_geocode?.state,
       ]
         .filter(Boolean)
         .join(", "),
+      is_live: listing?.is_live ?? false,
+      is_pending: listing?.is_pending ?? false,
+      is_sold: listing?.is_sold ?? false,
+      delivery_types: Array.isArray(listing?.delivery_types)
+        ? listing.delivery_types
+        : [],
+      raw: listing,
     };
   });
 }

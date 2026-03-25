@@ -1,9 +1,10 @@
-export function getHighResImage(url?: string): string {
+export function getHighResImage(url?: string, source?: string): string {
   if (!url || !url.startsWith("http")) return "/placeholder.jpg";
 
-  // Upgrade to highest resolution eBay offers (s-l1600)
-  const upgraded = url.replace(/s-l\d+\.jpg/i, "s-l1600.jpg");
+  if (source === "marketplace") {
+    return url;
+  }
 
-  // 🔑 RELATIVE path — Vite will proxy this to the backend
+  const upgraded = url.replace(/s-l\d+\.jpg/i, "s-l1600.jpg");
   return `/api/proxy-image?url=${encodeURIComponent(upgraded)}`;
 }

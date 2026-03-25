@@ -4,8 +4,6 @@ import RatingRing from "../components/RatingRing";
 import "./styles/ListingPage.css";
 import { useEffect, useMemo, useState } from "react";
 import { getHighResImage } from "../utils/imageHelpers";
-
-// NEW
 import { isSaved, toggleSaved } from "../utils/savedListings";
 
 function sourceLabel(source?: Listing["source"]) {
@@ -15,25 +13,19 @@ function sourceLabel(source?: Listing["source"]) {
 
 export default function ListingPage() {
   const { state } = useLocation();
-
-  // state can be undefined on refresh/direct link
   const listing = (state as any)?.listing as Listing | undefined;
 
   const [showOverview, setShowOverview] = useState(false);
   const [showDebug, setShowDebug] = useState(false);
   const [showRaw, setShowRaw] = useState(false);
   const [imageIndex, setImageIndex] = useState(0);
-
-  // NEW: saved state
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
     if (!listing?.id) return;
 
-    // initialize saved status
     setSaved(isSaved(listing.id));
 
-    // keep in sync if saved changes elsewhere
     const onChange = () => setSaved(isSaved(listing.id));
     window.addEventListener("saved:listings:changed", onChange);
     return () => window.removeEventListener("saved:listings:changed", onChange);
@@ -50,9 +42,12 @@ export default function ListingPage() {
   const images = listing.images ?? [];
   const safeIndex = Math.min(
     Math.max(imageIndex, 0),
-    Math.max(images.length - 1, 0),
+    Math.max(images.length - 1, 0)
   );
-  const currentImage = getHighResImage(images[safeIndex] ?? "");
+  const currentImage = getHighResImage(
+    images[safeIndex] ?? "",
+    listing.source
+  );
 
   const money = useMemo(() => {
     try {
@@ -76,14 +71,24 @@ export default function ListingPage() {
 
   const readableLabels: Record<string, string> = {
     priceFairness: "Price Fairness",
-    sellerTrust: "Seller Trust",
+    sellerTrust:
+      listing.source === "marketplace" ? "Listing Confidence" : "Seller Trust",
     conditionHonesty: "Condition Honesty",
-    shippingFairness: "Shipping Fairness",
-    descriptionQuality: "Description Detail",
+    shippingFairness:
+      listing.source === "marketplace"
+        ? "Pickup / Delivery Ease"
+        : "Shipping Fairness",
+    descriptionQuality:
+      listing.source === "marketplace"
+        ? "Listing Quality"
+        : "Description Detail",
   };
 
-  // Seller line formatting (no "undefined%")
   const sellerLine = useMemo(() => {
+    if (listing.source === "marketplace") {
+      return listing.location ? `📍 ${listing.location}` : null;
+    }
+
     const seller = listing.seller?.trim();
     const feedback = listing.feedback?.trim();
     const score = listing.score;
@@ -97,11 +102,16 @@ export default function ListingPage() {
     if (score != null) parts.push(`(${score})`);
 
     return parts.join(" ");
-  }, [listing.seller, listing.feedback, listing.score]);
+  }, [
+    listing.source,
+    listing.location,
+    listing.seller,
+    listing.feedback,
+    listing.score,
+  ]);
 
   return (
     <div className="listing-page">
-      {/* TOP SECTION */}
       <div className="listing-card-block">
         <div className="page-image">
           <div className="image-frame">
@@ -110,8 +120,6 @@ export default function ListingPage() {
               alt={listing.title}
               onError={(e) => (e.currentTarget.src = "/placeholder.jpg")}
             />
-
-            
           </div>
 
           {images.length > 1 && (
@@ -189,7 +197,6 @@ export default function ListingPage() {
         </div>
       </div>
 
-      {/* AI ANALYSIS */}
       {listing.aiScore != null && (
         <div className="ai-analysis-box">
           <div className="ai-analysis-header">

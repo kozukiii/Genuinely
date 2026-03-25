@@ -4,7 +4,19 @@ body {
   margin: 0;
   padding: 0;
   min-height: 100%;
-  background-color: #1f1f1f;
+  background:
+    radial-gradient(
+      1400px 800px at 14% 6%,
+      rgba(77, 166, 255, 0.08),
+      transparent 60%
+    ),
+    radial-gradient(
+      1200px 700px at 86% 16%,
+      rgba(57, 255, 157, 0.08),
+      transparent 58%
+    ),
+    #07080a;
+  background-attachment: fixed;
   color: #e5e7eb;
   font-family:
     system-ui,
@@ -21,7 +33,7 @@ body {
   margin: 0 auto;
   padding: 1rem;
   min-height: 100vh;
-  background-color: #1f1f1f;
+  background: transparent;
   text-align: left;
 }
 
@@ -180,10 +192,58 @@ h6 {
 
 .home-page .demo-toggle {
   display: inline-flex;
-  gap: 8px;
   align-items: center;
-  color: rgba(229, 231, 235, 0.92);
-  font-size: 0.95rem;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(57, 255, 157, 0.25);
+  color: rgba(245, 245, 245, 0.9);
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease;
+}
+
+.home-page .demo-toggle:hover {
+  border-color: rgba(77, 166, 255, 0.45);
+  background: rgba(77, 166, 255, 0.06);
+}
+
+.home-page .demo-toggle input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+  border: 1px solid rgba(57, 255, 157, 0.4);
+  background: rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+  position: relative;
+  flex-shrink: 0;
+  transition:
+    background 160ms ease,
+    border-color 160ms ease;
+}
+
+.home-page .demo-toggle input[type="checkbox"]:checked {
+  background: rgba(57, 255, 157, 0.25);
+  border-color: rgba(57, 255, 157, 0.7);
+}
+
+.home-page .demo-toggle input[type="checkbox"]:checked::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 1px;
+  width: 5px;
+  height: 9px;
+  border: 2px solid rgba(57, 255, 157, 0.9);
+  border-top: none;
+  border-left: none;
+  transform: rotate(45deg);
 }
 
 /* Limit control: premium glass chip */
@@ -249,11 +309,6 @@ h6 {
   color: rgba(209, 213, 219, 0.72);
 }
 
-.home-page .api-base-note {
-  font-size: 12px;
-  opacity: 0.7;
-  margin: 0;
-}
 
 /* Remove ugly number spinners (optional) */
 .home-page .limit-input::-webkit-outer-spin-button,

@@ -54,7 +54,6 @@ export default function SearchPage() {
   const [demoMode, setDemoMode] = useState(true);
   const [listings, setListings] = useState<Listing[]>([]);
   const [loading, setLoading] = useState(false);
-  const [debug, setDebug] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [initialQuery, setInitialQuery] = useState("");
 
@@ -81,7 +80,6 @@ export default function SearchPage() {
         `&limit=${limit}&sources=ebay,marketplace` +
         `&analyze=${demoMode ? "0" : "1"}`;
 
-      setDebug(`requesting ${url}`);
 
       try {
         const res = await fetch(url);
@@ -154,18 +152,10 @@ return (
         <span className="limit-hint">(1–64)</span>
       </label>
 
-      <p className="api-base-note">
-        API_BASE: {API_BASE || "(same-origin / vite proxy)"} | using limit: {limit}
-      </p>
     </div>
 
     {loading && <p className="mt-4">Loading results...</p>}
     {error && <p className="mt-4 text-red-400">{error}</p>}
-    {debug && (
-      <p className="mt-2" style={{ fontSize: 12, opacity: 0.7 }}>
-        {debug}
-      </p>
-    )}
 
     <div className="results-container">
       {listings.map((item) => (

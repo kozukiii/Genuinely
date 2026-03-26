@@ -53,14 +53,9 @@ h6 {
   display: grid;
 
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  justify-content: start;
-
-  /* Equal-height cards */
-  grid-auto-rows: 1fr;
 
   gap: 2.5rem;
-  justify-items: stretch;
-  align-items: stretch;
+  align-items: start;
 
   margin-top: 2rem;
 
@@ -72,6 +67,7 @@ h6 {
 .home-page .listing-card-wrapper {
   width: 100%;
   height: 100%;
+  min-width: 0;
   display: flex;
   flex-direction: column;
 }
@@ -470,8 +466,7 @@ h6 {
 
 .featured-grid{
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-  grid-auto-rows: 1fr;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
   gap: 2rem;
   margin-top: 1rem;
 }
@@ -621,8 +616,7 @@ h6 {
    ========================= */
 .featured-grid{
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-  grid-auto-rows: 1fr;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
   gap: 2rem;
   margin-top: 1rem;
 }
@@ -993,4 +987,59 @@ h6 {
   color: rgba(209, 213, 219, 0.7);
   min-width: 80px;
   text-align: center;
+}
+
+/* =========================
+   Mobile: two-column card grid
+   ========================= */
+@media (max-width: 768px) {
+  /* Give the page consistent horizontal breathing room */
+  .home-page {
+    padding: 0.75rem;
+  }
+
+  /* Hide desktop sidebar — mobile uses the overlay button instead */
+  .filters-sidebar {
+    display: none;
+  }
+
+  /* Search layout: single column, no sidebar gap */
+  .home-page .search-layout {
+    gap: 0;
+    margin-top: 0.75rem;
+  }
+
+  /* Results grid: single column, full width */
+  .home-page .results-container {
+    grid-template-columns: repeat(1, minmax(0, 1fr));
+    gap: 0.75rem;
+    margin: 0;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .home-page .listing-image img {
+    height: 8rem;
+  }
+
+  .home-page .listing-card {
+    padding: 0.5rem;
+    border-radius: 12px;
+  }
+
+  .home-page .listing-title {
+    font-size: 0.8rem;
+    margin: 0.4rem 0 0.2rem;
+  }
+
+  /* Featured grid: responsive columns on small screens */
+  .featured-grid {
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 0.75rem;
+  }
+
+  /* Shelf cards: slightly narrower on mobile */
+  .shelf-card {
+    width: 220px;
+  }
 }

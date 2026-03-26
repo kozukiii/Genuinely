@@ -280,7 +280,7 @@ export default function SearchPage() {
 
         {listings.length > 0 && (
           <span className="results-count">
-            {filtered.length} result{filtered.length !== 1 ? "s" : ""}
+            {filtered.length}+ result{filtered.length !== 1 ? "s" : ""}
           </span>
         )}
       </div>
@@ -328,7 +328,7 @@ export default function SearchPage() {
               </button>
 
               <span className="page-indicator">
-                Page {page}{totalPages > 1 ? ` of ${totalPages}` : ""}
+                Page {page}{totalPages > 1 ? ` of ${totalPages}+` : ""}
               </span>
 
               <button

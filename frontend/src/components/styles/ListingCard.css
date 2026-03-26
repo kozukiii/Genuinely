@@ -294,9 +294,9 @@
 .price-rating .card-badges {
   position: absolute;
 
-  /* THESE TWO NUMBERS control “exactly like first card” */
   right: 14px;
-  bottom: 50px;
+  top: 50%;
+  transform: translateY(-50%);
 
   display: flex;
   align-items: center;
@@ -364,6 +364,75 @@
   }
   .price-rating .card-badges {
     right: 12px;
+    top: auto;
     bottom: 6px;
+    transform: none;
+  }
+}
+
+/* Mobile: compact card for two-column grid */
+@media (max-width: 768px) {
+  .listing-card {
+    padding: 0.5rem;
+    border-radius: 12px;
+  }
+
+  .listing-title {
+    font-size: 0.78rem;
+    margin-top: 0.4rem;
+    -webkit-line-clamp: 2;
+    min-height: calc(1.22em * 2);
+  }
+
+  .listing-price {
+    font-size: 0.85rem;
+  }
+
+  .listing-shipping {
+    font-size: 0.7rem;
+  }
+
+  .listing-feedback {
+    font-size: 0.7rem;
+    margin-top: 0.3rem;
+  }
+
+  .listing-condition {
+    font-size: 0.68rem;
+    padding: 0.12rem 0.4rem;
+  }
+
+  .price-rating {
+    padding-right: 56px;
+    min-height: 64px;
+    gap: 0.4rem;
+  }
+
+  .price-rating .card-badges {
+    right: 4px;
+    bottom: 4px;
+    gap: 4px;
+  }
+
+  .price-rating .badge-ring .rating-ring {
+    width: 34px !important;
+    height: 34px !important;
+  }
+
+  .price-rating .badge-heart {
+    width: 28px;
+    height: 28px;
+    font-size: 0.82rem;
+    border-radius: 8px;
+  }
+
+  .listing-overview {
+    display: none;
+  }
+
+  .listing-link {
+    font-size: 0.75rem;
+    padding: 0.35rem 0.5rem;
+    border-radius: 10px;
   }
 }

@@ -94,7 +94,6 @@ function extractImagesFromHtml(html: string, _listingId: string): string[] {
   const primary = ogMatch ? ogMatch[1].replace(/&amp;/g, "&") : undefined;
 
   const results = Array.from(byFilename.values());
-  console.log("extractImagesFromHtml: listing imgs:", results.length, "primary:", !!primary);
 
   if (primary) {
     const base = primary.split("?")[0];
@@ -131,12 +130,10 @@ export async function getMarketplaceListing(listingId: string): Promise<Partial<
     });
 
     const html = await res.text();
-    console.log("fetching listing:", listingId, "status:", res.status, "size:", html.length);
-if (res.status !== 200) return {};
+    if (res.status !== 200) return {};
 
     const images = extractImagesFromHtml(html, listingId);
     const description = extractDescriptionFromHtml(html);
-    console.log("images:", images.length, images[0]?.slice(0, 80));
     return { images, description, fullDescription: description };
   } catch (err) {
     console.error("getMarketplaceListing error:", err);
@@ -194,7 +191,6 @@ export async function searchMarketplaceListings({
   const json = await res.json();
 
   const edges = json?.data?.marketplace_search?.feed_units?.edges ?? [];
-  console.dir(edges?.[0]?.node?.listing, { depth: null });
 
   return edges.map((edge: any) => {
     const listing = edge?.node?.listing;

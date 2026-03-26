@@ -51,16 +51,10 @@ h6 {
 /* --- Results Grid (scoped) --- */
 .home-page .results-container {
   display: grid;
-
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-
   gap: 2.5rem;
-  align-items: start;
-
-  margin-top: 2rem;
-
-  max-width: 100%;
   margin: 1rem 2rem auto auto;
+  max-width: 100%;
 }
 
 /* --- Card Wrappers (scoped) --- */
@@ -97,13 +91,10 @@ h6 {
 /* --- Card Image Area (uniform height) --- */
 .home-page .listing-image {
   width: 100%;
-  height: 100%;
-  display: flex;
-  justify-content: center;
-  align-items: center;
   overflow: hidden;
   border-radius: 12px;
   background: #000;
+  flex-shrink: 0;
 }
 
 .home-page .listing-image img {
@@ -397,6 +388,7 @@ h6 {
 .shelf-card {
   flex: 0 0 auto;
   width: 280px;
+  overflow: hidden;
 }
 
 .shelf-card .listing-image img {
@@ -593,6 +585,7 @@ h6 {
 .banner-card{
   flex: 0 0 auto;
   width: 320px;
+  overflow: hidden;
 }
 
 /* tighten the card inside banner without touching your grid */

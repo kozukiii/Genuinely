@@ -77,7 +77,7 @@ export default function ListingCard({ data }: { data: Listing }) {
             <div className="listing-price-row">
               <p className="listing-price">{money}</p>
               {data.shippingPrice != null && (
-                <span className="listing-shipping">
+                <span className={`listing-shipping${data.shippingPrice === 0 ? " listing-shipping--free" : ""}`}>
                   {data.shippingPrice === 0
                     ? "Free shipping"
                     : `+ ${new Intl.NumberFormat(undefined, { style: "currency", currency: data.currency ?? "USD", maximumFractionDigits: 0 }).format(data.shippingPrice)} shipping`}

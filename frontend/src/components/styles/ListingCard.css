@@ -24,7 +24,7 @@
 /* Card surface */
 .listing-card {
   position: relative;
-
+  box-sizing: border-box;
   background:
     radial-gradient(
       520px 280px at 18% 12%,
@@ -43,6 +43,7 @@
 
   padding: 1rem;
   width: 100%;
+  height: 100%;
 
   display: flex;
   flex-direction: column;
@@ -58,6 +59,13 @@
     border-color 180ms ease,
     box-shadow 180ms ease,
     filter 180ms ease;
+}
+
+.listing-card-wrapper {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  display: flex;
 }
 
 /* subtle inner sheen */
@@ -190,9 +198,15 @@
 
 /* Seller feedback (space so ring never collides) */
 .listing-feedback {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
   color: rgba(251, 191, 36, 0.92);
   font-size: 0.85rem;
+  line-height: 1.35;
   margin-top: 0.55rem;
+  min-height: calc(1.35em * 2);
 }
 
 .listing-price-row {

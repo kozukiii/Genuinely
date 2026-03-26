@@ -5,6 +5,7 @@ import ListingCard from "../components/ListingCard";
 import type { Listing } from "../types/Listing";
 import { getSavedListings } from "../utils/savedListings";
 import { getRecentlyViewed } from "../utils/recentlyViewed";
+import { setEbayNotice } from "../utils/ebayNotice";
 
 const API_BASE = "";
 
@@ -96,6 +97,37 @@ async function fetchEbay(query: string, limit: number) {
   return data;
 }
 
+async function fetchMarketplace(query: string, limit: number) {
+  const url =
+    `${API_BASE}/api/search?query=${encodeURIComponent(query)}` +
+    `&limit=${limit}&sources=marketplace&analyze=0`;
+
+  const res = await fetch(url);
+  const text = await res.text();
+
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status} ${res.statusText} | body: ${text.slice(0, 200)}`);
+  }
+
+  const data = JSON.parse(text) as Listing[];
+  if (!Array.isArray(data)) throw new Error("Response was not an array");
+  return data;
+}
+
+async function fetchHomepageListings(query: string, limit: number) {
+  try {
+    const ebayItems = await fetchEbay(query, limit);
+    if (ebayItems.length > 0) {
+      return { items: ebayItems, usedMarketplaceFallback: false };
+    }
+  } catch {
+    // eBay can fail independently, so the homepage should gracefully fall back.
+  }
+
+  const marketplaceItems = await fetchMarketplace(query, limit);
+  return { items: marketplaceItems, usedMarketplaceFallback: true };
+}
+
 function HorizontalShelf({ items }: { items: Listing[] }) {
   return (
     <div className="shelf-scroll">
@@ -124,13 +156,15 @@ export default function HomePage() {
   const [loadingGrid, setLoadingGrid] = useState(false);
   const [loadingYouMayLike, setLoadingYouMayLike] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [bannerUsingFallback, setBannerUsingFallback] = useState(false);
+  const [gridUsingFallback, setGridUsingFallback] = useState(false);
+  const [youMayLikeUsingFallback, setYouMayLikeUsingFallback] = useState(false);
 
   const bannerLoopItems = useMemo(() => {
     if (banner.items.length === 0) return [];
     return [...banner.items, ...banner.items];
   }, [banner.items]);
 
-  // Load local data (no fetch)
   useEffect(() => {
     setSavedItems(getSavedListings());
     setRecentItems(getRecentlyViewed());
@@ -142,7 +176,10 @@ export default function HomePage() {
     return () => window.removeEventListener("saved:listings:changed", onChange);
   }, []);
 
-  // "You May Like" — keyword from saved listings
+  useEffect(() => {
+    setEbayNotice(bannerUsingFallback || gridUsingFallback || youMayLikeUsingFallback);
+  }, [bannerUsingFallback, gridUsingFallback, youMayLikeUsingFallback]);
+
   useEffect(() => {
     const saved = getSavedListings();
     const keyword = extractKeyword(saved);
@@ -151,8 +188,9 @@ export default function HomePage() {
     setLoadingYouMayLike(true);
     const savedIds = new Set(saved.map((l) => l.id));
 
-    fetchEbay(keyword, 10)
-      .then((items) => {
+    fetchHomepageListings(keyword, 10)
+      .then(({ items, usedMarketplaceFallback }) => {
+        setYouMayLikeUsingFallback(usedMarketplaceFallback);
         const filtered = items.filter((l) => !savedIds.has(l.id));
         setYouMayLikeItems(filtered.slice(0, 8));
         setYouMayLikeLabel(keyword);
@@ -167,7 +205,8 @@ export default function HomePage() {
     setError(null);
 
     try {
-      const items = await fetchEbay(topic, 10);
+      const { items, usedMarketplaceFallback } = await fetchHomepageListings(topic, 10);
+      setBannerUsingFallback(usedMarketplaceFallback);
       setBanner({ topic, items });
     } catch (err) {
       const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
@@ -183,11 +222,12 @@ export default function HomePage() {
     setError(null);
 
     const topics = shuffle(GRID_TOPICS).slice(0, 3);
-    setGridLabel(`${topics.join(" · ")}`);
+    setGridLabel(topics.join(" / "));
 
     try {
-      const chunks = await Promise.all(topics.map((t) => fetchEbay(t, 8)));
-      const mixed = shuffle(chunks.flat()).slice(0, 12);
+      const chunks = await Promise.all(topics.map((t) => fetchHomepageListings(t, 8)));
+      setGridUsingFallback(chunks.some((chunk) => chunk.usedMarketplaceFallback));
+      const mixed = shuffle(chunks.flatMap((chunk) => chunk.items)).slice(0, 12);
       setGridItems(mixed);
     } catch (err) {
       const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
@@ -212,7 +252,6 @@ export default function HomePage() {
       <h1 className="logo-title">SmartDeals</h1>
       <p className="tagline">Your AI-powered secondhand marketplace guide.</p>
 
-      {/* Category Quick-Links */}
       <div className="category-pills">
         {CATEGORIES.map((cat) => (
           <button
@@ -227,7 +266,6 @@ export default function HomePage() {
 
       {error && <p className="mt-4 text-red-400">{error}</p>}
 
-      {/* Saved Listings Shelf */}
       <section className="home-section">
         <div className="section-head">
           <h2>
@@ -247,17 +285,16 @@ export default function HomePage() {
         )}
       </section>
 
-      {/* You May Like */}
       {(loadingYouMayLike || youMayLikeItems.length > 0) && (
         <section className="home-section">
           <div className="section-head">
             <h2>You May Like</h2>
             {youMayLikeLabel && (
-              <p className="section-sub">Based on your saves · "{youMayLikeLabel}"</p>
+              <p className="section-sub">Based on your saves for "{youMayLikeLabel}"</p>
             )}
           </div>
 
-          {loadingYouMayLike && <p className="section-empty">Loading…</p>}
+          {loadingYouMayLike && <p className="section-empty">Loading...</p>}
 
           {!loadingYouMayLike && youMayLikeItems.length > 0 && (
             <div className="banner-viewport" aria-label="You may like carousel">
@@ -273,7 +310,6 @@ export default function HomePage() {
         </section>
       )}
 
-      {/* Recently Viewed */}
       {recentItems.length > 0 && (
         <section className="home-section">
           <div className="section-head">
@@ -283,13 +319,12 @@ export default function HomePage() {
         </section>
       )}
 
-      {/* Banner */}
       <section className="hero-banner">
         <div className="section-head">
           <h2>{banner.topic ? `Save on ${banner.topic}` : "Featured Picks"}</h2>
         </div>
 
-        {loadingBanner && <p className="section-empty">Loading…</p>}
+        {loadingBanner && <p className="section-empty">Loading...</p>}
 
         {!loadingBanner && banner.items.length === 0 && (
           <p className="section-empty">No banner items found.</p>
@@ -308,14 +343,13 @@ export default function HomePage() {
         )}
       </section>
 
-      {/* Featured Deals Grid */}
       <section className="featured-grid-section">
         <div className="section-head">
           <h2>Featured Deals</h2>
           <p className="section-sub">{gridLabel || "Random mixed products."}</p>
         </div>
 
-        {loadingGrid && <p className="section-empty">Loading…</p>}
+        {loadingGrid && <p className="section-empty">Loading...</p>}
 
         {!loadingGrid && gridItems.length === 0 && (
           <p className="section-empty">No grid items found.</p>

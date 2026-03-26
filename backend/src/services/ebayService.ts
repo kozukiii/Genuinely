@@ -5,6 +5,7 @@ import type { Listing } from "../types/listing";
 
 const EBAY_SEARCH = "https://api.ebay.com/buy/browse/v1/item_summary/search";
 const EBAY_ITEM = "https://api.ebay.com/buy/browse/v1/item";
+const EBAY_RATE_LIMITS = "https://api.ebay.com/developer/analytics/v1_beta/rate_limit/";
 
 /**
  * We keep Listing as the public contract, but we preserve extra metadata
@@ -290,13 +291,28 @@ export async function searchEbayNormalized(
   query: string,
   limit: number = 1
 ): Promise<Listing[]> {
-  try {
-    const items = await getEbayItemsWithDetails(query, limit);
-    return items
-      .map(mapEbayInternalToListing)
-      .filter((l) => l.id && l.title && l.url);
-  } catch (err) {
-    console.error("searchEbayNormalized failed", err);
-    return [];
+  const items = await getEbayItemsWithDetails(query, limit);
+  return items
+    .map(mapEbayInternalToListing)
+    .filter((l) => l.id && l.title && l.url);
+}
+
+export async function getEbayRateLimits() {
+  const token = await getEbayToken();
+
+  const res = await fetch(EBAY_RATE_LIMITS, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(
+      `eBay getRateLimits failed: HTTP ${res.status} ${res.statusText} | ${body.slice(0, 500)}`
+    );
   }
+
+  return res.json();
 }

@@ -52,6 +52,17 @@ export async function searchAll(req: Request, res: Response) {
 
   const location = String(req.query.location ?? "Eau Claire").trim();
 
+  let ebayUnavailable = false;
+  const runEbaySearch = async (target: number) => {
+    try {
+      return await searchEbayNormalized(query, target);
+    } catch (err) {
+      ebayUnavailable = true;
+      console.error("searchEbayNormalized failed", err);
+      return [] as Listing[];
+    }
+  };
+
   const [marketplace, ebay] = await Promise.all([
     useMarketplace
       ? searchMarketplaceNormalized({
@@ -60,9 +71,7 @@ export async function searchAll(req: Request, res: Response) {
           limit: marketplaceTarget || 10,
         }).catch(() => [])
       : Promise.resolve([]),
-    useEbay
-      ? searchEbayNormalized(query, ebayTarget).catch(() => [])
-      : Promise.resolve([]),
+    useEbay ? runEbaySearch(ebayTarget) : Promise.resolve([]),
   ]);
 
   // Enrich marketplace listings with full image galleries in parallel
@@ -77,13 +86,17 @@ export async function searchAll(req: Request, res: Response) {
 
   let merged = dedupe([...ebay, ...enrichedMarketplace]);
 
-  if (merged.length < limit && useEbay) {
+  if (merged.length < limit && useEbay && !ebayUnavailable) {
     const need = limit - merged.length;
-    const extra = await searchEbayNormalized(query, ebayTarget + need).catch(() => []);
+    const extra = await runEbaySearch(ebayTarget + need);
     merged = dedupe([...merged, ...extra]);
   }
 
   const finalItems = merged.slice(0, limit);
+  res.setHeader(
+    "X-Ebay-Search-Status",
+    useEbay ? (ebayUnavailable ? "unavailable" : "ok") : "not-requested"
+  );
 
   if (analyze) {
     const analyzed = await scoreListings(finalItems);

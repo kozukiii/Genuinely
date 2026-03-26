@@ -5,6 +5,7 @@ import ListingCard from "../components/ListingCard";
 import FiltersSidebar, { type FilterState } from "../components/FiltersSidebar";
 import type { Listing } from "../types/Listing";
 import "./styles/HomePage.css";
+import { setEbayNotice } from "../utils/ebayNotice";
 
 const PAGE_SIZE = 12;
 const PRELOAD_SIZE = PAGE_SIZE * 2; // always fetch 2 pages up-front
@@ -29,7 +30,7 @@ async function fetchFromApi(
   targetTotal: number,
   sources: { ebay: boolean; marketplace: boolean },
   analyze: boolean
-): Promise<Listing[]> {
+): Promise<{ items: Listing[]; ebayUnavailable: boolean }> {
   const activeSources =
     (["ebay", "marketplace"] as const).filter((s) => sources[s]).join(",") ||
     "ebay,marketplace";
@@ -45,7 +46,10 @@ async function fetchFromApi(
 
   const data = JSON.parse(text);
   if (!Array.isArray(data)) throw new Error("Response was not an array");
-  return data as Listing[];
+  return {
+    items: data as Listing[],
+    ebayUnavailable: res.headers.get("X-Ebay-Search-Status") === "unavailable",
+  };
 }
 
 function applyFilters(listings: Listing[], filters: FilterState): Listing[] {
@@ -133,16 +137,18 @@ export default function SearchPage() {
 
       const fetchSize = limitOverride ?? PRELOAD_SIZE;
       try {
-        const data = await fetchFromApi(q, fetchSize, filters.sources, !demoMode);
-        setListings(data);
+        const { items, ebayUnavailable } = await fetchFromApi(q, fetchSize, filters.sources, !demoMode);
+        setEbayNotice(filters.sources.ebay && ebayUnavailable);
+        setListings(items);
         setResultKey((k) => k + 1);
-        setHasMore(data.length >= fetchSize);
+        setHasMore(items.length >= fetchSize);
 
         sessionStorage.setItem(SEARCH_QUERY_KEY, q);
-        sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(data));
+        sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(items));
         sessionStorage.setItem(SEARCH_TIMESTAMP_KEY, Date.now().toString());
         sessionStorage.setItem(SEARCH_PAGE_KEY, "1");
       } catch (err) {
+        setEbayNotice(filters.sources.ebay);
         setError(`Failed to load listings: ${err instanceof Error ? err.message : String(err)}`);
       } finally {
         setLoading(false);
@@ -161,17 +167,19 @@ export default function SearchPage() {
     if (filtered.length < needed && hasMore) {
       setLoading(true);
       try {
-        const data = await fetchFromApi(
+        const { items, ebayUnavailable } = await fetchFromApi(
           queryRef.current,
           needed + PAGE_SIZE, // fetch a page ahead so next-next doesn't stall
           sourcesRef.current,
           !demoMode
         );
-        setListings(data);
-        setHasMore(data.length >= needed + PAGE_SIZE);
+        setEbayNotice(sourcesRef.current.ebay && ebayUnavailable);
+        setListings(items);
+        setHasMore(items.length >= needed + PAGE_SIZE);
 
-        sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(data));
+        sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(items));
       } catch (err) {
+        setEbayNotice(sourcesRef.current.ebay);
         setError(`Failed to load more listings: ${err instanceof Error ? err.message : String(err)}`);
         return;
       } finally {
@@ -203,15 +211,17 @@ export default function SearchPage() {
     setPage(1);
 
     fetchFromApi(q, PRELOAD_SIZE, filters.sources, !demoMode)
-      .then((data) => {
-        setListings(data);
-        setHasMore(data.length >= PRELOAD_SIZE);
-        sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(data));
+      .then(({ items, ebayUnavailable }) => {
+        setEbayNotice(filters.sources.ebay && ebayUnavailable);
+        setListings(items);
+        setHasMore(items.length >= PRELOAD_SIZE);
+        sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(items));
         sessionStorage.setItem(SEARCH_PAGE_KEY, "1");
       })
-      .catch((err) =>
-        setError(`Failed to load listings: ${err instanceof Error ? err.message : String(err)}`)
-      )
+      .catch((err) => {
+        setEbayNotice(filters.sources.ebay);
+        setError(`Failed to load listings: ${err instanceof Error ? err.message : String(err)}`);
+      })
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters.sources]);
@@ -235,10 +245,11 @@ export default function SearchPage() {
 
     prefetchingRef.current = true;
     fetchFromApi(currentQuery, nextNeeded, filters.sources, !demoMode)
-      .then((data) => {
-        setListings(data);
-        setHasMore(data.length >= nextNeeded);
-        sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(data));
+      .then(({ items, ebayUnavailable }) => {
+        setEbayNotice(filters.sources.ebay && ebayUnavailable);
+        setListings(items);
+        setHasMore(items.length >= nextNeeded);
+        sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(items));
       })
       .catch(() => {})
       .finally(() => { prefetchingRef.current = false; });
@@ -288,9 +299,7 @@ export default function SearchPage() {
       {error && <p className="mt-4 text-red-400">{error}</p>}
 
       <div className="search-layout">
-        {listings.length > 0 && (
-          <FiltersSidebar filters={filters} onChange={setFilters} />
-        )}
+        <FiltersSidebar filters={filters} onChange={setFilters} />
 
         <div className="search-main">
           <div className="results-wrapper">
@@ -344,7 +353,7 @@ export default function SearchPage() {
       </div>
 
       {!loading && !error && listings.length === 0 && (
-        <p className="mt-8 text-gray-400">Enter a search above to begin.</p>
+        <p className="mt-8 text-gray-400">Enter a search above to begin. Filters are ready whenever you are.</p>
       )}
     </div>
   );

@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import {
-  
-  getEbayItemsWithDetails
+  getEbayItemsWithDetails,
+  getEbayRateLimits,
 } from "../services/ebayService";
 import {
   
@@ -37,5 +37,16 @@ export async function overviewSearch(req: Request, res: Response) {
   } catch (err) {
     console.error("AI Route Error:", err);
     res.status(500).json({ error: "AI analysis failed" });
+  }
+}
+
+export async function rateLimits(req: Request, res: Response) {
+  try {
+    const data = await getEbayRateLimits();
+    res.json(data);
+  } catch (err) {
+    console.error("eBay rate limits error:", err);
+    const message = err instanceof Error ? err.message : "Failed to fetch eBay rate limits";
+    res.status(500).json({ error: message });
   }
 }

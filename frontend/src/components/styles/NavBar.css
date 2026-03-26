@@ -31,6 +31,18 @@
     );
 }
 
+.nav-notice {
+  max-width: 880px;
+  margin: 0.15rem 1rem 0;
+  padding: 0.8rem 1rem;
+  border: 2px solid rgba(255, 159, 67, 0.85);
+  border-radius: 16px;
+  background: rgba(255, 159, 67, 0.08);
+  color: #ffe7c2;
+  text-align: center;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.24);
+}
+
 /* Logo: Playfair, classy, slightly airy */
 .nav-logo {
   font-family: "Playfair Display", serif;

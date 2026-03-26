@@ -195,6 +195,17 @@
   margin-top: 0.55rem;
 }
 
+.listing-price-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.listing-shipping {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
 /* =========================
    Overview
    ========================= */

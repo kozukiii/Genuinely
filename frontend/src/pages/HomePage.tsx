@@ -1,7 +1,10 @@
 import "./styles/HomePage.css";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import ListingCard from "../components/ListingCard";
 import type { Listing } from "../types/Listing";
+import { getSavedListings } from "../utils/savedListings";
+import { getRecentlyViewed } from "../utils/recentlyViewed";
 
 const API_BASE = "";
 
@@ -33,6 +36,21 @@ const GRID_TOPICS = [
   "smartphone",
 ];
 
+const CATEGORIES = [
+  { label: "Trading Cards", query: "trading cards" },
+  { label: "PS5", query: "ps5" },
+  { label: "Xbox", query: "xbox series x" },
+  { label: "Sneakers", query: "sneakers" },
+  { label: "iPhone", query: "iphone" },
+  { label: "MacBook", query: "macbook" },
+  { label: "GPU", query: "graphics card" },
+  { label: "Headphones", query: "headphones" },
+  { label: "Lego", query: "lego" },
+  { label: "Camera", query: "camera" },
+  { label: "Nintendo Switch", query: "nintendo switch" },
+  { label: "Watches", query: "watch" },
+];
+
 function pickRandom<T>(arr: T[]) {
   return arr[Math.floor(Math.random() * arr.length)];
 }
@@ -44,6 +62,21 @@ function shuffle<T>(arr: T[]) {
     [a[i], a[j]] = [a[j], a[i]];
   }
   return a;
+}
+
+function extractKeyword(listings: Listing[]): string | null {
+  if (listings.length === 0) return null;
+  const stopWords = new Set(["the", "a", "an", "and", "or", "for", "of", "in", "with", "lot", "set"]);
+  for (const listing of shuffle(listings)) {
+    const words = listing.title
+      .toLowerCase()
+      .replace(/[^a-z0-9 ]/g, " ")
+      .split(/\s+/)
+      .filter((w) => w.length > 3 && !stopWords.has(w));
+    if (words.length >= 2) return words.slice(0, 2).join(" ");
+    if (words.length === 1) return words[0];
+  }
+  return null;
 }
 
 async function fetchEbay(query: string, limit: number) {
@@ -63,34 +96,83 @@ async function fetchEbay(query: string, limit: number) {
   return data;
 }
 
+function HorizontalShelf({ items }: { items: Listing[] }) {
+  return (
+    <div className="shelf-scroll">
+      {items.map((item, idx) => (
+        <div className="shelf-card" key={`${item.source}:${item.id}:${idx}`}>
+          <ListingCard data={item} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function HomePage() {
-  const [bannerTopic, setBannerTopic] = useState<string>("");
-  const [bannerItems, setBannerItems] = useState<Listing[]>([]);
+  const navigate = useNavigate();
+
+  const [banner, setBanner] = useState<{ topic: string; items: Listing[] }>({ topic: "", items: [] });
   const [gridLabel, setGridLabel] = useState<string>("");
   const [gridItems, setGridItems] = useState<Listing[]>([]);
 
+  const [savedItems, setSavedItems] = useState<Listing[]>([]);
+  const [recentItems, setRecentItems] = useState<Listing[]>([]);
+  const [youMayLikeItems, setYouMayLikeItems] = useState<Listing[]>([]);
+  const [youMayLikeLabel, setYouMayLikeLabel] = useState("");
+
   const [loadingBanner, setLoadingBanner] = useState(false);
   const [loadingGrid, setLoadingGrid] = useState(false);
+  const [loadingYouMayLike, setLoadingYouMayLike] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const bannerLoopItems = useMemo(() => {
-    if (bannerItems.length === 0) return [];
-    return [...bannerItems, ...bannerItems];
-  }, [bannerItems]);
+    if (banner.items.length === 0) return [];
+    return [...banner.items, ...banner.items];
+  }, [banner.items]);
+
+  // Load local data (no fetch)
+  useEffect(() => {
+    setSavedItems(getSavedListings());
+    setRecentItems(getRecentlyViewed());
+
+    const onChange = () => {
+      setSavedItems(getSavedListings());
+    };
+    window.addEventListener("saved:listings:changed", onChange);
+    return () => window.removeEventListener("saved:listings:changed", onChange);
+  }, []);
+
+  // "You May Like" — keyword from saved listings
+  useEffect(() => {
+    const saved = getSavedListings();
+    const keyword = extractKeyword(saved);
+    if (!keyword) return;
+
+    setLoadingYouMayLike(true);
+    const savedIds = new Set(saved.map((l) => l.id));
+
+    fetchEbay(keyword, 10)
+      .then((items) => {
+        const filtered = items.filter((l) => !savedIds.has(l.id));
+        setYouMayLikeItems(filtered.slice(0, 8));
+        setYouMayLikeLabel(keyword);
+      })
+      .catch(() => {})
+      .finally(() => setLoadingYouMayLike(false));
+  }, []);
 
   const loadBanner = useCallback(async () => {
     const topic = pickRandom(BANNER_TOPICS);
-    setBannerTopic(topic);
     setLoadingBanner(true);
     setError(null);
 
     try {
       const items = await fetchEbay(topic, 10);
-      setBannerItems(items);
+      setBanner({ topic, items });
     } catch (err) {
       const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
       setError(`Banner failed: ${msg}`);
-      setBannerItems([]);
+      setBanner({ topic, items: [] });
     } finally {
       setLoadingBanner(false);
     }
@@ -101,7 +183,7 @@ export default function HomePage() {
     setError(null);
 
     const topics = shuffle(GRID_TOPICS).slice(0, 3);
-    setGridLabel(`Mix: ${topics.join(" · ")}`);
+    setGridLabel(`${topics.join(" · ")}`);
 
     try {
       const chunks = await Promise.all(topics.map((t) => fetchEbay(t, 8)));
@@ -116,37 +198,104 @@ export default function HomePage() {
     }
   }, []);
 
-  const loadAll = useCallback(async () => {
-    await Promise.all([loadBanner(), loadGrid()]);
+  useEffect(() => {
+    void Promise.all([loadBanner(), loadGrid()]);
   }, [loadBanner, loadGrid]);
 
-  useEffect(() => {
-    void loadAll();
-  }, [loadAll]);
+  function goToSearch(query: string) {
+    sessionStorage.setItem("search:query", query);
+    navigate("/search");
+  }
 
   return (
     <div className="home-page">
       <h1 className="logo-title">SmartDeals</h1>
       <p className="tagline">Your AI-powered secondhand marketplace guide.</p>
 
-      <div className="home-actions">
-        <span className="home-note">eBay only · analyze=0</span>
+      {/* Category Quick-Links */}
+      <div className="category-pills">
+        {CATEGORIES.map((cat) => (
+          <button
+            key={cat.query}
+            className="category-pill"
+            onClick={() => goToSearch(cat.query)}
+          >
+            {cat.label}
+          </button>
+        ))}
       </div>
 
       {error && <p className="mt-4 text-red-400">{error}</p>}
 
-      <section className="hero-banner">
+      {/* Saved Listings Shelf */}
+      <section className="home-section">
         <div className="section-head">
-          <h2>{bannerTopic ? `Save on ${bannerTopic}` : "Featured Picks"}</h2>
+          <h2>
+            Your Saved Items
+            {savedItems.length > 0 && (
+              <span className="section-count">{savedItems.length}</span>
+            )}
+          </h2>
         </div>
 
-        {loadingBanner && <p className="mt-4">Loading banner…</p>}
+        {savedItems.length === 0 ? (
+          <p className="section-empty">
+            Save listings while browsing and they'll appear here.
+          </p>
+        ) : (
+          <HorizontalShelf items={savedItems} />
+        )}
+      </section>
 
-        {!loadingBanner && bannerItems.length === 0 && (
+      {/* You May Like */}
+      {(loadingYouMayLike || youMayLikeItems.length > 0) && (
+        <section className="home-section">
+          <div className="section-head">
+            <h2>You May Like</h2>
+            {youMayLikeLabel && (
+              <p className="section-sub">Based on your saves · "{youMayLikeLabel}"</p>
+            )}
+          </div>
+
+          {loadingYouMayLike && <p className="section-empty">Loading…</p>}
+
+          {!loadingYouMayLike && youMayLikeItems.length > 0 && (
+            <div className="banner-viewport" aria-label="You may like carousel">
+              <div className="banner-track">
+                {[...youMayLikeItems, ...youMayLikeItems].map((item, idx) => (
+                  <div className="banner-card" key={`${item.source}:${item.id}:${idx}`}>
+                    <ListingCard data={item} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* Recently Viewed */}
+      {recentItems.length > 0 && (
+        <section className="home-section">
+          <div className="section-head">
+            <h2>Recently Viewed</h2>
+          </div>
+          <HorizontalShelf items={recentItems} />
+        </section>
+      )}
+
+      {/* Banner */}
+      <section className="hero-banner">
+        <div className="section-head">
+          <h2>{banner.topic ? `Save on ${banner.topic}` : "Featured Picks"}</h2>
+        </div>
+
+        {loadingBanner && <p className="section-empty">Loading…</p>}
+
+        {!loadingBanner && banner.items.length === 0 && (
           <p className="section-empty">No banner items found.</p>
         )}
 
-        {bannerItems.length > 0 && (
+        {banner.items.length > 0 && (
           <div className="banner-viewport" aria-label="Featured banner carousel">
             <div className="banner-track">
               {bannerLoopItems.map((item, idx) => (
@@ -159,13 +308,14 @@ export default function HomePage() {
         )}
       </section>
 
+      {/* Featured Deals Grid */}
       <section className="featured-grid-section">
         <div className="section-head">
           <h2>Featured Deals</h2>
           <p className="section-sub">{gridLabel || "Random mixed products."}</p>
         </div>
 
-        {loadingGrid && <p className="mt-4">Loading grid…</p>}
+        {loadingGrid && <p className="section-empty">Loading…</p>}
 
         {!loadingGrid && gridItems.length === 0 && (
           <p className="section-empty">No grid items found.</p>

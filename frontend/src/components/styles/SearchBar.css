@@ -36,6 +36,32 @@
   color: rgba(209, 213, 219, 0.5);
 }
 
+.search-bar-limit {
+  width: 72px;
+  padding: 0.6rem 0.5rem;
+  border: none;
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+  background: transparent;
+  color: rgba(209, 213, 219, 0.7);
+  font-size: 0.85rem;
+  outline: none;
+  flex-shrink: 0;
+}
+
+.search-bar-limit::placeholder {
+  color: rgba(209, 213, 219, 0.35);
+}
+
+.search-bar-limit::-webkit-outer-spin-button,
+.search-bar-limit::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.search-bar-limit[type="number"] {
+  -moz-appearance: textfield;
+}
+
 .search-bar button {
   padding: 0.6rem 1.1rem;
   border: none;

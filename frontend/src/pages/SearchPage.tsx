@@ -88,6 +88,8 @@ export default function SearchPage() {
   const [error, setError] = useState<string | null>(null);
   const [initialQuery, setInitialQuery] = useState("");
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
+  const [sweeping, setSweeping] = useState(false);
+  const [resultKey, setResultKey] = useState(0);
 
   // Keep a stable ref so effects can read the latest query/sources without re-running
   const queryRef = useRef(currentQuery);
@@ -96,6 +98,8 @@ export default function SearchPage() {
   sourcesRef.current = filters.sources;
   const prefetchingRef = useRef(false);
   const scrollIntentRef = useRef<"top" | "bottom" | null>(null);
+  const listingsRef = useRef(listings);
+  listingsRef.current = listings;
 
   const filtered = useMemo(
     () => applyFilters(listings, filters),
@@ -113,19 +117,26 @@ export default function SearchPage() {
 
   // ── Initial search (new query) ──────────────────────────────────────────
   const handleSearch = useCallback(
-    async (query: string) => {
+    async (query: string, limitOverride?: number) => {
       const q = query.trim();
       if (!q) return;
+
+      if (listingsRef.current.length > 0) {
+        setSweeping(true);
+        setTimeout(() => setSweeping(false), 300);
+      }
 
       setLoading(true);
       setError(null);
       setCurrentQuery(q);
       setPage(1);
 
+      const fetchSize = limitOverride ?? PRELOAD_SIZE;
       try {
-        const data = await fetchFromApi(q, PRELOAD_SIZE, filters.sources, !demoMode);
+        const data = await fetchFromApi(q, fetchSize, filters.sources, !demoMode);
         setListings(data);
-        setHasMore(data.length >= PRELOAD_SIZE);
+        setResultKey((k) => k + 1);
+        setHasMore(data.length >= fetchSize);
 
         sessionStorage.setItem(SEARCH_QUERY_KEY, q);
         sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(data));
@@ -274,7 +285,6 @@ export default function SearchPage() {
         )}
       </div>
 
-      {loading && <p className="mt-4">Loading results...</p>}
       {error && <p className="mt-4 text-red-400">{error}</p>}
 
       <div className="search-layout">
@@ -283,12 +293,27 @@ export default function SearchPage() {
         )}
 
         <div className="search-main">
-          <div className="results-container">
-            {pageItems.map((item) => (
-              <ListingCard key={`${item.source}:${item.id}`} data={item} />
-            ))}
-            {!loading && listings.length > 0 && pageItems.length === 0 && (
-              <p className="empty-message">No listings match the current filters.</p>
+          <div className="results-wrapper">
+            {/* Spinner — shown only after sweep completes, while still loading */}
+            {loading && !sweeping && (
+              <div className="results-full-spinner">
+                <div className="results-spinner" />
+              </div>
+            )}
+
+            {/* Cards — hidden after sweep, shown while sweeping out or when done */}
+            {(!loading || sweeping) && (
+              <div
+                key={resultKey}
+                className={`results-container${sweeping ? " results-sweep-out" : ""}${!loading && resultKey > 0 ? " results-sweep-in" : ""}`}
+              >
+                {pageItems.map((item) => (
+                  <ListingCard key={`${item.source}:${item.id}`} data={item} />
+                ))}
+                {!loading && listings.length > 0 && pageItems.length === 0 && (
+                  <p className="empty-message">No listings match the current filters.</p>
+                )}
+              </div>
             )}
           </div>
 

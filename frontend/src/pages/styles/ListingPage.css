@@ -241,6 +241,12 @@
   font-size: 0.85rem;
 }
 
+.page-shipping {
+  font-size: 0.85rem;
+  color: var(--muted);
+  align-self: baseline;
+}
+
 .page-seller {
   font-size: 0.95rem;
   color: var(--muted);
@@ -292,6 +298,51 @@
   margin-bottom: 0.4rem;
   text-align: center;
   color: rgba(229, 229, 229, 0.85);
+}
+
+/* Analyze button row */
+.analyze-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+
+.analyze-btn {
+  padding: 9px 20px;
+  border-radius: 12px;
+  border: 1px solid rgba(57, 255, 157, 0.4);
+  background: rgba(57, 255, 157, 0.07);
+  color: rgba(57, 255, 157, 0.95);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 150ms ease, border-color 150ms ease, transform 150ms ease;
+}
+
+.analyze-btn:hover:not(:disabled) {
+  background: rgba(57, 255, 157, 0.14);
+  border-color: rgba(57, 255, 157, 0.65);
+  transform: translateY(-1px);
+}
+
+.analyze-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.analyze-subtext {
+  font-size: 0.78rem;
+  color: rgba(209, 213, 219, 0.55);
+  margin: 0;
+}
+
+.analyze-error {
+  font-size: 0.8rem;
+  color: rgba(255, 120, 120, 0.85);
+  margin: 0;
 }
 
 /* CTA */
@@ -530,8 +581,8 @@
 /* Price + Heart inline row */
 .price-heart-row {
   display: flex;
-  align-items: center;
-  gap: 12px;
+  align-items: baseline;
+  gap: 10px;
 }
 
 /* Inline heart button (glass) */

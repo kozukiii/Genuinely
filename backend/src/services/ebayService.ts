@@ -168,9 +168,32 @@ function mapEbayInternalToListing(item: any): EbayListingRich {
     // --- common extras ---
     seller: item.seller ?? item.sellerUsername ?? undefined,
     feedback: item.feedback ?? item.sellerFeedback ?? undefined,
-    shippingPrice: toNumberPrice(
-      item.shippingPrice ?? item.shippingCost ?? item.shipping?.shippingCost
-    ),
+    shippingPrice: (() => {
+      // Explicit fields first
+      const explicit = item.shippingPrice ?? item.shippingCost ?? item.shipping?.shippingCost;
+      if (explicit != null) return toNumberPrice(explicit);
+
+      // eBay Browse API stores shipping as shippingOptions[].shippingCost
+      const opts = item.shippingOptions ?? item.shippingOption;
+      if (Array.isArray(opts) && opts.length > 0) {
+        // FREE shipping eBay explicitly marks with type "FREE" or a zero-value cost
+        const isFree = opts.some(
+          (o: any) =>
+            String(o.shippingCostType ?? o.type ?? "").toUpperCase() === "FREE" ||
+            toNumberPrice(o.shippingCost) === 0
+        );
+        if (isFree) return 0;
+
+        // Otherwise take the lowest shipping cost offered
+        const costs = opts
+          .map((o: any) => toNumberPrice(o.shippingCost))
+          .filter((n: number) => n > 0);
+        if (costs.length > 0) return Math.min(...costs);
+      }
+
+      // No shipping info at all — leave undefined so UI hides the field
+      return undefined;
+    })(),
     location: itemLocation, // keep your existing field populated
     score: item.score ?? undefined,
 

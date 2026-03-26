@@ -321,6 +321,93 @@ h6 {
   -moz-appearance: textfield;
 }
 /* =========================
+   Category Quick-Links
+   ========================= */
+.category-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 1.2rem;
+}
+
+.category-pill {
+  padding: 7px 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(225, 235, 255, 0.88);
+  font-size: 0.84rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 150ms ease, background 150ms ease, transform 150ms ease;
+  white-space: nowrap;
+}
+
+.category-pill:hover {
+  border-color: rgba(57, 255, 157, 0.45);
+  background: rgba(57, 255, 157, 0.07);
+  transform: translateY(-1px);
+}
+
+/* =========================
+   Generic home section
+   ========================= */
+.home-section {
+  margin-top: 1.6rem;
+  padding: 1.25rem;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+}
+
+/* Section count badge */
+.section-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: rgba(57, 255, 157, 0.15);
+  border: 1px solid rgba(57, 255, 157, 0.3);
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: rgba(57, 255, 157, 0.9);
+  vertical-align: middle;
+}
+
+/* =========================
+   Horizontal shelf scroll
+   ========================= */
+.shelf-scroll {
+  display: flex;
+  gap: 16px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+  scrollbar-width: thin;
+  scrollbar-color: #475569 transparent;
+}
+
+.shelf-scroll::-webkit-scrollbar {
+  height: 5px;
+}
+
+.shelf-scroll::-webkit-scrollbar-thumb {
+  background: #475569;
+  border-radius: 4px;
+}
+
+.shelf-card {
+  flex: 0 0 auto;
+  width: 280px;
+}
+
+.shelf-card .listing-image img {
+  height: 11rem;
+}
+
+/* =========================
    Featured Deals section
    ========================= */
 
@@ -556,7 +643,8 @@ h6 {
 
 /* Center sections and their headers */
 .home-page .hero-banner,
-.home-page .featured-grid-section{
+.home-page .featured-grid-section,
+.home-page .home-section {
   text-align: center;
 }
 
@@ -804,6 +892,51 @@ h6 {
 }
 .filter-input[type="number"] {
   -moz-appearance: textfield;
+}
+
+/* =========================
+   Results loading overlay
+   ========================= */
+.results-wrapper {
+  position: relative;
+}
+
+.results-sweep-out {
+  animation: sweepRight 280ms ease-in forwards;
+  pointer-events: none;
+}
+
+.results-sweep-in {
+  animation: sweepInLeft 280ms ease-out forwards;
+}
+
+@keyframes sweepRight {
+  from { transform: translateX(0);    opacity: 1; }
+  to   { transform: translateX(110%); opacity: 0; }
+}
+
+@keyframes sweepInLeft {
+  from { transform: translateX(-40px); opacity: 0; }
+  to   { transform: translateX(0);     opacity: 1; }
+}
+
+.results-full-spinner {
+  display: flex;
+  justify-content: center;
+  padding: 80px 0;
+}
+
+.results-spinner {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.08);
+  border-top-color: rgba(57, 255, 157, 0.85);
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 /* search-main wraps results grid + page nav */

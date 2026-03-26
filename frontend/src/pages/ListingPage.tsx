@@ -1,10 +1,11 @@
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import type { Listing } from "../types/Listing";
 import RatingRing from "../components/RatingRing";
 import "./styles/ListingPage.css";
 import { useEffect, useMemo, useState } from "react";
 import { getHighResImage } from "../utils/imageHelpers";
-import { isSaved, toggleSaved } from "../utils/savedListings";
+import { isSaved, toggleSaved, updateSavedListing } from "../utils/savedListings";
+import { recordView, updateRecentlyViewed } from "../utils/recentlyViewed";
 
 function sourceLabel(source?: Listing["source"]) {
   if (source === "marketplace") return "Marketplace";
@@ -13,6 +14,7 @@ function sourceLabel(source?: Listing["source"]) {
 
 export default function ListingPage() {
   const { state } = useLocation();
+  const navigate = useNavigate();
   const listing = (state as any)?.listing as Listing | undefined;
 
   const [showOverview, setShowOverview] = useState(false);
@@ -23,10 +25,16 @@ export default function ListingPage() {
   const [enrichedImages, setEnrichedImages] = useState<string[] | null>(null);
   const [enrichedDescription, setEnrichedDescription] = useState<string | null>(null);
   const [enrichLoading, setEnrichLoading] = useState(false);
+  const [analysisResult, setAnalysisResult] = useState<Partial<Listing> & { analyzedAt?: string } | null>(
+    listing?.aiScore != null ? { ...listing, analyzedAt: undefined } : null
+  );
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analyzeError, setAnalyzeError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!listing?.id) return;
 
+    recordView(listing);
     setSaved(isSaved(listing.id));
 
     const onChange = () => setSaved(isSaved(listing.id));
@@ -48,6 +56,35 @@ export default function ListingPage() {
       .catch((err) => console.warn("Marketplace enrichment failed:", err))
       .finally(() => setEnrichLoading(false));
   }, [listing?.id, listing?.source]);
+
+  async function runAnalysis() {
+    if (!listing) return;
+    setAnalyzing(true);
+    setAnalyzeError(null);
+    try {
+      const res = await fetch("/api/search/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(listing),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const enriched: Listing = { ...listing, ...data, analyzedAt: undefined };
+      const withTs = { ...enriched, analyzedAt: data.analyzedAt ?? new Date().toISOString() };
+      setAnalysisResult(withTs);
+
+      // Persist enriched listing back to stores so cards reflect the score
+      updateSavedListing(enriched);
+      updateRecentlyViewed(enriched);
+
+      // Replace router state so back-navigation restores the scored listing
+      navigate(".", { replace: true, state: { listing: enriched } });
+    } catch (err) {
+      setAnalyzeError(err instanceof Error ? err.message : "Analysis failed");
+    } finally {
+      setAnalyzing(false);
+    }
+  }
 
   if (!listing) {
     return (
@@ -82,12 +119,15 @@ export default function ListingPage() {
     }
   }, [listing.price, listing.currency]);
 
+  // Merge live analysis result over listing when available
+  const ai = analysisResult ?? listing;
+
   const scores = {
-    priceFairness: listing.aiScores?.priceFairness,
-    sellerTrust: listing.aiScores?.sellerTrust,
-    conditionHonesty: listing.aiScores?.conditionHonesty,
-    shippingFairness: listing.aiScores?.shippingFairness,
-    descriptionQuality: listing.aiScores?.descriptionQuality,
+    priceFairness: ai.aiScores?.priceFairness,
+    sellerTrust: ai.aiScores?.sellerTrust,
+    conditionHonesty: ai.aiScores?.conditionHonesty,
+    shippingFairness: ai.aiScores?.shippingFairness,
+    descriptionQuality: ai.aiScores?.descriptionQuality,
   };
 
   const readableLabels: Record<string, string> = {
@@ -179,6 +219,14 @@ export default function ListingPage() {
               <div className="price-heart-row">
                 <p className="page-price">{money}</p>
 
+                {listing.shippingPrice != null && (
+                  <span className="page-shipping">
+                    {listing.shippingPrice === 0
+                      ? "Free shipping"
+                      : `+ ${new Intl.NumberFormat(undefined, { style: "currency", currency: listing.currency ?? "USD", maximumFractionDigits: 0 }).format(listing.shippingPrice)} shipping`}
+                  </span>
+                )}
+
                 <button
                   type="button"
                   className="page-heart-inline"
@@ -202,10 +250,10 @@ export default function ListingPage() {
               {sellerLine && <p className="page-seller">{sellerLine}</p>}
             </div>
 
-            {listing.aiScore != null && (
+            {ai.aiScore != null && (
               <div className="page-rating-ring">
-                <RatingRing value={listing.aiScore} size={80} />
-                <p className="page-rating-label">{listing.aiScore}/100</p>
+                <RatingRing value={ai.aiScore} size={80} />
+                <p className="page-rating-label">{ai.aiScore}/100</p>
               </div>
             )}
           </div>
@@ -213,6 +261,34 @@ export default function ListingPage() {
           {(enrichedDescription || listing.description) && (
             <p className="page-description">{enrichedDescription || listing.description}</p>
           )}
+
+          <div className="analyze-row">
+            <button
+              className="analyze-btn"
+              onClick={runAnalysis}
+              disabled={analyzing}
+            >
+              {analyzing
+                ? "Analyzing…"
+                : analysisResult?.analyzedAt
+                ? "Re-analyze"
+                : ai.aiScore != null
+                ? "Re-analyze"
+                : "Analyze listing"}
+            </button>
+
+            {analysisResult?.analyzedAt && (
+              <p className="analyze-subtext">
+                Last analyzed {new Date(analysisResult.analyzedAt).toLocaleString()}
+              </p>
+            )}
+            {!analysisResult?.analyzedAt && ai.aiScore != null && (
+              <p className="analyze-subtext">Previously analyzed</p>
+            )}
+            {analyzeError && (
+              <p className="analyze-error">{analyzeError}</p>
+            )}
+          </div>
 
           <a
             className="external-ebay-link"
@@ -225,13 +301,13 @@ export default function ListingPage() {
         </div>
       </div>
 
-      {listing.aiScore != null && (
+      {ai.aiScore != null && (
         <div className="ai-analysis-box">
           <div className="ai-analysis-header">
-            <RatingRing value={listing.aiScore} size={80} />
+            <RatingRing value={ai.aiScore} size={80} />
             <div>
               <p className="ai-analysis-main">
-                Our AI analysis rated this listing {listing.aiScore}/100.
+                Our AI analysis rated this listing {ai.aiScore}/100.
               </p>
 
               <button
@@ -245,7 +321,7 @@ export default function ListingPage() {
 
           {showOverview && (
             <div className="ai-overview-dropdown">
-              {listing.aiScores && (
+              {ai.aiScores && (
                 <div className="ai-score-grid">
                   {Object.entries(scores).map(([key, value]) => {
                     if (value == null) return null;
@@ -260,7 +336,7 @@ export default function ListingPage() {
               )}
 
               <h3>Summary</h3>
-              <p>{listing.overview}</p>
+              <p>{ai.overview}</p>
 
               <button
                 className="ai-debug-toggle"
@@ -270,7 +346,7 @@ export default function ListingPage() {
               </button>
 
               {showDebug && (
-                <pre className="debug-block">{listing.debugInfo}</pre>
+                <pre className="debug-block">{ai.debugInfo}</pre>
               )}
 
               <button
@@ -281,7 +357,7 @@ export default function ListingPage() {
               </button>
 
               {showRaw && (
-                <pre className="debug-block">{listing.rawAnalysis}</pre>
+                <pre className="debug-block">{ai.rawAnalysis}</pre>
               )}
             </div>
           )}

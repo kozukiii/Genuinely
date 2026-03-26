@@ -24,6 +24,12 @@ export function isSaved(id: string): boolean {
   return getSavedListings().some((x) => x.id === id);
 }
 
+export function updateSavedListing(listing: Listing) {
+  const saved = getSavedListings();
+  if (!saved.some((x) => x.id === listing.id)) return;
+  setSavedListings(saved.map((x) => (x.id === listing.id ? listing : x)));
+}
+
 export function toggleSaved(listing: Listing): boolean {
   const saved = getSavedListings();
   const exists = saved.some((x) => x.id === listing.id);

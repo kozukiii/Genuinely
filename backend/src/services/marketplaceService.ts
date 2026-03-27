@@ -48,7 +48,10 @@ async function getLatLng(location: string) {
 
   const res = await fetch(GRAPHQL_URL, {
     method: "POST",
-    headers: { ...FB_HEADERS, cookie: getFbCookie() },
+    headers: {
+      "user-agent": "Mozilla/5.0",
+      "content-type": "application/x-www-form-urlencoded",
+    },
     body,
     ...(proxyUrls.length ? { agent: getProxyAgent() } : {}),
   });
@@ -213,7 +216,10 @@ export async function searchMarketplaceListings({
 
   const res = await fetch(GRAPHQL_URL, {
     method: "POST",
-    headers: { ...FB_HEADERS, cookie: getFbCookie() },
+    headers: {
+      "user-agent": "Mozilla/5.0",
+      "content-type": "application/x-www-form-urlencoded",
+    },
     body,
     ...(proxyUrls.length ? { agent: getProxyAgent() } : {}),
   });

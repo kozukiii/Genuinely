@@ -1,5 +1,10 @@
 import fetch from "node-fetch";
+import { HttpsProxyAgent } from "https-proxy-agent";
 import type { Listing } from "../types/listing";
+
+const proxyAgent = process.env.PROXY_URL
+  ? new HttpsProxyAgent(process.env.PROXY_URL)
+  : undefined;
 
 const GRAPHQL_URL = "https://www.facebook.com/api/graphql/";
 
@@ -37,6 +42,7 @@ async function getLatLng(location: string) {
     method: "POST",
     headers: { ...FB_HEADERS, cookie: getFbCookie() },
     body,
+    ...(proxyAgent ? { agent: proxyAgent } : {}),
   });
 
   const json = await res.json();
@@ -142,6 +148,7 @@ export async function getMarketplaceListing(listingId: string): Promise<Partial<
         "accept-language": "en-US,en;q=0.9",
         cookie,
       },
+      ...(proxyAgent ? { agent: proxyAgent } : {}),
     });
 
     const html = await res.text();
@@ -198,6 +205,7 @@ export async function searchMarketplaceListings({
     method: "POST",
     headers: { ...FB_HEADERS, cookie: getFbCookie() },
     body,
+    ...(proxyAgent ? { agent: proxyAgent } : {}),
   });
 
   const json = await res.json();

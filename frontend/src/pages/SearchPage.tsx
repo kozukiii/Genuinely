@@ -349,7 +349,7 @@ const listingsRef = useRef(listings);
       </div>
 
       {!loading && !error && listings.length === 0 && (
-        <p className="mt-8 text-gray-400">Search Gennuinely's Multi-Source Database.</p>
+        <p className="mt-8 text-gray-400">Search Genuinely's Multi-Source Database.</p>
       )}
     </div>
   );

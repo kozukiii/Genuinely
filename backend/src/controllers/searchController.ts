@@ -69,7 +69,10 @@ export async function searchAll(req: Request, res: Response) {
           query,
           location,
           limit: marketplaceTarget || 10,
-        }).catch(() => [])
+        }).catch((err) => {
+          console.error("searchMarketplaceNormalized failed", err);
+          return [] as Listing[];
+        })
       : Promise.resolve([]),
     useEbay ? runEbaySearch(ebayTarget) : Promise.resolve([]),
   ]);
@@ -77,7 +80,10 @@ export async function searchAll(req: Request, res: Response) {
   // Enrich marketplace listings with full image galleries in parallel
   const enrichedMarketplace = await Promise.all(
     marketplace.map(async (listing: Listing) => {
-      const detail = await getMarketplaceListing(listing.id).catch(() => ({} as Partial<Listing>));
+      const detail = await getMarketplaceListing(listing.id).catch((err) => {
+        console.error("getMarketplaceListing failed", listing.id, err);
+        return {} as Partial<Listing>;
+      });
       if (detail.images && detail.images.length > 0) listing.images = detail.images;
       if (detail.description) listing.description = detail.description;
       return listing;

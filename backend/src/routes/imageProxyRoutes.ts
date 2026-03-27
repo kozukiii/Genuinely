@@ -9,10 +9,24 @@ router.get("/", async (req, res) => {
   if (!url) return res.status(400).send("Missing URL");
 
   try {
-    const response = await fetch(url);
-    const buffer = Buffer.from(await response.arrayBuffer());
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1)",
+        "Referer": "https://www.ebay.com/",
+      },
+    });
 
-    res.setHeader("Content-Type", response.headers.get("content-type") || "image/jpeg");
+    if (!response.ok) {
+      return res.status(response.status).send("Image unavailable");
+    }
+
+    const contentType = response.headers.get("content-type") || "";
+    if (!contentType.startsWith("image/")) {
+      return res.status(502).send("Unexpected content type");
+    }
+
+    const buffer = Buffer.from(await response.arrayBuffer());
+    res.setHeader("Content-Type", contentType);
     res.setHeader("Cache-Control", "public, max-age=86400");
     res.send(buffer);
   } catch (err) {

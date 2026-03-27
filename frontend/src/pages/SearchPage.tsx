@@ -101,8 +101,7 @@ export default function SearchPage() {
   const sourcesRef = useRef(filters.sources);
   sourcesRef.current = filters.sources;
   const prefetchingRef = useRef(false);
-  const scrollIntentRef = useRef<"top" | "bottom" | null>(null);
-  const listingsRef = useRef(listings);
+const listingsRef = useRef(listings);
   listingsRef.current = listings;
 
   const filtered = useMemo(
@@ -189,7 +188,7 @@ export default function SearchPage() {
 
     setPage(nextPage);
     sessionStorage.setItem(SEARCH_PAGE_KEY, String(nextPage));
-    scrollIntentRef.current = "top";
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }, [canGoNext, loading, page, filtered.length, hasMore, demoMode]);
 
   // ── Prev page ───────────────────────────────────────────────────────────
@@ -198,7 +197,7 @@ export default function SearchPage() {
     const prevPage = page - 1;
     setPage(prevPage);
     sessionStorage.setItem(SEARCH_PAGE_KEY, String(prevPage));
-    scrollIntentRef.current = "bottom";
+    window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
   }, [canGoPrev, loading, page]);
 
   // ── Re-fetch when sources change (reset to page 1) ──────────────────────
@@ -226,19 +225,7 @@ export default function SearchPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters.sources]);
 
-  // ── Scroll after page change renders ────────────────────────────────────
-  useEffect(() => {
-    const intent = scrollIntentRef.current;
-    if (!intent) return;
-    scrollIntentRef.current = null;
-    if (intent === "top") {
-      window.scrollTo({ top: 0, behavior: "smooth" });
-    } else {
-      window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
-    }
-  }, [pageItems]);
-
-  // ── Background prefetch: silently load next page while user reads current ──
+// ── Background prefetch: silently load next page while user reads current ──
   useEffect(() => {
     const nextNeeded = (page + 1) * PAGE_SIZE;
     if (!currentQuery || !hasMore || listings.length >= nextNeeded || loading || prefetchingRef.current) return;

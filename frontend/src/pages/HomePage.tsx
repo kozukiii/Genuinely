@@ -7,7 +7,7 @@ import { getSavedListings } from "../utils/savedListings";
 import { getRecentlyViewed } from "../utils/recentlyViewed";
 import { setEbayNotice } from "../utils/ebayNotice";
 
-const API_BASE = "";
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
 const BANNER_TOPICS = [
   "iphone 15",

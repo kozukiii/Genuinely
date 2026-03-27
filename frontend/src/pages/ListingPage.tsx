@@ -12,6 +12,8 @@ function sourceLabel(source?: Listing["source"]) {
   return "eBay";
 }
 
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
+
 export default function ListingPage() {
   const { state } = useLocation();
   const navigate = useNavigate();
@@ -45,7 +47,7 @@ export default function ListingPage() {
   useEffect(() => {
     if (listing?.source !== "marketplace" || !listing?.id) return;
     setEnrichLoading(true);
-    fetch(`/api/marketplace/item/${listing.id}`)
+    fetch(`${API_BASE}/api/marketplace/item/${listing.id}`)
       .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
       .then((data) => {
         if (Array.isArray(data.images) && data.images.length > 0) setEnrichedImages(data.images);
@@ -62,7 +64,7 @@ export default function ListingPage() {
     setAnalyzing(true);
     setAnalyzeError(null);
     try {
-      const res = await fetch("/api/search/analyze", {
+      const res = await fetch(`${API_BASE}/api/search/analyze`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(listing),

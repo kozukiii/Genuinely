@@ -9,7 +9,7 @@ import { setEbayNotice } from "../utils/ebayNotice";
 
 const PAGE_SIZE = 12;
 const PRELOAD_SIZE = PAGE_SIZE * 2; // always fetch 2 pages up-front
-const API_BASE = "";
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
 const SEARCH_QUERY_KEY = "search:query";
 const SEARCH_LISTINGS_KEY = "search:listings";

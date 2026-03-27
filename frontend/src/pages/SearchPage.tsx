@@ -341,7 +341,7 @@ const listingsRef = useRef(listings);
       </div>
 
       {!loading && !error && listings.length === 0 && (
-        <p className="mt-8 text-gray-400">Enter a search above to begin. Filters are ready whenever you are.</p>
+        <p className="mt-8 text-gray-400">Enter a search above to begin.</p>
       )}
     </div>
   );

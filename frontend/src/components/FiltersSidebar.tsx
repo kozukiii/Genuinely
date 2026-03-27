@@ -24,9 +24,7 @@ interface Props {
 }
 
 export default function FiltersSidebar({ filters, onChange }: Props) {
-  const [collapsed, setCollapsed] = useState(
-    () => typeof window !== "undefined" && window.innerWidth < 768
-  );
+  const [collapsed, setCollapsed] = useState(false);
   const [draft, setDraft] = useState<FilterState>(filters);
 
   // Keep draft in sync if parent resets filters externally

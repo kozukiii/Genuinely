@@ -84,6 +84,7 @@ export default function SearchPage() {
   const navType = useNavigationType();
 
   const [demoMode, setDemoMode] = useState(true);
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const [listings, setListings] = useState<Listing[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [page, setPage] = useState(1);
@@ -277,6 +278,13 @@ const listingsRef = useRef(listings);
           Demo mode
         </label>
 
+        <button
+          className="mobile-filter-toggle"
+          onClick={() => setMobileFiltersOpen((o) => !o)}
+        >
+          Filters {mobileFiltersOpen ? "▲" : "▼"}
+        </button>
+
         {listings.length > 0 && (
           <span className="results-count">
             {filtered.length}+ result{filtered.length !== 1 ? "s" : ""}
@@ -287,7 +295,7 @@ const listingsRef = useRef(listings);
       {error && <p className="mt-4 text-red-400">{error}</p>}
 
       <div className="search-layout">
-        <FiltersSidebar filters={filters} onChange={handleFilterApply} />
+        <FiltersSidebar filters={filters} onChange={handleFilterApply} mobileOpen={mobileFiltersOpen} />
 
         <div className="search-main">
           <div className="results-wrapper">
@@ -341,7 +349,7 @@ const listingsRef = useRef(listings);
       </div>
 
       {!loading && !error && listings.length === 0 && (
-        <p className="mt-8 text-gray-400">Enter a search above to begin.</p>
+        <p className="mt-8 text-gray-400">Search Gennuinely's Multi-Source Database.</p>
       )}
     </div>
   );

@@ -21,9 +21,10 @@ const DEFAULT_FILTERS: FilterState = {
 interface Props {
   filters: FilterState;
   onChange: (next: FilterState) => void;
+  mobileOpen?: boolean;
 }
 
-export default function FiltersSidebar({ filters, onChange }: Props) {
+export default function FiltersSidebar({ filters, onChange, mobileOpen = false }: Props) {
   const [collapsed, setCollapsed] = useState(false);
   const [draft, setDraft] = useState<FilterState>(filters);
 
@@ -50,7 +51,7 @@ export default function FiltersSidebar({ filters, onChange }: Props) {
   }
 
   return (
-    <aside className={`filters-sidebar${collapsed ? " collapsed" : ""}`}>
+    <aside className={`filters-sidebar${collapsed ? " collapsed" : ""}${mobileOpen ? " mobile-open" : ""}`}>
       <button
         className="sidebar-toggle"
         onClick={() => setCollapsed((c) => !c)}

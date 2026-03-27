@@ -200,6 +200,10 @@ h6 {
   background: rgba(77, 166, 255, 0.06);
 }
 
+.mobile-filter-toggle {
+  display: none;
+}
+
 .home-page .demo-toggle input[type="checkbox"] {
   appearance: none;
   -webkit-appearance: none;
@@ -1046,23 +1050,24 @@ h6 {
     margin-top: 0.75rem;
   }
 
-  /* Filters: full-width horizontal bar above results */
+  /* Filters: hidden by default on mobile, shown via toggle */
   .filters-sidebar {
+    display: none;
+  }
+
+  .filters-sidebar.mobile-open {
     display: block;
     flex: none;
     width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
     position: static;
     border-radius: 14px;
     padding: 0.75rem 1rem;
+    overflow: hidden;
   }
 
-  .filters-sidebar.collapsed {
-    flex: none;
-    width: 100%;
-    padding: 0.5rem 1rem;
-  }
-
-  /* Hide the toggle arrow on mobile — always show content */
+  /* Hide the desktop collapse arrow on mobile */
   .filters-sidebar .sidebar-toggle {
     display: none;
   }
@@ -1073,6 +1078,8 @@ h6 {
     flex-wrap: wrap;
     gap: 0.75rem;
     align-items: flex-end;
+    width: 100%;
+    box-sizing: border-box;
   }
 
   .filters-sidebar .filters-title {
@@ -1083,12 +1090,32 @@ h6 {
     margin-bottom: 0;
     min-width: 120px;
     flex: 1 1 120px;
+    box-sizing: border-box;
   }
 
-  .filters-sidebar .filter-apply,
+  .filters-sidebar .filter-apply {
+    flex: 1 1 100%;
+    margin-top: 0.25rem;
+  }
+
   .filters-sidebar .filter-reset {
-    flex: 0 0 auto;
-    align-self: flex-end;
+    flex: 1 1 100%;
+    margin-top: 0;
+  }
+
+  /* Mobile filter toggle button (next to Demo mode) */
+  .mobile-filter-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 5px 12px;
+    border-radius: 999px;
+    border: 1px solid rgba(57, 255, 157, 0.3);
+    background: rgba(57, 255, 157, 0.07);
+    color: rgba(57, 255, 157, 0.9);
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
   }
 
   /* Results grid: single column, full width */

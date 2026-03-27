@@ -67,7 +67,10 @@ export default function ListingPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(listing),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body?.error ?? `HTTP ${res.status}`);
+      }
       const data = await res.json();
       const enriched: Listing = { ...listing, ...data, analyzedAt: undefined };
       const withTs = { ...enriched, analyzedAt: data.analyzedAt ?? new Date().toISOString() };

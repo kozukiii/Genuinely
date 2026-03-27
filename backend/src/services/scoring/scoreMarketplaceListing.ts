@@ -1,4 +1,4 @@
-import { analyzeMarketplaceListingWithImages, batchAnalyzeMarketplaceListingsWithImages } from "../../ai/marketplaceOverview";
+import { analyzeMarketplaceListingWithImages, batchAnalyzeMarketplaceListingsWithImages } from "../../ai/marketplaceOverview.openai";
 
 function average(nums: number[]) {
   const valid = nums.filter((n) => typeof n === "number" && !isNaN(n));

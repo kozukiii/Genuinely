@@ -16,9 +16,10 @@ router.post("/analyze", async (req, res) => {
   try {
     const [result] = await scoreListings([listing]);
     return res.json({ ...result, analyzedAt: new Date().toISOString() });
-  } catch (err) {
+  } catch (err: any) {
     console.error("analyze error:", err);
-    return res.status(500).json({ error: "Analysis failed" });
+    const message = err?.message ?? err?.error?.message ?? String(err);
+    return res.status(500).json({ error: message });
   }
 });
 

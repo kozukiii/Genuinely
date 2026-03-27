@@ -32,6 +32,7 @@ export async function searchMarketplace(req: Request, res: Response) {
     res.json(listings);
   } catch (err: any) {
     console.error("Marketplace error:", err);
-    res.status(500).json({ error: "Marketplace search failed" });
+    const message = err?.message ?? err?.error?.message ?? String(err);
+    res.status(500).json({ error: message });
   }
 }

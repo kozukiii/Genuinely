@@ -34,9 +34,10 @@ export async function overviewSearch(req: Request, res: Response) {
 
     // Step 3 — return an array of analyzed listings
     res.json(analyzed);
-  } catch (err) {
+  } catch (err: any) {
     console.error("AI Route Error:", err);
-    res.status(500).json({ error: "AI analysis failed" });
+    const message = err?.message ?? err?.error?.message ?? String(err);
+    res.status(500).json({ error: message });
   }
 }
 

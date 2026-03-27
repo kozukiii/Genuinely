@@ -1,4 +1,4 @@
-import { analyzeListingWithImages, batchAnalyzeListingsWithImages } from "../ai/ebayOverview";
+import { analyzeListingWithImages, batchAnalyzeListingsWithImages } from "../ai/ebayOverview.openai";
 
 // Helper for safe average
 function average(nums: number[]) {

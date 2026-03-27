@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s -X POST http://localhost:3000/api/search/analyze -H \"Content-Type: application/json\" -d '{\"\"id\"\":\"\"test123\"\",\"\"source\"\":\"\"ebay\"\",\"\"title\"\":\"\"Test Item\"\",\"\"price\"\":50}')",
+      "Bash(node -e \":*)",
+      "Bash(grep -r \"VITE_API_BASE\\\\|import.meta.env\\\\|process.env\" /c/Users/zmhig/Documents/Projects/Genuinely/frontend/src --include=*.ts --include=*.tsx)",
+      "Bash(npm uninstall:*)"
+    ]
+  }
+}

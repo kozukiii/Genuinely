@@ -6,6 +6,7 @@ dotenv.config({ quiet: true });
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
 
+
 function clean(v: any): string | undefined {
   if (v === undefined || v === null) return undefined;
   const s = String(v).trim();

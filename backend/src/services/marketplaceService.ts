@@ -3,9 +3,16 @@ import type { Listing } from "../types/listing";
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { HttpsProxyAgent } = require("https-proxy-agent");
-const proxyAgent = process.env.PROXY_URL
-  ? new HttpsProxyAgent(process.env.PROXY_URL)
-  : undefined;
+
+const proxyUrls = process.env.PROXY_URL
+  ? process.env.PROXY_URL.split(",").map((s) => s.trim()).filter(Boolean)
+  : [];
+
+function getProxyAgent() {
+  if (proxyUrls.length === 0) return undefined;
+  const url = proxyUrls[Math.floor(Math.random() * proxyUrls.length)];
+  return new HttpsProxyAgent(url);
+}
 
 const GRAPHQL_URL = "https://www.facebook.com/api/graphql/";
 
@@ -43,7 +50,7 @@ async function getLatLng(location: string) {
     method: "POST",
     headers: { ...FB_HEADERS, cookie: getFbCookie() },
     body,
-    ...(proxyAgent ? { agent: proxyAgent } : {}),
+    ...(proxyUrls.length ? { agent: getProxyAgent() } : {}),
   });
 
   const raw = await res.text();
@@ -151,7 +158,7 @@ export async function getMarketplaceListing(listingId: string): Promise<Partial<
         "accept-language": "en-US,en;q=0.9",
         cookie,
       },
-      ...(proxyAgent ? { agent: proxyAgent } : {}),
+      ...(proxyUrls.length ? { agent: getProxyAgent() } : {}),
     });
 
     const html = await res.text();
@@ -208,7 +215,7 @@ export async function searchMarketplaceListings({
     method: "POST",
     headers: { ...FB_HEADERS, cookie: getFbCookie() },
     body,
-    ...(proxyAgent ? { agent: proxyAgent } : {}),
+    ...(proxyUrls.length ? { agent: getProxyAgent() } : {}),
   });
 
   const json = await res.json();

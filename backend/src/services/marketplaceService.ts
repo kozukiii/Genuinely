@@ -3,6 +3,24 @@ import type { Listing } from "../types/listing";
 
 const GRAPHQL_URL = "https://www.facebook.com/api/graphql/";
 
+function getFbCookie() {
+  return [
+    `c_user=${process.env.FB_C_USER}`,
+    `xs=${decodeURIComponent(process.env.FB_XS ?? "")}`,
+    `datr=${process.env.FB_DATR}`,
+    `sb=${process.env.FB_SB}`,
+  ].join("; ");
+}
+
+const FB_HEADERS = {
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+  "content-type": "application/x-www-form-urlencoded",
+  "accept": "*/*, application/json",
+  "accept-language": "en-US,en;q=0.9",
+  "origin": "https://www.facebook.com",
+  "referer": "https://www.facebook.com/marketplace/",
+};
+
 async function getLatLng(location: string) {
   const body = new URLSearchParams({
     variables: JSON.stringify({
@@ -17,10 +35,7 @@ async function getLatLng(location: string) {
 
   const res = await fetch(GRAPHQL_URL, {
     method: "POST",
-    headers: {
-      "user-agent": "Mozilla/5.0",
-      "content-type": "application/x-www-form-urlencoded",
-    },
+    headers: { ...FB_HEADERS, cookie: getFbCookie() },
     body,
   });
 
@@ -181,10 +196,7 @@ export async function searchMarketplaceListings({
 
   const res = await fetch(GRAPHQL_URL, {
     method: "POST",
-    headers: {
-      "user-agent": "Mozilla/5.0",
-      "content-type": "application/x-www-form-urlencoded",
-    },
+    headers: { ...FB_HEADERS, cookie: getFbCookie() },
     body,
   });
 

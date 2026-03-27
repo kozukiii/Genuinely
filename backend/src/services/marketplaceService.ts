@@ -1,7 +1,8 @@
 import fetch from "node-fetch";
-import { HttpsProxyAgent } from "https-proxy-agent";
 import type { Listing } from "../types/listing";
 
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { HttpsProxyAgent } = require("https-proxy-agent");
 const proxyAgent = process.env.PROXY_URL
   ? new HttpsProxyAgent(process.env.PROXY_URL)
   : undefined;

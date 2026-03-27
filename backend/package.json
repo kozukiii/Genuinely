@@ -17,7 +17,7 @@
     "express": "^5.1.0",
     "form-data": "^4.0.4",
     "helmet": "^8.1.0",
-    "https-proxy-agent": "^8.0.0",
+    "https-proxy-agent": "^5.0.1",
     "node-fetch": "^2.7.0",
     "nodemon": "^3.1.10",
     "openai": "^6.7.0",

@@ -46,7 +46,9 @@ async function getLatLng(location: string) {
     ...(proxyAgent ? { agent: proxyAgent } : {}),
   });
 
-  const json = await res.json();
+  const raw = await res.text();
+  console.log(`[marketplace:getLatLng] status=${res.status} body=${raw.slice(0, 300)}`);
+  const json = JSON.parse(raw);
 
   const first =
     json?.data?.city_street_search?.street_results?.edges?.[0]?.node;

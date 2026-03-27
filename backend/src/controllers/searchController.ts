@@ -98,6 +98,12 @@ export async function searchAll(req: Request, res: Response) {
     merged = dedupe([...merged, ...extra]);
   }
 
+  // Shuffle so eBay and marketplace listings are interleaved
+  for (let i = merged.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [merged[i], merged[j]] = [merged[j], merged[i]];
+  }
+
   const finalItems = merged.slice(0, limit);
   res.setHeader(
     "X-Ebay-Search-Status",

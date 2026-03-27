@@ -85,3 +85,15 @@
   color: rgba(77, 166, 255, 0.95);
   box-shadow: 0 0 16px rgba(77, 166, 255, 0.2);
 }
+
+@media (max-width: 768px) {
+  .search-bar-limit {
+    display: none;
+  }
+
+  .search-bar button {
+    white-space: nowrap;
+    flex-shrink: 0;
+    padding: 0.6rem 0.9rem;
+  }
+}

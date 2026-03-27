@@ -200,8 +200,9 @@ const listingsRef = useRef(listings);
     window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
   }, [canGoPrev, loading, page]);
 
-  // ── Re-fetch when sources change (reset to page 1) ──────────────────────
-  useEffect(() => {
+  // ── Re-fetch when filters are applied ───────────────────────────────────
+  const handleFilterApply = useCallback(async (next: FilterState) => {
+    setFilters(next);
     const q = queryRef.current;
     if (!q) return;
 
@@ -209,21 +210,21 @@ const listingsRef = useRef(listings);
     setError(null);
     setPage(1);
 
-    fetchFromApi(q, PRELOAD_SIZE, filters.sources, !demoMode)
-      .then(({ items, ebayUnavailable }) => {
-        setEbayNotice(filters.sources.ebay && ebayUnavailable);
-        setListings(items);
-        setHasMore(items.length >= PRELOAD_SIZE);
-        sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(items));
-        sessionStorage.setItem(SEARCH_PAGE_KEY, "1");
-      })
-      .catch((err) => {
-        setEbayNotice(filters.sources.ebay);
-        setError(`Failed to load listings: ${err instanceof Error ? err.message : String(err)}`);
-      })
-      .finally(() => setLoading(false));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters.sources]);
+    try {
+      const { items, ebayUnavailable } = await fetchFromApi(q, PRELOAD_SIZE, next.sources, !demoMode);
+      setEbayNotice(next.sources.ebay && ebayUnavailable);
+      setListings(items);
+      setResultKey((k) => k + 1);
+      setHasMore(items.length >= PRELOAD_SIZE);
+      sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(items));
+      sessionStorage.setItem(SEARCH_PAGE_KEY, "1");
+    } catch (err) {
+      setEbayNotice(next.sources.ebay);
+      setError(`Failed to load listings: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setLoading(false);
+    }
+  }, [demoMode]);
 
 // ── Background prefetch: silently load next page while user reads current ──
   useEffect(() => {
@@ -286,7 +287,7 @@ const listingsRef = useRef(listings);
       {error && <p className="mt-4 text-red-400">{error}</p>}
 
       <div className="search-layout">
-        <FiltersSidebar filters={filters} onChange={setFilters} />
+        <FiltersSidebar filters={filters} onChange={handleFilterApply} />
 
         <div className="search-main">
           <div className="results-wrapper">

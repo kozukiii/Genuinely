@@ -608,6 +608,31 @@ h6 {
   .banner-track{ animation: none; }
 }
 
+/* Mobile: replace auto-scroll animation with touch swipe */
+@media (max-width: 768px) {
+  .banner-viewport {
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+
+  .banner-viewport::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Remove the pseudo-element edge fades — they clip touch area */
+  .banner-viewport::before,
+  .banner-viewport::after {
+    display: none;
+  }
+
+  .banner-track {
+    animation: none;
+    width: max-content;
+    padding: 14px 8px;
+  }
+}
+
 /* =========================
    Featured grid
    ========================= */
@@ -846,6 +871,25 @@ h6 {
   transform: rotate(45deg);
 }
 
+.filter-apply {
+  width: 100%;
+  margin-top: 0.5rem;
+  padding: 8px 0;
+  border-radius: 10px;
+  border: 1px solid rgba(57, 255, 157, 0.35);
+  background: rgba(57, 255, 157, 0.1);
+  color: rgba(57, 255, 157, 0.95);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.filter-apply:hover {
+  border-color: rgba(57, 255, 157, 0.6);
+  background: rgba(57, 255, 157, 0.18);
+}
+
 .filter-reset {
   width: 100%;
   margin-top: 0.25rem;
@@ -995,15 +1039,56 @@ h6 {
     padding: 0.75rem;
   }
 
-  /* Hide desktop sidebar — mobile uses the overlay button instead */
+  /* Search layout: stack filters above results */
+  .home-page .search-layout {
+    flex-direction: column;
+    gap: 0.75rem;
+    margin-top: 0.75rem;
+  }
+
+  /* Filters: full-width horizontal bar above results */
   .filters-sidebar {
+    display: block;
+    flex: none;
+    width: 100%;
+    position: static;
+    border-radius: 14px;
+    padding: 0.75rem 1rem;
+  }
+
+  .filters-sidebar.collapsed {
+    flex: none;
+    width: 100%;
+    padding: 0.5rem 1rem;
+  }
+
+  /* Hide the toggle arrow on mobile — always show content */
+  .filters-sidebar .sidebar-toggle {
     display: none;
   }
 
-  /* Search layout: single column, no sidebar gap */
-  .home-page .search-layout {
-    gap: 0;
-    margin-top: 0.75rem;
+  /* Filters content: wrap horizontally */
+  .filters-sidebar .sidebar-inner {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    align-items: flex-end;
+  }
+
+  .filters-sidebar .filters-title {
+    display: none;
+  }
+
+  .filters-sidebar .filter-group {
+    margin-bottom: 0;
+    min-width: 120px;
+    flex: 1 1 120px;
+  }
+
+  .filters-sidebar .filter-apply,
+  .filters-sidebar .filter-reset {
+    flex: 0 0 auto;
+    align-self: flex-end;
   }
 
   /* Results grid: single column, full width */

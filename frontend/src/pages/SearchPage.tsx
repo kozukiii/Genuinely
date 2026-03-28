@@ -295,7 +295,12 @@ const listingsRef = useRef(listings);
       {error && <p className="mt-4 text-red-400">{error}</p>}
 
       <div className="search-layout">
-        <FiltersSidebar filters={filters} onChange={handleFilterApply} mobileOpen={mobileFiltersOpen} />
+        <FiltersSidebar
+          filters={filters}
+          onChange={handleFilterApply}
+          onSortChange={(sortBy) => setFilters((f) => ({ ...f, sortBy }))}
+          mobileOpen={mobileFiltersOpen}
+        />
 
         <div className="search-main">
           <div className="results-wrapper">

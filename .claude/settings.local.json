@@ -5,7 +5,8 @@
       "Bash(node -e \":*)",
       "Bash(grep -r \"VITE_API_BASE\\\\|import.meta.env\\\\|process.env\" /c/Users/zmhig/Documents/Projects/Genuinely/frontend/src --include=*.ts --include=*.tsx)",
       "Bash(npm uninstall:*)",
-      "Bash(grep -r \"you may like\\\\|recommendations\\\\|recommend\" c:UserszmhigDocumentsProjectsGenuinelyfrontendsrc --include=*.tsx --include=*.ts)"
+      "Bash(grep -r \"you may like\\\\|recommendations\\\\|recommend\" c:UserszmhigDocumentsProjectsGenuinelyfrontendsrc --include=*.tsx --include=*.ts)",
+      "Bash(npm run:*)"
     ]
   }
 }

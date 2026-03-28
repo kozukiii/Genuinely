@@ -21,10 +21,11 @@ const DEFAULT_FILTERS: FilterState = {
 interface Props {
   filters: FilterState;
   onChange: (next: FilterState) => void;
+  onSortChange: (sortBy: string) => void;
   mobileOpen?: boolean;
 }
 
-export default function FiltersSidebar({ filters, onChange, mobileOpen = false }: Props) {
+export default function FiltersSidebar({ filters, onChange, onSortChange, mobileOpen = false }: Props) {
   const [collapsed, setCollapsed] = useState(false);
   const [draft, setDraft] = useState<FilterState>(filters);
 
@@ -64,13 +65,13 @@ export default function FiltersSidebar({ filters, onChange, mobileOpen = false }
         <div className="sidebar-inner">
           <h2 className="filters-title">Filters</h2>
 
-          {/* Sort */}
+          {/* Sort — immediate, no re-fetch */}
           <div className="filter-group">
             <label className="filter-label">Sort by</label>
             <select
               className="filter-select"
-              value={draft.sortBy}
-              onChange={(e) => setDraftField("sortBy", e.target.value)}
+              value={filters.sortBy}
+              onChange={(e) => onSortChange(e.target.value)}
             >
               <option value="default">Best Match</option>
               <option value="price_asc">Price: Low → High</option>

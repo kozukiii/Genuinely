@@ -136,6 +136,30 @@ function extractImagesFromHtml(html: string, _listingId: string): string[] {
   return results;
 }
 
+function extractTitleFromHtml(html: string): string | undefined {
+  const og = html.match(/<meta[^>]+property="og:title"\s+content="([^"]+)"/);
+  if (og) return og[1].replace(/&amp;/g, "&").replace(/&#039;/g, "'").trim();
+  const m = html.match(/"marketplace_listing_title"\s*:\s*"([^"]+)"/);
+  if (m) return m[1];
+  const h1 = html.match(/<h1[^>]*>([^<]+)<\/h1>/);
+  if (h1) return h1[1].trim();
+  return undefined;
+}
+
+function extractPriceFromHtml(html: string): number {
+  const m = html.match(/"formatted_amount"\s*:\s*"([^"]+)"/);
+  if (m) {
+    const n = Number(m[1].replace(/[^0-9.]/g, ""));
+    if (!isNaN(n) && n > 0) return n;
+  }
+  const dollar = html.match(/\$\s*([0-9][0-9,]*(?:\.[0-9]{2})?)/);
+  if (dollar) {
+    const n = Number(dollar[1].replace(/,/g, ""));
+    if (!isNaN(n) && n > 0) return n;
+  }
+  return 0;
+}
+
 function extractDescriptionFromHtml(html: string): string | undefined {
   const m = html.match(/"redacted_description"\s*:\s*\{\s*"text"\s*:\s*"([^"]+)"/);
   if (m) return m[1].replace(/\\n/g, "\n");
@@ -174,6 +198,48 @@ export async function getMarketplaceListing(listingId: string): Promise<Partial<
     console.error("getMarketplaceListing error:", err);
     return {};
   }
+}
+
+export async function getMarketplaceListingFull(listingId: string): Promise<Listing> {
+  const cookie = [
+    `c_user=${process.env.FB_C_USER}`,
+    `xs=${decodeURIComponent(process.env.FB_XS ?? "")}`,
+    `datr=${process.env.FB_DATR}`,
+    `sb=${process.env.FB_SB}`,
+  ].join("; ");
+
+  const res = await fetch(`https://mbasic.facebook.com/marketplace/item/${listingId}/`, {
+    method: "GET",
+    headers: {
+      "user-agent": "Mozilla/5.0 (Linux; Android 9; SM-G960F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.157 Mobile Safari/537.36",
+      "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "accept-language": "en-US,en;q=0.9",
+      cookie,
+    },
+    ...(proxyUrls.length ? { agent: getProxyAgent() } : {}),
+  });
+
+  if (res.status !== 200) {
+    throw new Error(`Marketplace fetch failed: HTTP ${res.status}`);
+  }
+
+  const html = await res.text();
+  const images = extractImagesFromHtml(html, listingId);
+  const description = extractDescriptionFromHtml(html);
+  const title = extractTitleFromHtml(html) ?? "Marketplace Listing";
+  const price = extractPriceFromHtml(html);
+
+  return {
+    id: listingId,
+    source: "marketplace",
+    title,
+    price,
+    currency: "USD",
+    url: `https://www.facebook.com/marketplace/item/${listingId}`,
+    images,
+    description,
+    fullDescription: description,
+  };
 }
 
 export async function searchMarketplaceListings({

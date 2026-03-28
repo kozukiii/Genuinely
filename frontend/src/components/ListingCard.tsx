@@ -80,7 +80,7 @@ export default function ListingCard({ data }: { data: Listing }) {
                 <span className={`listing-shipping${data.shippingPrice === 0 ? " listing-shipping--free" : ""}`}>
                   {data.shippingPrice === 0
                     ? "Free shipping"
-                    : `+ ${new Intl.NumberFormat(undefined, { style: "currency", currency: data.currency ?? "USD", maximumFractionDigits: 0 }).format(data.shippingPrice)} shipping`}
+                    : `+ ${new Intl.NumberFormat(undefined, { style: "currency", currency: data.currency ?? "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(data.shippingPrice)} shipping`}
                 </span>
               )}
             </div>

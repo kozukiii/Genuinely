@@ -134,6 +134,7 @@ Analyze the listing and produce *numeric scores* for the following categories ON
 - descriptionQuality (0–100) *is the description detailed, accurate, and well-written*
 
 If shipping is free, automatically give full points (100) for shippingFairness.
+If shippingCostType is "CALCULATED" or shipping cost is otherwise unknown, treat shippingFairness as neutral (score 65) — never penalize for calculated shipping.
 If the seller has excellent feedback (99%+) and many ratings (1000+), automatically give full points (100) for sellerTrust.
 
 If any field is missing/undefined, treat it as NEUTRAL (no deduction, no reward). Missing data should NEVER lower a score unless it's critical (e.g., description or seller ratings).
@@ -226,7 +227,7 @@ SCORING RULES (apply to every listing):
 - priceFairness (0–100): compare to recent similar listings
 - sellerTrust (0–100): based on feedback score and rating count; auto 100 if 99%+ feedback and 1000+ ratings
 - conditionHonesty (0–100): does description match images and stated condition
-- shippingFairness (0–100): is shipping reasonable; auto 100 if shipping is free
+- shippingFairness (0–100): is shipping reasonable; auto 100 if shipping is free; score 65 (neutral) if shippingCostType is CALCULATED or cost is unknown — never penalize for calculated shipping
 - descriptionQuality (0–100): is the description detailed, accurate, and well-written
 
 Missing data = NEUTRAL (no deduction unless truly critical).

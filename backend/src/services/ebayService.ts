@@ -181,9 +181,17 @@ function mapEbayInternalToListing(item: any): EbayListingRich {
         const isFree = opts.some(
           (o: any) =>
             String(o.shippingCostType ?? o.type ?? "").toUpperCase() === "FREE" ||
-            toNumberPrice(o.shippingCost) === 0
+            (o.shippingCost != null && toNumberPrice(o.shippingCost) === 0)
         );
         if (isFree) return 0;
+
+        // Calculated shipping with no resolved cost — only skip if cost is still absent
+        const isUnresolvedCalculated = opts.some(
+          (o: any) =>
+            String(o.shippingCostType ?? "").toUpperCase() === "CALCULATED" &&
+            o.shippingCost == null
+        );
+        if (isUnresolvedCalculated) return undefined;
 
         // Otherwise take the lowest shipping cost offered
         const costs = opts
@@ -222,13 +230,38 @@ function mapEbayInternalToListing(item: any): EbayListingRich {
   };
 }
 
-export async function getEbayItemsWithDetails(query: string, limit: number = 8) {
+export async function getEbayItemsWithDetails(
+  query: string,
+  limit: number = 8,
+  buyerLocation?: { country: string; zip: string } | null,
+  minPrice?: number,
+  maxPrice?: number,
+  sortBy?: "price_asc" | "price_desc"
+) {
   const token = await getEbayToken();
 
-  const searchRes = await fetch(
-    `${EBAY_SEARCH}?q=${encodeURIComponent(query)}&limit=${limit}`,
-    { headers: { Authorization: `Bearer ${token}` } }
-  );
+  const ebayHeaders: Record<string, string> = { Authorization: `Bearer ${token}` };
+  const currency = buyerLocation?.country === "GB" ? "GBP"
+    : buyerLocation?.country === "CA" ? "CAD"
+    : buyerLocation?.country === "AU" ? "AUD"
+    : "USD";
+
+  if (buyerLocation?.country) {
+    const parts = [`country=${buyerLocation.country}`];
+    if (buyerLocation.zip) parts.push(`zip=${buyerLocation.zip}`);
+    ebayHeaders["X-EBAY-C-ENDUSERCTX"] = `contextualLocation=${parts.join(",")}`;
+  }
+
+  let searchUrl = `${EBAY_SEARCH}?q=${encodeURIComponent(query)}&limit=${limit}`;
+  if (minPrice != null || maxPrice != null) {
+    const lo = minPrice != null ? minPrice : "";
+    const hi = maxPrice != null ? maxPrice : "";
+    searchUrl += `&filter=${encodeURIComponent(`price:[${lo}..${hi}],priceCurrency:${currency}`)}`;
+  }
+  if (sortBy === "price_asc") searchUrl += "&sort=price";
+  else if (sortBy === "price_desc") searchUrl += "&sort=-price";
+
+  const searchRes = await fetch(searchUrl, { headers: ebayHeaders });
 
   if (!searchRes.ok) {
     const body = await searchRes.text().catch(() => "");
@@ -249,7 +282,7 @@ export async function getEbayItemsWithDetails(query: string, limit: number = 8) 
   const detailedItems = await Promise.all(
     summaries.map(async (summary: any) => {
       const fullRes = await fetch(`${EBAY_ITEM}/${summary.id}`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: ebayHeaders,
       });
 
       // If one item fails, don’t kill the whole request
@@ -289,12 +322,58 @@ export async function getEbayItemsWithDetails(query: string, limit: number = 8) 
 // ✅ Used by /api/search aggregator
 export async function searchEbayNormalized(
   query: string,
-  limit: number = 1
+  limit: number = 1,
+  buyerLocation?: { country: string; zip: string } | null,
+  minPrice?: number,
+  maxPrice?: number,
+  sortBy?: "price_asc" | "price_desc"
 ): Promise<Listing[]> {
-  const items = await getEbayItemsWithDetails(query, limit);
+  const items = await getEbayItemsWithDetails(query, limit, buyerLocation, minPrice, maxPrice, sortBy);
   return items
     .map(mapEbayInternalToListing)
     .filter((l) => l.id && l.title && l.url);
+}
+
+export async function getEbayItemByNumericId(
+  numericId: string,
+  buyerLocation?: { country: string; zip: string } | null
+): Promise<Listing> {
+  const token = await getEbayToken();
+  const ebayId = `v1|${numericId}|0`;
+
+  const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
+  if (buyerLocation?.country) {
+    const parts = [`country=${buyerLocation.country}`];
+    if (buyerLocation.zip) parts.push(`zip=${buyerLocation.zip}`);
+    headers["X-EBAY-C-ENDUSERCTX"] = `contextualLocation=${parts.join(",")}`;
+  }
+
+  const res = await fetch(`${EBAY_ITEM}/${ebayId}`, { headers });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`eBay item fetch failed: HTTP ${res.status} | ${body.slice(0, 200)}`);
+  }
+
+  const item: any = await res.json();
+
+  const images: string[] = [
+    item.image?.imageUrl,
+    ...(item.additionalImages?.map((i: any) => i?.imageUrl) ?? []),
+  ].filter(Boolean);
+
+  const merged = {
+    ...item,
+    id: item.itemId ?? ebayId,
+    url: item.itemWebUrl ?? `https://www.ebay.com/itm/${numericId}`,
+    images,
+    seller: item.seller?.username,
+    feedback: item.seller?.feedbackPercentage,
+    score: item.seller?.feedbackScore,
+    fullDescription: item.description ?? "",
+  };
+
+  return mapEbayInternalToListing(merged);
 }
 
 export async function getEbayRateLimits() {

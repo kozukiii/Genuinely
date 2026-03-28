@@ -228,7 +228,7 @@ export default function ListingPage() {
                   <span className="page-shipping">
                     {listing.shippingPrice === 0
                       ? "Free shipping"
-                      : `+ ${new Intl.NumberFormat(undefined, { style: "currency", currency: listing.currency ?? "USD", maximumFractionDigits: 0 }).format(listing.shippingPrice)} shipping`}
+                      : `+ ${new Intl.NumberFormat(undefined, { style: "currency", currency: listing.currency ?? "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(listing.shippingPrice)} shipping`}
                   </span>
                 )}
 

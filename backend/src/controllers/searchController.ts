@@ -4,6 +4,7 @@ import type { Listing } from "../types/listing";
 import { searchEbayNormalized } from "../services/ebayService";
 import { searchMarketplaceNormalized, getMarketplaceListing } from "../services/marketplaceService";
 import { scoreListings } from "../services/scoring/scoreListing";
+import { getLocationFromIp, extractClientIp } from "../utils/geoIp";
 
 function clampInt(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
@@ -52,10 +53,22 @@ export async function searchAll(req: Request, res: Response) {
 
   const location = String(req.query.location ?? "Eau Claire").trim();
 
+  const rawMin = req.query.minPrice ? Number(req.query.minPrice) : undefined;
+  const rawMax = req.query.maxPrice ? Number(req.query.maxPrice) : undefined;
+  const minPrice = rawMin != null && Number.isFinite(rawMin) ? rawMin : undefined;
+  const maxPrice = rawMax != null && Number.isFinite(rawMax) ? rawMax : undefined;
+
+  const sortByRaw = String(req.query.sortBy ?? "").trim();
+  const sortBy = (sortByRaw === "price_asc" || sortByRaw === "price_desc") ? sortByRaw : undefined;
+
+  const buyerLocation = useEbay
+    ? await getLocationFromIp(extractClientIp(req as any)).catch(() => null)
+    : null;
+
   let ebayUnavailable = false;
   const runEbaySearch = async (target: number) => {
     try {
-      return await searchEbayNormalized(query, target);
+      return await searchEbayNormalized(query, target, buyerLocation, minPrice, maxPrice, sortBy);
     } catch (err) {
       ebayUnavailable = true;
       console.error("searchEbayNormalized failed", err);
@@ -98,10 +111,13 @@ export async function searchAll(req: Request, res: Response) {
     merged = dedupe([...merged, ...extra]);
   }
 
-  // Shuffle so eBay and marketplace listings are interleaved
-  for (let i = merged.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [merged[i], merged[j]] = [merged[j], merged[i]];
+  // When sorting by price, skip the shuffle so eBay's native ordering is preserved.
+  // Otherwise interleave randomly so the two sources are mixed.
+  if (!sortBy) {
+    for (let i = merged.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [merged[i], merged[j]] = [merged[j], merged[i]];
+    }
   }
 
   const finalItems = merged.slice(0, limit);

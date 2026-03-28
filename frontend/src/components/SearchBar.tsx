@@ -4,9 +4,10 @@ import "./styles/SearchBar.css";
 interface Props {
   onSearch: (query: string, limit?: number) => void;
   initialQuery?: string;
+  onLinkAnalysis?: () => void;
 }
 
-export default function SearchBar({ onSearch, initialQuery = "" }: Props) {
+export default function SearchBar({ onSearch, initialQuery = "", onLinkAnalysis }: Props) {
   const [query, setQuery] = useState(initialQuery);
   const [limit, setLimit] = useState<string>("");
 
@@ -24,6 +25,7 @@ export default function SearchBar({ onSearch, initialQuery = "" }: Props) {
   };
 
   return (
+    <div className="search-bar-wrapper">
     <div className="search-bar">
       <input
         type="text"
@@ -43,6 +45,12 @@ export default function SearchBar({ onSearch, initialQuery = "" }: Props) {
         title="Max results (debug)"
       />
       <button onClick={submit}>Search</button>
+    </div>
+    {onLinkAnalysis && (
+      <button className="search-bar-link-btn" onClick={onLinkAnalysis}>
+        Have a link for a listing that needs analysis?
+      </button>
+    )}
     </div>
   );
 }

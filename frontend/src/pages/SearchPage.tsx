@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigationType } from "react-router-dom";
 import SearchBar from "../components/SearchBar";
+import LinkAnalysisModal from "../components/LinkAnalysisModal";
 import ListingCard from "../components/ListingCard";
 import FiltersSidebar, { type FilterState } from "../components/FiltersSidebar";
 import type { Listing } from "../types/Listing";
@@ -25,20 +26,34 @@ const DEFAULT_FILTERS: FilterState = {
   sortBy: "default",
 };
 
+function parsePriceInput(raw: string): number | null {
+  const n = Number(raw.replace(/[^0-9.]/g, ""));
+  return Number.isFinite(n) && raw.replace(/[^0-9.]/g, "") !== "" ? n : null;
+}
+
 async function fetchFromApi(
   query: string,
   targetTotal: number,
-  sources: { ebay: boolean; marketplace: boolean },
+  filters: FilterState,
   analyze: boolean
 ): Promise<{ items: Listing[]; ebayUnavailable: boolean }> {
   const activeSources =
-    (["ebay", "marketplace"] as const).filter((s) => sources[s]).join(",") ||
+    (["ebay", "marketplace"] as const).filter((s) => filters.sources[s]).join(",") ||
     "ebay,marketplace";
 
-  const url =
+  const minP = parsePriceInput(filters.minPrice);
+  const maxP = parsePriceInput(filters.maxPrice);
+
+  let url =
     `${API_BASE}/api/search?query=${encodeURIComponent(query)}` +
     `&limit=${targetTotal}&sources=${activeSources}` +
     `&analyze=${analyze ? "1" : "0"}`;
+
+  if (minP !== null) url += `&minPrice=${minP}`;
+  if (maxP !== null) url += `&maxPrice=${maxP}`;
+  if (filters.sortBy && filters.sortBy !== "default" && filters.sortBy !== "ai_score") {
+    url += `&sortBy=${filters.sortBy}`;
+  }
 
   const res = await fetch(url);
   const text = await res.text();
@@ -55,10 +70,10 @@ async function fetchFromApi(
 function applyFilters(listings: Listing[], filters: FilterState): Listing[] {
   let result = listings.slice();
 
-  const minP = filters.minPrice !== "" ? Number(filters.minPrice) : null;
-  const maxP = filters.maxPrice !== "" ? Number(filters.maxPrice) : null;
-  if (minP !== null && Number.isFinite(minP)) result = result.filter((l) => l.price >= minP);
-  if (maxP !== null && Number.isFinite(maxP)) result = result.filter((l) => l.price <= maxP);
+  const minP = parsePriceInput(filters.minPrice);
+  const maxP = parsePriceInput(filters.maxPrice);
+  if (minP !== null) result = result.filter((l) => l.price >= minP);
+  if (maxP !== null) result = result.filter((l) => l.price <= maxP);
 
   if (filters.condition !== "any") {
     result = result.filter((l) => {
@@ -95,14 +110,15 @@ export default function SearchPage() {
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
   const [sweeping, setSweeping] = useState(false);
   const [resultKey, setResultKey] = useState(0);
+  const [linkModalOpen, setLinkModalOpen] = useState(false);
 
-  // Keep a stable ref so effects can read the latest query/sources without re-running
+  // Keep stable refs so callbacks/effects always see the latest values
   const queryRef = useRef(currentQuery);
   queryRef.current = currentQuery;
-  const sourcesRef = useRef(filters.sources);
-  sourcesRef.current = filters.sources;
+  const filtersRef = useRef(filters);
+  filtersRef.current = filters;
   const prefetchingRef = useRef(false);
-const listingsRef = useRef(listings);
+  const listingsRef = useRef(listings);
   listingsRef.current = listings;
 
   const filtered = useMemo(
@@ -137,7 +153,7 @@ const listingsRef = useRef(listings);
 
       const fetchSize = limitOverride ?? PRELOAD_SIZE;
       try {
-        const { items, ebayUnavailable } = await fetchFromApi(q, fetchSize, filters.sources, !demoMode);
+        const { items, ebayUnavailable } = await fetchFromApi(q, fetchSize, filters, !demoMode);
         setEbayNotice(filters.sources.ebay && ebayUnavailable);
         setListings(items);
         setResultKey((k) => k + 1);
@@ -170,25 +186,34 @@ const listingsRef = useRef(listings);
         const { items, ebayUnavailable } = await fetchFromApi(
           queryRef.current,
           needed + PAGE_SIZE, // fetch a page ahead so next-next doesn't stall
-          sourcesRef.current,
+          filtersRef.current,
           !demoMode
         );
-        setEbayNotice(sourcesRef.current.ebay && ebayUnavailable);
+        setEbayNotice(filtersRef.current.sources.ebay && ebayUnavailable);
         setListings(items);
-        setHasMore(items.length >= needed + PAGE_SIZE);
 
+        const moreAvailable = items.length >= needed + PAGE_SIZE;
+        setHasMore(moreAvailable);
+
+        // Clamp to last valid page so we never land on an empty page
+        const newFiltered = applyFilters(items, filtersRef.current);
+        const newTotalPages = Math.max(1, Math.ceil(newFiltered.length / PAGE_SIZE));
+        const targetPage = Math.min(nextPage, newTotalPages);
+        setPage(targetPage);
+        sessionStorage.setItem(SEARCH_PAGE_KEY, String(targetPage));
         sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(items));
       } catch (err) {
-        setEbayNotice(sourcesRef.current.ebay);
+        setEbayNotice(filtersRef.current.sources.ebay);
         setError(`Failed to load more listings: ${err instanceof Error ? err.message : String(err)}`);
         return;
       } finally {
         setLoading(false);
       }
+    } else {
+      setPage(nextPage);
+      sessionStorage.setItem(SEARCH_PAGE_KEY, String(nextPage));
     }
 
-    setPage(nextPage);
-    sessionStorage.setItem(SEARCH_PAGE_KEY, String(nextPage));
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, [canGoNext, loading, page, filtered.length, hasMore, demoMode]);
 
@@ -212,7 +237,7 @@ const listingsRef = useRef(listings);
     setPage(1);
 
     try {
-      const { items, ebayUnavailable } = await fetchFromApi(q, PRELOAD_SIZE, next.sources, !demoMode);
+      const { items, ebayUnavailable } = await fetchFromApi(q, PRELOAD_SIZE, next, !demoMode);
       setEbayNotice(next.sources.ebay && ebayUnavailable);
       setListings(items);
       setResultKey((k) => k + 1);
@@ -233,9 +258,9 @@ const listingsRef = useRef(listings);
     if (!currentQuery || !hasMore || listings.length >= nextNeeded || loading || prefetchingRef.current) return;
 
     prefetchingRef.current = true;
-    fetchFromApi(currentQuery, nextNeeded, filters.sources, !demoMode)
+    fetchFromApi(currentQuery, nextNeeded, filtersRef.current, !demoMode)
       .then(({ items, ebayUnavailable }) => {
-        setEbayNotice(filters.sources.ebay && ebayUnavailable);
+        setEbayNotice(filtersRef.current.sources.ebay && ebayUnavailable);
         setListings(items);
         setHasMore(items.length >= nextNeeded);
         sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(items));
@@ -266,7 +291,12 @@ const listingsRef = useRef(listings);
 
   return (
     <div className="home-page">
-      <SearchBar onSearch={handleSearch} initialQuery={initialQuery} />
+      <SearchBar
+        onSearch={handleSearch}
+        initialQuery={initialQuery}
+        onLinkAnalysis={() => setLinkModalOpen(true)}
+      />
+      {linkModalOpen && <LinkAnalysisModal onClose={() => setLinkModalOpen(false)} />}
 
       <div className="search-controls">
         <label className="demo-toggle">
@@ -287,7 +317,7 @@ const listingsRef = useRef(listings);
 
         {listings.length > 0 && (
           <span className="results-count">
-            {filtered.length}+ result{filtered.length !== 1 ? "s" : ""}
+            {filtered.length}{hasMore ? "+" : ""} result{filtered.length !== 1 ? "s" : ""}
           </span>
         )}
       </div>
@@ -323,6 +353,9 @@ const listingsRef = useRef(listings);
                 {!loading && listings.length > 0 && pageItems.length === 0 && (
                   <p className="empty-message">No listings match the current filters.</p>
                 )}
+                {!loading && !hasMore && pageItems.length > 0 && page === totalPages && (
+                  <p className="end-of-results">You've reached the end of results.</p>
+                )}
               </div>
             )}
           </div>
@@ -338,7 +371,7 @@ const listingsRef = useRef(listings);
               </button>
 
               <span className="page-indicator">
-                Page {page}{totalPages > 1 ? ` of ${totalPages}+` : ""}
+                Page {page}{totalPages > 1 ? ` of ${totalPages}${hasMore ? "+" : ""}` : ""}
               </span>
 
               <button

@@ -156,6 +156,15 @@ h6 {
   color: #9ca3af;
 }
 
+.home-page .end-of-results {
+  grid-column: 1 / -1;
+  margin-top: 1.5rem;
+  font-size: 0.9rem;
+  color: rgba(156, 163, 175, 0.6);
+  text-align: center;
+  letter-spacing: 0.02em;
+}
+
 /* --- Scrollbar (global but safe) --- */
 ::-webkit-scrollbar {
   width: 8px;

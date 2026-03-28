@@ -1,0 +1,168 @@
+/* LinkAnalysisModal.css */
+
+.lam-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(8, 10, 18, 0.75);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  animation: lam-fade-in 180ms ease;
+}
+
+@keyframes lam-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.lam-card {
+  position: relative;
+  width: min(520px, 92vw);
+  padding: 2rem 2rem 1.75rem;
+  border-radius: 18px;
+  background: rgba(18, 20, 30, 0.96);
+  border: 1px solid rgba(57, 255, 157, 0.2);
+  box-shadow:
+    0 0 0 1px rgba(57, 255, 157, 0.06),
+    0 24px 64px rgba(0, 0, 0, 0.6);
+  animation: lam-slide-up 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes lam-slide-up {
+  from { opacity: 0; transform: translateY(18px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.lam-close {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(209, 213, 219, 0.6);
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease;
+}
+
+.lam-close:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(245, 245, 245, 0.9);
+}
+
+.lam-close:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.lam-title {
+  margin: 0 0 0.35rem;
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: rgba(245, 245, 245, 0.95);
+  letter-spacing: -0.01em;
+}
+
+.lam-hint {
+  margin: 0 0 1.25rem;
+  font-size: 0.88rem;
+  color: rgba(156, 163, 175, 0.8);
+  line-height: 1.5;
+}
+
+.lam-input-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.lam-input {
+  flex: 1;
+  padding: 0.65rem 0.9rem;
+  border-radius: 10px;
+  border: 1px solid rgba(57, 255, 157, 0.2);
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(245, 245, 245, 0.92);
+  font-size: 0.92rem;
+  outline: none;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.lam-input::placeholder {
+  color: rgba(209, 213, 219, 0.35);
+}
+
+.lam-input:focus {
+  border-color: rgba(77, 166, 255, 0.5);
+  box-shadow: 0 0 0 3px rgba(77, 166, 255, 0.1);
+}
+
+.lam-input:disabled {
+  opacity: 0.5;
+}
+
+.lam-submit {
+  padding: 0.65rem 1.2rem;
+  border-radius: 10px;
+  border: 1px solid rgba(57, 255, 157, 0.35);
+  background: rgba(57, 255, 157, 0.14);
+  color: rgba(57, 255, 157, 0.95);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease, box-shadow 140ms ease;
+}
+
+.lam-submit:hover:not(:disabled) {
+  background: rgba(77, 166, 255, 0.18);
+  border-color: rgba(77, 166, 255, 0.5);
+  color: rgba(77, 166, 255, 0.95);
+  box-shadow: 0 0 16px rgba(77, 166, 255, 0.2);
+}
+
+.lam-submit:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.lam-progress {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 1rem;
+}
+
+.lam-spinner {
+  display: inline-block;
+  width: 15px;
+  height: 15px;
+  border: 2px solid rgba(57, 255, 157, 0.25);
+  border-top-color: rgba(57, 255, 157, 0.85);
+  border-radius: 50%;
+  animation: lam-spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes lam-spin {
+  to { transform: rotate(360deg); }
+}
+
+.lam-progress-label {
+  font-size: 0.85rem;
+  color: rgba(57, 255, 157, 0.75);
+}
+
+.lam-error {
+  margin-top: 0.85rem;
+  font-size: 0.85rem;
+  color: rgba(252, 129, 129, 0.9);
+}

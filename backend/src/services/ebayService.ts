@@ -236,7 +236,8 @@ export async function getEbayItemsWithDetails(
   buyerLocation?: { country: string; zip: string } | null,
   minPrice?: number,
   maxPrice?: number,
-  sortBy?: "price_asc" | "price_desc"
+  sortBy?: "price_asc" | "price_desc",
+  offset = 0
 ) {
   const token = await getEbayToken();
 
@@ -260,6 +261,7 @@ export async function getEbayItemsWithDetails(
   }
   if (sortBy === "price_asc") searchUrl += "&sort=price";
   else if (sortBy === "price_desc") searchUrl += "&sort=-price";
+  if (offset > 0) searchUrl += `&offset=${offset}`;
 
   const searchRes = await fetch(searchUrl, { headers: ebayHeaders });
 
@@ -326,9 +328,10 @@ export async function searchEbayNormalized(
   buyerLocation?: { country: string; zip: string } | null,
   minPrice?: number,
   maxPrice?: number,
-  sortBy?: "price_asc" | "price_desc"
+  sortBy?: "price_asc" | "price_desc",
+  offset = 0
 ): Promise<Listing[]> {
-  const items = await getEbayItemsWithDetails(query, limit, buyerLocation, minPrice, maxPrice, sortBy);
+  const items = await getEbayItemsWithDetails(query, limit, buyerLocation, minPrice, maxPrice, sortBy, offset);
   return items
     .map(mapEbayInternalToListing)
     .filter((l) => l.id && l.title && l.url);

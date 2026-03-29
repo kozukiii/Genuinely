@@ -4,7 +4,10 @@ import fetch from "node-fetch";
 
 dotenv.config({ quiet: true });
 
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
+const client = new OpenAI({
+  apiKey: process.env.GROQ_API_KEY!,
+  baseURL: "https://api.groq.com/openai/v1",
+});
 
 
 function clean(v: any): string | undefined {
@@ -303,7 +306,7 @@ Do NOT wrap JSON in backticks.
   }
 
   const response = await client.chat.completions.create({
-    model: "gpt-4o-mini",
+    model: "meta-llama/llama-4-scout-17b-16e-instruct",
     messages,
     max_tokens: 1000,
     temperature: 0.2,
@@ -354,6 +357,8 @@ OUTPUT FORMAT — return ONLY a JSON array (no markdown, no backticks):
 
 async function _runMarketplaceBatch(listings: any[], allDataUrls: string[][]): Promise<string[]> {
   const contentParts: any[] = [];
+  let totalImages = 0;
+  const MAX_BATCH_IMAGES = 5;
 
   for (let i = 0; i < listings.length; i++) {
     const listing = listings[i];
@@ -374,11 +379,14 @@ async function _runMarketplaceBatch(listings: any[], allDataUrls: string[][]): P
     contentParts.push({ type: "text", text: `Listing URL: ${link}` });
     contentParts.push({ type: "text", text: `Images Attached: ${dataUrls.length}` });
 
-    if (dataUrls.length) {
+    const allowedImages = Math.max(0, MAX_BATCH_IMAGES - totalImages);
+    const batchDataUrls = dataUrls.slice(0, allowedImages);
+    if (batchDataUrls.length) {
       contentParts.push({ type: "text", text: `[Images for Listing ${i + 1}]` });
-      for (const dataUrl of dataUrls) {
+      for (const dataUrl of batchDataUrls) {
         contentParts.push({ type: "image_url", image_url: { url: dataUrl } });
       }
+      totalImages += batchDataUrls.length;
     }
 
     contentParts.push({ type: "text", text: `=== END LISTING ${i + 1} ===` });
@@ -387,12 +395,12 @@ async function _runMarketplaceBatch(listings: any[], allDataUrls: string[][]): P
   let rawResponse: string;
   try {
     const response = await client.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: "meta-llama/llama-4-scout-17b-16e-instruct",
       messages: [
         { role: "system", content: MARKETPLACE_BATCH_SYSTEM_PROMPT },
         { role: "user", content: contentParts },
       ],
-      max_tokens: Math.min(listings.length * 800, 16000),
+      max_tokens: Math.min(listings.length * 800, 5000),
       temperature: 0.2,
     });
     rawResponse = response.choices[0].message.content?.trim() ?? "[]";

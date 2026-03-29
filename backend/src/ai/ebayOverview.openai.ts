@@ -3,7 +3,10 @@ import dotenv from "dotenv";
 
 dotenv.config({ quiet: true });
 
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
+const client = new OpenAI({
+  apiKey: process.env.GROQ_API_KEY!,
+  baseURL: "https://api.groq.com/openai/v1",
+});
 
 
 function clean(v: any): string | undefined {
@@ -191,18 +194,16 @@ DEBUG INFO:
     },
   ];
 
-  // Attach all images (explicit multi-image support)
-  if (imageUrls.length) {
-    for (const url of imageUrls) {
-      messages[1].content.push({
-        type: "image_url",
-        image_url: { url },
-      });
-    }
+  // Attach images — Groq supports max 5 per request
+  for (const url of imageUrls.slice(0, 5)) {
+    messages[1].content.push({
+      type: "image_url",
+      image_url: { url },
+    });
   }
 
   const response = await client.chat.completions.create({
-    model: "gpt-4o-mini",
+    model: "meta-llama/llama-4-scout-17b-16e-instruct",
     messages,
     max_tokens: 1000,
     temperature: 0.2,
@@ -215,7 +216,7 @@ DEBUG INFO:
 // Batch analysis — analyzes multiple listings in a single API call
 // ---------------------------------------------------------------------------
 
-const EBAY_BATCH_SIZE = 8;
+const EBAY_BATCH_SIZE = 4;
 
 const EBAY_BATCH_SYSTEM_PROMPT = `
 You are an expert AI specializing in evaluating online marketplace listings.
@@ -248,6 +249,8 @@ OUTPUT FORMAT — return ONLY a JSON array (no markdown, no backticks):
 
 async function _runEbayBatch(listings: any[]): Promise<string[]> {
   const contentParts: any[] = [];
+  let totalImages = 0;
+  const MAX_BATCH_IMAGES = 5;
 
   for (let i = 0; i < listings.length; i++) {
     const listing = listings[i];
@@ -287,11 +290,14 @@ async function _runEbayBatch(listings: any[]): Promise<string[]> {
     contentParts.push({ type: "text", text: `Listing URL: ${link}` });
     contentParts.push({ type: "text", text: `Images Provided: ${imageUrls.length}` });
 
-    if (imageUrls.length) {
+    const allowedImages = Math.max(0, MAX_BATCH_IMAGES - totalImages);
+    const batchImageUrls = imageUrls.slice(0, allowedImages);
+    if (batchImageUrls.length) {
       contentParts.push({ type: "text", text: `[Images for Listing ${i + 1}]` });
-      for (const url of imageUrls) {
+      for (const url of batchImageUrls) {
         contentParts.push({ type: "image_url", image_url: { url } });
       }
+      totalImages += batchImageUrls.length;
     }
 
     contentParts.push({ type: "text", text: `=== END LISTING ${i + 1} ===` });
@@ -300,12 +306,12 @@ async function _runEbayBatch(listings: any[]): Promise<string[]> {
   let rawResponse: string;
   try {
     const response = await client.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: "meta-llama/llama-4-scout-17b-16e-instruct",
       messages: [
         { role: "system", content: EBAY_BATCH_SYSTEM_PROMPT },
         { role: "user", content: contentParts },
       ],
-      max_tokens: Math.min(listings.length * 800, 16000),
+      max_tokens: Math.min(listings.length * 800, 5000),
       temperature: 0.2,
     });
     rawResponse = response.choices[0].message.content?.trim() ?? "[]";

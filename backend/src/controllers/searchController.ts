@@ -39,11 +39,14 @@ export async function searchAll(req: Request, res: Response) {
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
 
+  const offset = clampInt(Number(req.query.offset ?? 0), 0, 10000);
+
   const wantsEbay = sourcesRaw.includes("ebay");
   const wantsMarketplace = sourcesRaw.includes("marketplace");
 
   const useEbay = wantsEbay || (!wantsEbay && !wantsMarketplace);
-  const useMarketplace = wantsMarketplace;
+  // Skip marketplace on offset pages — the client already has those from the first fetch
+  const useMarketplace = wantsMarketplace && offset === 0;
 
   const sourceCount = (useEbay ? 1 : 0) + (useMarketplace ? 1 : 0);
   const perSource = Math.floor(limit / sourceCount);
@@ -68,7 +71,7 @@ export async function searchAll(req: Request, res: Response) {
   let ebayUnavailable = false;
   const runEbaySearch = async (target: number) => {
     try {
-      return await searchEbayNormalized(query, target, buyerLocation, minPrice, maxPrice, sortBy);
+      return await searchEbayNormalized(query, target, buyerLocation, minPrice, maxPrice, sortBy, offset);
     } catch (err) {
       ebayUnavailable = true;
       console.error("searchEbayNormalized failed", err);
@@ -111,9 +114,10 @@ export async function searchAll(req: Request, res: Response) {
     merged = dedupe([...merged, ...extra]);
   }
 
-  // When sorting by price, skip the shuffle so eBay's native ordering is preserved.
-  // Otherwise interleave randomly so the two sources are mixed.
-  if (!sortBy) {
+  // Shuffle only on the first page so eBay and marketplace are interleaved.
+  // Skip when sorting by price (preserve eBay's native order) or when offset > 0
+  // (incremental pages should come in stable eBay order so appending is consistent).
+  if (!sortBy && offset === 0) {
     for (let i = merged.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [merged[i], merged[j]] = [merged[j], merged[i]];

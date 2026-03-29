@@ -31,11 +31,22 @@ function parsePriceInput(raw: string): number | null {
   return Number.isFinite(n) && raw.replace(/[^0-9.]/g, "") !== "" ? n : null;
 }
 
+function dedupeListings(items: Listing[]): Listing[] {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const key = `${item.source}:${item.id}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 async function fetchFromApi(
   query: string,
   targetTotal: number,
   filters: FilterState,
-  analyze: boolean
+  analyze: boolean,
+  offset = 0
 ): Promise<{ items: Listing[]; ebayUnavailable: boolean }> {
   const activeSources =
     (["ebay", "marketplace"] as const).filter((s) => filters.sources[s]).join(",") ||
@@ -54,6 +65,7 @@ async function fetchFromApi(
   if (filters.sortBy && filters.sortBy !== "default" && filters.sortBy !== "ai_score") {
     url += `&sortBy=${filters.sortBy}`;
   }
+  if (offset > 0) url += `&offset=${offset}`;
 
   const res = await fetch(url);
   const text = await res.text();
@@ -183,25 +195,28 @@ export default function SearchPage() {
     if (filtered.length < needed && hasMore) {
       setLoading(true);
       try {
-        const { items, ebayUnavailable } = await fetchFromApi(
+        // Fetch only the next batch of NEW items starting at the current end
+        const offset = listingsRef.current.length;
+        const { items: newItems, ebayUnavailable } = await fetchFromApi(
           queryRef.current,
-          needed + PAGE_SIZE, // fetch a page ahead so next-next doesn't stall
+          PRELOAD_SIZE,
           filtersRef.current,
-          !demoMode
+          !demoMode,
+          offset
         );
         setEbayNotice(filtersRef.current.sources.ebay && ebayUnavailable);
-        setListings(items);
 
-        const moreAvailable = items.length >= needed + PAGE_SIZE;
-        setHasMore(moreAvailable);
+        const combined = dedupeListings([...listingsRef.current, ...newItems]);
+        setListings(combined);
+        setHasMore(newItems.length >= PAGE_SIZE);
 
         // Clamp to last valid page so we never land on an empty page
-        const newFiltered = applyFilters(items, filtersRef.current);
+        const newFiltered = applyFilters(combined, filtersRef.current);
         const newTotalPages = Math.max(1, Math.ceil(newFiltered.length / PAGE_SIZE));
         const targetPage = Math.min(nextPage, newTotalPages);
         setPage(targetPage);
         sessionStorage.setItem(SEARCH_PAGE_KEY, String(targetPage));
-        sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(items));
+        sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(combined));
       } catch (err) {
         setEbayNotice(filtersRef.current.sources.ebay);
         setError(`Failed to load more listings: ${err instanceof Error ? err.message : String(err)}`);
@@ -258,12 +273,14 @@ export default function SearchPage() {
     if (!currentQuery || !hasMore || listings.length >= nextNeeded || loading || prefetchingRef.current) return;
 
     prefetchingRef.current = true;
-    fetchFromApi(currentQuery, nextNeeded, filtersRef.current, !demoMode)
-      .then(({ items, ebayUnavailable }) => {
+    const prefetchOffset = listings.length;
+    fetchFromApi(currentQuery, PAGE_SIZE, filtersRef.current, !demoMode, prefetchOffset)
+      .then(({ items: newItems, ebayUnavailable }) => {
         setEbayNotice(filtersRef.current.sources.ebay && ebayUnavailable);
-        setListings(items);
-        setHasMore(items.length >= nextNeeded);
-        sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(items));
+        const combined = dedupeListings([...listingsRef.current, ...newItems]);
+        setListings(combined);
+        setHasMore(newItems.length >= PAGE_SIZE);
+        sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(combined));
       })
       .catch(() => {})
       .finally(() => { prefetchingRef.current = false; });

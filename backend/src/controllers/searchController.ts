@@ -4,6 +4,7 @@ import type { Listing } from "../types/listing";
 import { searchEbayNormalized } from "../services/ebayService";
 import { searchMarketplaceNormalized } from "../services/marketplaceService";
 import { scoreListings } from "../services/scoring/scoreListing";
+import { fetchMarketContext } from "../ai/priceContext";
 
 function clampInt(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
@@ -66,6 +67,9 @@ export async function searchAll(req: Request, res: Response) {
   const countryRaw = String(req.query.country ?? "").trim().toUpperCase();
   const buyerLocation = countryRaw ? { country: countryRaw, zip: "" } : null;
 
+  // Start market context fetch in parallel with API searches (only when analyze=1)
+  const contextPromise = analyze ? fetchMarketContext(query) : Promise.resolve(null);
+
   let ebayUnavailable = false;
   const runEbaySearch = async (target: number) => {
     try {
@@ -116,7 +120,8 @@ export async function searchAll(req: Request, res: Response) {
   );
 
   if (analyze) {
-    const analyzed = await scoreListings(finalItems);
+    const context = await contextPromise;
+    const analyzed = await scoreListings(finalItems, context);
     return res.json(analyzed);
   }
 

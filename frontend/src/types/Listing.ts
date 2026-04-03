@@ -49,4 +49,5 @@ export interface Listing {
   overview?: string;
   debugInfo?: string;
   rawAnalysis?: string;
+  marketContext?: string;
 }

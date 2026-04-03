@@ -1,5 +1,6 @@
 import fetch from "node-fetch";
 import { mapEbaySummary } from "../utils/mapEbaySummary";
+import { buildEpnUrl } from "../utils/buildEpnUrl";
 import { getEbayToken } from "./ebayToken";
 import type { Listing } from "../types/listing";
 
@@ -114,7 +115,7 @@ function extractOriginalAndDiscount(item: any) {
 function mapEbayInternalToListing(item: any): EbayListingRich {
   const id = String(item.id ?? item.itemId ?? "");
   const title = String(item.title ?? item.name ?? "");
-  const url = String(item.url ?? item.itemWebUrl ?? item.webUrl ?? "");
+  const url = buildEpnUrl(String(item.url ?? item.itemWebUrl ?? item.webUrl ?? ""));
 
   const images: string[] = Array.isArray(item.images)
     ? item.images.filter(Boolean)

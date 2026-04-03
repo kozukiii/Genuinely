@@ -101,7 +101,7 @@ function stripHtml(html: string): string {
   return html.replace(/<[^>]*>/g, " ").replace(/\s{2,}/g, " ").trim();
 }
 
-export async function analyzeListingWithImages(listing: any) {
+export async function analyzeListingWithImages(listing: any, context?: string | null) {
   const title = clean(listing.title) ?? "Untitled";
   const currency = clean(listing.currency) ?? "USD";
   const link = clean(listing.link ?? listing.url) ?? "";
@@ -195,11 +195,12 @@ DEBUG INFO:
 
         { type: "text", text: `Listing URL: ${link}` },
         { type: "text", text: `Images Provided: ${imageUrls.length}` },
+        ...(context ? [{ type: "text", text: `\n--- MARKET CONTEXT (web search) ---\n${context}\n--- END MARKET CONTEXT ---` }] : []),
       ],
     },
   ];
 
-  for (const url of imageUrls) {
+  for (const url of imageUrls.slice(0, 5)) {
     messages[1].content.push({
       type: "image_url",
       image_url: { url },
@@ -251,7 +252,7 @@ OUTPUT FORMAT — return ONLY a JSON array (no markdown, no backticks):
 ]
 `.trim();
 
-async function _runEbayBatch(listings: any[]): Promise<string[]> {
+async function _runEbayBatch(listings: any[], context?: string | null): Promise<string[]> {
   const contentParts: any[] = [];
 
   for (let i = 0; i < listings.length; i++) {
@@ -293,7 +294,7 @@ async function _runEbayBatch(listings: any[]): Promise<string[]> {
     contentParts.push({ type: "text", text: `Listing URL: ${link}` });
     contentParts.push({ type: "text", text: `Images Provided: ${imageUrls.length}` });
 
-    const batchImageUrls = imageUrls;
+    const batchImageUrls = imageUrls.slice(0, 2);
     if (batchImageUrls.length) {
       contentParts.push({ type: "text", text: `[Images for Listing ${i + 1}]` });
       for (const url of batchImageUrls) {
@@ -302,6 +303,10 @@ async function _runEbayBatch(listings: any[]): Promise<string[]> {
     }
 
     contentParts.push({ type: "text", text: `=== END LISTING ${i + 1} ===` });
+  }
+
+  if (context) {
+    contentParts.push({ type: "text", text: `\n--- MARKET CONTEXT (web search) ---\n${context}\n--- END MARKET CONTEXT ---` });
   }
 
   let rawResponse: string;
@@ -318,7 +323,7 @@ async function _runEbayBatch(listings: any[]): Promise<string[]> {
     rawResponse = response.choices[0].message.content?.trim() ?? "[]";
   } catch (err) {
     console.error("eBay batch API call failed, falling back to individual calls:", err);
-    return Promise.all(listings.map(analyzeListingWithImages));
+    return Promise.all(listings.map((l) => analyzeListingWithImages(l, context)));
   }
 
   try {
@@ -333,17 +338,17 @@ async function _runEbayBatch(listings: any[]): Promise<string[]> {
     });
   } catch (err) {
     console.error("eBay batch response parse failed, falling back to individual calls:", err);
-    return Promise.all(listings.map(analyzeListingWithImages));
+    return Promise.all(listings.map((l) => analyzeListingWithImages(l, context)));
   }
 }
 
-export async function batchAnalyzeListingsWithImages(listings: any[]): Promise<string[]> {
+export async function batchAnalyzeListingsWithImages(listings: any[], context?: string | null): Promise<string[]> {
   if (listings.length === 0) return [];
 
   const results: string[] = [];
   for (let start = 0; start < listings.length; start += EBAY_BATCH_SIZE) {
     const chunk = listings.slice(start, start + EBAY_BATCH_SIZE);
-    const chunkResults = await _runEbayBatch(chunk);
+    const chunkResults = await _runEbayBatch(chunk, context);
     results.push(...chunkResults);
   }
   return results;

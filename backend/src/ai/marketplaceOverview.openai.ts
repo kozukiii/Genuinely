@@ -74,7 +74,7 @@ async function fetchImageAsDataUrl(url: string): Promise<string | null> {
   }
 }
 
-export async function analyzeMarketplaceListingWithImages(listing: any) {
+export async function analyzeMarketplaceListingWithImages(listing: any, context?: string | null) {
   const title = clean(listing.title) ?? "Untitled";
   const currency = clean(listing.currency) ?? "USD";
   const link = clean(listing.link ?? listing.url) ?? "";
@@ -95,7 +95,7 @@ export async function analyzeMarketplaceListingWithImages(listing: any) {
     await Promise.all(imageUrls.slice(0, 3).map((url) => fetchImageAsDataUrl(url)))
   ).filter(Boolean) as string[];
 
-  const isAcceptsOffers = !listing.price || Number(listing.price) === 0;
+  const isAcceptsOffers = !listing.price || Number(listing.price) === 0 || [123456, 1234567, 999999, 9999999].includes(Math.round(Number(listing.price)));
 
   const messages: any[] = [
     {
@@ -299,6 +299,7 @@ Do NOT wrap JSON in backticks.
         { type: "text", text: `Listing URL: ${link}` },
         { type: "text", text: `Images Provided: ${imageUrls.length}` },
         { type: "text", text: `Images Successfully Attached: ${dataUrls.length}` },
+        ...(context ? [{ type: "text", text: `\n--- MARKET CONTEXT (web search) ---\n${context}\n--- END MARKET CONTEXT ---` }] : []),
       ],
     },
   ];
@@ -366,7 +367,7 @@ OUTPUT FORMAT — return ONLY a JSON array (no markdown, no backticks):
 ]
 `.trim();
 
-async function _runMarketplaceBatch(listings: any[], allDataUrls: string[][]): Promise<string[]> {
+async function _runMarketplaceBatch(listings: any[], allDataUrls: string[][], context?: string | null): Promise<string[]> {
   const contentParts: any[] = [];
 
   for (let i = 0; i < listings.length; i++) {
@@ -378,7 +379,7 @@ async function _runMarketplaceBatch(listings: any[], allDataUrls: string[][]): P
     const deliveryTypes = formatDeliveryTypes(listing.delivery_types ?? listing.raw?.delivery_types);
     const availability = formatAvailability(listing);
     const dataUrls = allDataUrls[i];
-    const batchAcceptsOffers = !listing.price || Number(listing.price) === 0;
+    const batchAcceptsOffers = !listing.price || Number(listing.price) === 0 || [123456, 1234567, 999999, 9999999].includes(Math.round(Number(listing.price)));
 
     contentParts.push({ type: "text", text: `=== LISTING ${i + 1} ===` });
     contentParts.push({ type: "text", text: `Title: ${title}` });
@@ -399,6 +400,10 @@ async function _runMarketplaceBatch(listings: any[], allDataUrls: string[][]): P
     contentParts.push({ type: "text", text: `=== END LISTING ${i + 1} ===` });
   }
 
+  if (context) {
+    contentParts.push({ type: "text", text: `\n--- MARKET CONTEXT (web search) ---\n${context}\n--- END MARKET CONTEXT ---` });
+  }
+
   let rawResponse: string;
   try {
     const response = await client.chat.completions.create({
@@ -413,7 +418,7 @@ async function _runMarketplaceBatch(listings: any[], allDataUrls: string[][]): P
     rawResponse = response.choices[0].message.content?.trim() ?? "[]";
   } catch (err) {
     console.error("Marketplace batch API call failed, falling back to individual calls:", err);
-    return Promise.all(listings.map(analyzeMarketplaceListingWithImages));
+    return Promise.all(listings.map((l) => analyzeMarketplaceListingWithImages(l, context)));
   }
 
   try {
@@ -428,11 +433,11 @@ async function _runMarketplaceBatch(listings: any[], allDataUrls: string[][]): P
     });
   } catch (err) {
     console.error("Marketplace batch response parse failed, falling back to individual calls:", err);
-    return Promise.all(listings.map(analyzeMarketplaceListingWithImages));
+    return Promise.all(listings.map((l) => analyzeMarketplaceListingWithImages(l, context)));
   }
 }
 
-export async function batchAnalyzeMarketplaceListingsWithImages(listings: any[]): Promise<string[]> {
+export async function batchAnalyzeMarketplaceListingsWithImages(listings: any[], context?: string | null): Promise<string[]> {
   if (listings.length === 0) return [];
 
   const results: string[] = [];
@@ -454,7 +459,7 @@ export async function batchAnalyzeMarketplaceListingsWithImages(listings: any[])
       })
     );
 
-    const chunkResults = await _runMarketplaceBatch(chunk, allDataUrls);
+    const chunkResults = await _runMarketplaceBatch(chunk, allDataUrls, context);
     results.push(...chunkResults);
   }
   return results;

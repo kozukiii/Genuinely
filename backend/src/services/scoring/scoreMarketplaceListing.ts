@@ -1,4 +1,5 @@
 import { analyzeMarketplaceListingWithImages, batchAnalyzeMarketplaceListingsWithImages } from "../../ai/marketplaceOverview.openai";
+import { calculatePriceFairness, isAcceptsOffersPrice } from "./priceFairnessScore";
 
 function average(nums: number[]) {
   const valid = nums.filter((n) => typeof n === "number" && !isNaN(n));
@@ -7,7 +8,7 @@ function average(nums: number[]) {
 }
 
 function buildMarketplaceDebugInfo(listing: any): string {
-  const acceptsOffers = !listing.price || Number(listing.price) === 0;
+  const acceptsOffers = isAcceptsOffersPrice(listing.price);
   const imageUrls: string[] = Array.isArray(listing.imageUrls)
     ? listing.imageUrls.filter((u: any) => typeof u === "string" && u.trim())
     : Array.isArray(listing.images)
@@ -28,9 +29,9 @@ function buildMarketplaceDebugInfo(listing: any): string {
   }, null, 2);
 }
 
-export async function scoreMarketplaceListing(listing: any) {
-  const acceptsOffers = listing.price === 0;
-  const analysis = await analyzeMarketplaceListingWithImages(listing);
+export async function scoreMarketplaceListing(listing: any, context?: string | null) {
+  const acceptsOffers = isAcceptsOffersPrice(listing.price, context);
+  const analysis = await analyzeMarketplaceListingWithImages(listing, context);
 
   let jsonBlock: any = null;
 
@@ -48,20 +49,20 @@ export async function scoreMarketplaceListing(listing: any) {
     console.error("Failed to parse Marketplace AI JSON:", err);
   }
 
-  const scores = jsonBlock?.scores || {};
+  const scores = { ...(jsonBlock?.scores || {}) };
+  const { sellerTrust, conditionHonesty, shippingFairness, descriptionQuality } = scores;
 
-  const {
-    priceFairness,
-    sellerTrust,
-    conditionHonesty,
-    shippingFairness,
-    descriptionQuality,
-  } = scores;
+  // Override LLM price fairness with deterministic context-based score when available
+  const calculatedPriceFairness = acceptsOffers
+    ? null
+    : calculatePriceFairness(listing.price, context, listing.condition, listing.title);
+  if (calculatedPriceFairness !== null) {
+    scores.priceFairness = calculatedPriceFairness;
+  }
 
-  // Exclude priceFairness from the rating when listing uses offer-based pricing
   const scoreValues = acceptsOffers
     ? [sellerTrust, conditionHonesty, shippingFairness, descriptionQuality]
-    : [priceFairness, sellerTrust, conditionHonesty, shippingFairness, descriptionQuality];
+    : [scores.priceFairness, sellerTrust, conditionHonesty, shippingFairness, descriptionQuality];
 
   const aiScore = average(scoreValues);
 
@@ -73,11 +74,12 @@ export async function scoreMarketplaceListing(listing: any) {
     overview: jsonBlock?.overview || "No overview.",
     debugInfo: buildMarketplaceDebugInfo(listing),
     rawAnalysis: analysis,
+    marketContext: context ?? undefined,
   };
 }
 
-function parseMarketplaceAnalysis(listing: any, analysis: string) {
-  const acceptsOffers = listing.price === 0;
+function parseMarketplaceAnalysis(listing: any, analysis: string, context?: string | null) {
+  const acceptsOffers = isAcceptsOffersPrice(listing.price, context);
 
   let jsonBlock: any = null;
 
@@ -93,13 +95,19 @@ function parseMarketplaceAnalysis(listing: any, analysis: string) {
     console.error("Failed to parse Marketplace AI JSON:", err);
   }
 
-  const scores = jsonBlock?.scores || {};
-  const { priceFairness, sellerTrust, conditionHonesty, shippingFairness, descriptionQuality } = scores;
+  const scores = { ...(jsonBlock?.scores || {}) };
+  const { sellerTrust, conditionHonesty, shippingFairness, descriptionQuality } = scores;
 
-  // Exclude priceFairness from the rating when listing uses offer-based pricing
+  const calculatedPriceFairness = acceptsOffers
+    ? null
+    : calculatePriceFairness(listing.price, context, listing.condition, listing.title);
+  if (calculatedPriceFairness !== null) {
+    scores.priceFairness = calculatedPriceFairness;
+  }
+
   const scoreValues = acceptsOffers
     ? [sellerTrust, conditionHonesty, shippingFairness, descriptionQuality]
-    : [priceFairness, sellerTrust, conditionHonesty, shippingFairness, descriptionQuality];
+    : [scores.priceFairness, sellerTrust, conditionHonesty, shippingFairness, descriptionQuality];
 
   const aiScore = average(scoreValues);
 
@@ -111,11 +119,12 @@ function parseMarketplaceAnalysis(listing: any, analysis: string) {
     overview: jsonBlock?.overview || "No overview.",
     debugInfo: buildMarketplaceDebugInfo(listing),
     rawAnalysis: analysis,
+    marketContext: context ?? undefined,
   };
 }
 
-export async function scoreMarketplaceListings(listings: any[]) {
+export async function scoreMarketplaceListings(listings: any[], context?: string | null) {
   if (listings.length === 0) return [];
-  const rawStrings = await batchAnalyzeMarketplaceListingsWithImages(listings);
-  return listings.map((listing, i) => parseMarketplaceAnalysis(listing, rawStrings[i]));
+  const rawStrings = await batchAnalyzeMarketplaceListingsWithImages(listings, context);
+  return listings.map((listing, i) => parseMarketplaceAnalysis(listing, rawStrings[i], context));
 }

@@ -16,23 +16,23 @@ function getProxyAgent() {
 
 const GRAPHQL_URL = "https://www.facebook.com/api/graphql/";
 
-function getFbCookie() {
-  return [
-    `c_user=${process.env.FB_C_USER}`,
-    `xs=${decodeURIComponent(process.env.FB_XS ?? "")}`,
-    `datr=${process.env.FB_DATR}`,
-    `sb=${process.env.FB_SB}`,
-  ].join("; ");
-}
+// function getFbCookie() {
+//   return [
+//     `c_user=${process.env.FB_C_USER}`,
+//     `xs=${decodeURIComponent(process.env.FB_XS ?? "")}`,
+//     `datr=${process.env.FB_DATR}`,
+//     `sb=${process.env.FB_SB}`,
+//   ].join("; ");
+// }
 
-const FB_HEADERS = {
-  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-  "content-type": "application/x-www-form-urlencoded",
-  "accept": "*/*, application/json",
-  "accept-language": "en-US,en;q=0.9",
-  "origin": "https://www.facebook.com",
-  "referer": "https://www.facebook.com/marketplace/",
-};
+// const FB_HEADERS = {
+//   "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+//   "content-type": "application/x-www-form-urlencoded",
+//   "accept": "*/*, application/json",
+//   "accept-language": "en-US,en;q=0.9",
+//   "origin": "https://www.facebook.com",
+//   "referer": "https://www.facebook.com/marketplace/",
+// };
 
 const latLngCache = new Map<string, { lat: number; lng: number; expiresAt: number }>();
 
@@ -176,12 +176,12 @@ function extractDescriptionFromHtml(html: string): string | undefined {
 
 export async function getMarketplaceListing(listingId: string): Promise<Partial<Listing>> {
   try {
-    const cookie = [
-      `c_user=${process.env.FB_C_USER}`,
-      `xs=${decodeURIComponent(process.env.FB_XS ?? "")}`,
-      `datr=${process.env.FB_DATR}`,
-      `sb=${process.env.FB_SB}`,
-    ].join("; ");
+    // const cookie = [
+    //   `c_user=${process.env.FB_C_USER}`,
+    //   `xs=${decodeURIComponent(process.env.FB_XS ?? "")}`,
+    //   `datr=${process.env.FB_DATR}`,
+    //   `sb=${process.env.FB_SB}`,
+    // ].join("; ");
 
     const res = await fetch(`https://mbasic.facebook.com/marketplace/item/${listingId}/`, {
       method: "GET",
@@ -189,7 +189,7 @@ export async function getMarketplaceListing(listingId: string): Promise<Partial<
         "user-agent": "Mozilla/5.0 (Linux; Android 9; SM-G960F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.157 Mobile Safari/537.36",
         "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "accept-language": "en-US,en;q=0.9",
-        cookie,
+        // cookie,
       },
       ...(proxyUrls.length ? { agent: getProxyAgent() } : {}),
     });
@@ -207,12 +207,12 @@ export async function getMarketplaceListing(listingId: string): Promise<Partial<
 }
 
 export async function getMarketplaceListingFull(listingId: string): Promise<Listing> {
-  const cookie = [
-    `c_user=${process.env.FB_C_USER}`,
-    `xs=${decodeURIComponent(process.env.FB_XS ?? "")}`,
-    `datr=${process.env.FB_DATR}`,
-    `sb=${process.env.FB_SB}`,
-  ].join("; ");
+  // const cookie = [
+  //   `c_user=${process.env.FB_C_USER}`,
+  //   `xs=${decodeURIComponent(process.env.FB_XS ?? "")}`,
+  //   `datr=${process.env.FB_DATR}`,
+  //   `sb=${process.env.FB_SB}`,
+  // ].join("; ");
 
   const res = await fetch(`https://mbasic.facebook.com/marketplace/item/${listingId}/`, {
     method: "GET",
@@ -220,7 +220,7 @@ export async function getMarketplaceListingFull(listingId: string): Promise<List
       "user-agent": "Mozilla/5.0 (Linux; Android 9; SM-G960F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.157 Mobile Safari/537.36",
       "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
       "accept-language": "en-US,en;q=0.9",
-      cookie,
+      // cookie,
     },
     ...(proxyUrls.length ? { agent: getProxyAgent() } : {}),
   });

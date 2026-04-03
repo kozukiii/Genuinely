@@ -1,4 +1,5 @@
 import { analyzeListingWithImages, batchAnalyzeListingsWithImages } from "../ai/ebayOverview.openai";
+import { calculatePriceFairness } from "./scoring/priceFairnessScore";
 
 // Helper for safe average
 function average(nums: number[]) {
@@ -47,7 +48,7 @@ function buildEbayDebugInfo(listing: any): string {
   }, null, 2);
 }
 
-function parseAIAnalysis(listing: any, analysis: string) {
+function parseAIAnalysis(listing: any, analysis: string, context?: string | null) {
   let jsonBlock: any = null;
 
   try {
@@ -62,10 +63,21 @@ function parseAIAnalysis(listing: any, analysis: string) {
     console.error("Failed to parse AI JSON:", err);
   }
 
-  const scores = jsonBlock?.scores || {};
-  const { priceFairness, sellerTrust, conditionHonesty, shippingFairness, locationRisk, descriptionQuality } = scores;
+  const scores = { ...(jsonBlock?.scores || {}) };
+  const { sellerTrust, conditionHonesty, shippingFairness, locationRisk, descriptionQuality } = scores;
 
-  const aiScore = average([priceFairness, sellerTrust, conditionHonesty, shippingFairness, locationRisk, descriptionQuality]);
+  // Override LLM price fairness with deterministic context-based score when available
+  const calculatedPriceFairness = calculatePriceFairness(
+    listing.price,
+    context,
+    listing.condition,
+    listing.title,
+  );
+  if (calculatedPriceFairness !== null) {
+    scores.priceFairness = calculatedPriceFairness;
+  }
+
+  const aiScore = average([scores.priceFairness, sellerTrust, conditionHonesty, shippingFairness, locationRisk, descriptionQuality]);
 
   return {
     aiScore,
@@ -76,12 +88,12 @@ function parseAIAnalysis(listing: any, analysis: string) {
   };
 }
 
-export async function analyzeItemWithAI(merged: any) {
-  const analysis = await analyzeListingWithImages(merged);
-  return parseAIAnalysis(merged, analysis);
+export async function analyzeItemWithAI(merged: any, context?: string | null) {
+  const analysis = await analyzeListingWithImages(merged, context);
+  return { ...parseAIAnalysis(merged, analysis, context), marketContext: context ?? undefined };
 }
 
-export async function analyzeItemsWithAI(items: any[]) {
+export async function analyzeItemsWithAI(items: any[], context?: string | null) {
   if (items.length === 0) return [];
 
   const BATCH_SIZE = 8;
@@ -89,9 +101,9 @@ export async function analyzeItemsWithAI(items: any[]) {
 
   for (let start = 0; start < items.length; start += BATCH_SIZE) {
     const chunk = items.slice(start, start + BATCH_SIZE);
-    const rawStrings = await batchAnalyzeListingsWithImages(chunk);
+    const rawStrings = await batchAnalyzeListingsWithImages(chunk, context);
     for (let i = 0; i < chunk.length; i++) {
-      results.push({ ...chunk[i], ...parseAIAnalysis(chunk[i], rawStrings[i]) });
+      results.push({ ...chunk[i], ...parseAIAnalysis(chunk[i], rawStrings[i], context), marketContext: context ?? undefined });
     }
   }
 

@@ -22,6 +22,7 @@ export default function ListingPage() {
   const [showOverview, setShowOverview] = useState(false);
   const [showDebug, setShowDebug] = useState(false);
   const [showRaw, setShowRaw] = useState(false);
+  const [showContext, setShowContext] = useState(false);
   const [imageIndex, setImageIndex] = useState(0);
   const [saved, setSaved] = useState(false);
   const [enrichedImages, setEnrichedImages] = useState<string[] | null>(null);
@@ -222,7 +223,14 @@ export default function ListingPage() {
           <div className="info-ring-row">
             <div className="info-column">
               <div className="price-heart-row">
-                <p className="page-price">{money}</p>
+                {listing.acceptsOffers ? (
+                  <div className="page-price-accepts-offers">
+                    <p className="page-price page-price--offers">Accepts Offers</p>
+                    <span className="page-price--offers-hint">Visit listing to determine price</span>
+                  </div>
+                ) : (
+                  <p className="page-price">{money}</p>
+                )}
 
                 {listing.shippingPrice != null && (
                   <span className="page-shipping">
@@ -342,6 +350,20 @@ export default function ListingPage() {
 
               <h3>Summary</h3>
               <p>{ai.overview}</p>
+
+              {ai.marketContext && (
+                <>
+                  <button
+                    className="ai-debug-toggle"
+                    onClick={() => setShowContext(!showContext)}
+                  >
+                    {showContext ? "Hide market context ↑" : "Show market context ↓"}
+                  </button>
+                  {showContext && (
+                    <pre className="debug-block">{ai.marketContext}</pre>
+                  )}
+                </>
+              )}
 
               <button
                 className="ai-debug-toggle"

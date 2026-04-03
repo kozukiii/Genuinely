@@ -2,25 +2,25 @@ import { scoreEbayListing } from "./scoreEbayListing";
 import { scoreMarketplaceListing, scoreMarketplaceListings } from "./scoreMarketplaceListing";
 import { analyzeItemsWithAI } from "../aiService";
 
-export async function scoreListing(listing: any) {
+export async function scoreListing(listing: any, context?: string | null) {
   switch (listing.source) {
     case "ebay":
-      return scoreEbayListing(listing);
+      return scoreEbayListing(listing, context);
     case "marketplace":
-      return scoreMarketplaceListing(listing);
+      return scoreMarketplaceListing(listing, context);
     default:
       return listing;
   }
 }
 
-export async function scoreListings(listings: any[]) {
+export async function scoreListings(listings: any[], context?: string | null) {
   const ebay = listings.filter((l) => l.source === "ebay");
   const marketplace = listings.filter((l) => l.source === "marketplace");
   const other = listings.filter((l) => l.source !== "ebay" && l.source !== "marketplace");
 
   const [scoredEbay, scoredMarketplace] = await Promise.all([
-    analyzeItemsWithAI(ebay),
-    scoreMarketplaceListings(marketplace),
+    analyzeItemsWithAI(ebay, context),
+    scoreMarketplaceListings(marketplace, context),
   ]);
 
   // Restore original order

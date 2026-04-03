@@ -34,7 +34,13 @@ const FB_HEADERS = {
   "referer": "https://www.facebook.com/marketplace/",
 };
 
+const latLngCache = new Map<string, { lat: number; lng: number; expiresAt: number }>();
+
 async function getLatLng(location: string) {
+  const key = location.toLowerCase().trim();
+  const cached = latLngCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return { lat: cached.lat, lng: cached.lng };
+
   const body = new URLSearchParams({
     variables: JSON.stringify({
       params: {
@@ -63,39 +69,38 @@ async function getLatLng(location: string) {
   const first =
     json?.data?.city_street_search?.street_results?.edges?.[0]?.node;
 
-  return {
+  const result = {
     lat: first?.location?.latitude,
     lng: first?.location?.longitude,
   };
+
+  if (result.lat != null && result.lng != null) {
+    latLngCache.set(key, { lat: result.lat, lng: result.lng, expiresAt: Date.now() + 60 * 60 * 1000 });
+  }
+
+  return result;
 }
 
 function extractMarketplaceImages(listing: any): string[] {
   const urls = new Set<string>();
 
   const pushIfValid = (url: any) => {
-    if (typeof url === "string" && url.trim().startsWith("http")) {
-      urls.add(url.trim());
-    }
+    if (typeof url !== "string" || !url.trim().startsWith("http")) return;
+    // Facebook profile pictures use /t1. CDN paths; listing photos use /t45.
+    // Filter out profile pics so they don't pollute listing image galleries.
+    if (/\/t1[._]/.test(url)) return;
+    urls.add(url.trim());
   };
 
+  // Primary listing photo
   pushIfValid(listing?.primary_listing_photo?.image?.uri);
 
-  const possibleArrays = [
-    listing?.listing_photos,
-    listing?.photos,
-    listing?.all_photos,
-    listing?.additional_photos,
-    listing?.media,
-    listing?.images,
-  ];
-
-  for (const arr of possibleArrays) {
-    if (!Array.isArray(arr)) continue;
-
-    for (const item of arr) {
+  // Only pull from the dedicated listing photos array, not generic photo/media fields
+  // which can include seller profile pictures
+  const listingPhotos = listing?.listing_photos;
+  if (Array.isArray(listingPhotos)) {
+    for (const item of listingPhotos) {
       pushIfValid(item?.image?.uri);
-      pushIfValid(item?.uri);
-      pushIfValid(item?.url);
     }
   }
 
@@ -108,6 +113,7 @@ function extractImagesFromHtml(html: string, _listingId: string): string[] {
     const url = raw.replace(/\\u0025/g, "%").replace(/\\\//g, "/").replace(/&amp;/g, "&");
     if (!url.startsWith("http")) return;
     if (!url.includes("scontent")) return;
+    if (/\/t1[._]/.test(url)) return; // profile pictures, not listing photos
     const fnMatch = url.match(/\/(\d+_[^/?#"\\]+\.(?:jpg|jpeg|png|webp))/i);
     const key = fnMatch ? fnMatch[1] : url;
     if (!byFilename.has(key)) byFilename.set(key, url);

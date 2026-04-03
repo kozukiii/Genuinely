@@ -95,6 +95,8 @@ export async function analyzeMarketplaceListingWithImages(listing: any) {
     await Promise.all(imageUrls.slice(0, 3).map((url) => fetchImageAsDataUrl(url)))
   ).filter(Boolean) as string[];
 
+  const isAcceptsOffers = !listing.price || Number(listing.price) === 0;
+
   const messages: any[] = [
     {
       role: "system",
@@ -237,6 +239,11 @@ PRICE EVALUATION RULES:
 - If exact model/version is uncertain, stay conservative internally, but still write the overview around the inferred item identity
 - The overview must sound product-specific, not category-generic
 
+ACCEPTS OFFERS RULE (CRITICAL):
+- If the price field is "Accepts Offers" or $0, this listing uses offer-based / negotiated pricing — no fixed price is set.
+- In this case you MUST set priceFairness to null in the JSON output (output the literal JSON null, not a number).
+- In the overview, mention that this listing accepts offers and that the buyer should visit the listing to negotiate or determine the price.
+
 COMPARABLE LISTINGS (if provided below):
 Use them as your primary reference for priceFairness.
 If comparables are provided, priceFairness should be grounded mainly in those comps rather than broad assumptions.
@@ -285,7 +292,7 @@ Do NOT wrap JSON in backticks.
       role: "user",
       content: [
         { type: "text", text: `Title: ${title}` },
-        { type: "text", text: `Price: ${listing.price} ${currency}` },
+        { type: "text", text: `Price: ${isAcceptsOffers ? "Accepts Offers" : `${listing.price} ${currency}`}` },
         { type: "text", text: `Location: ${location}` },
         { type: "text", text: `Delivery Types: ${deliveryTypes}` },
         { type: "text", text: `Availability: ${availability}` },
@@ -331,11 +338,15 @@ Analyze ALL of them using the scoring rules below and return results as a JSON a
 IMPORTANT: Marketplace listings often have sparse data. Score them FAIRLY without over-penalizing missing metadata.
 
 SCORING RULES (apply to every listing):
-- priceFairness (0–100): judge price for the specific inferred item; be confident and specific, not generic
+- priceFairness (0–100 or null): judge price for the specific inferred item; be confident and specific, not generic. If the price is "Accepts Offers" or $0, set priceFairness to null (JSON null) — do NOT guess a score.
 - sellerTrust (0–100): interpret as LISTING CONFIDENCE — active listing + real image + plausible title = 70–85 baseline
 - conditionHonesty (0–100): images and title align well = 70–90; neutral/unclear = 55–70
 - shippingFairness (0–100): standard local pickup = 75–90; multiple options = 85–95
 - descriptionQuality (0–100): clear specific title + context = 70–90; vague = 30–50
+
+ACCEPTS OFFERS RULE (CRITICAL):
+- If a listing's price is "Accepts Offers" or $0, set priceFairness to null in the JSON.
+- In the overview for that listing, mention that the price is negotiable and the buyer should visit the listing to determine the asking price.
 
 CRITICAL:
 - Missing data = NEUTRAL (not negative)
@@ -357,8 +368,6 @@ OUTPUT FORMAT — return ONLY a JSON array (no markdown, no backticks):
 
 async function _runMarketplaceBatch(listings: any[], allDataUrls: string[][]): Promise<string[]> {
   const contentParts: any[] = [];
-  let totalImages = 0;
-  const MAX_BATCH_IMAGES = 5;
 
   for (let i = 0; i < listings.length; i++) {
     const listing = listings[i];
@@ -369,24 +378,22 @@ async function _runMarketplaceBatch(listings: any[], allDataUrls: string[][]): P
     const deliveryTypes = formatDeliveryTypes(listing.delivery_types ?? listing.raw?.delivery_types);
     const availability = formatAvailability(listing);
     const dataUrls = allDataUrls[i];
+    const batchAcceptsOffers = !listing.price || Number(listing.price) === 0;
 
     contentParts.push({ type: "text", text: `=== LISTING ${i + 1} ===` });
     contentParts.push({ type: "text", text: `Title: ${title}` });
-    contentParts.push({ type: "text", text: `Price: ${listing.price} ${currency}` });
+    contentParts.push({ type: "text", text: `Price: ${batchAcceptsOffers ? "Accepts Offers" : `${listing.price} ${currency}`}` });
     contentParts.push({ type: "text", text: `Location: ${location}` });
     contentParts.push({ type: "text", text: `Delivery Types: ${deliveryTypes}` });
     contentParts.push({ type: "text", text: `Availability: ${availability}` });
     contentParts.push({ type: "text", text: `Listing URL: ${link}` });
     contentParts.push({ type: "text", text: `Images Attached: ${dataUrls.length}` });
 
-    const allowedImages = Math.max(0, MAX_BATCH_IMAGES - totalImages);
-    const batchDataUrls = dataUrls.slice(0, allowedImages);
-    if (batchDataUrls.length) {
+    if (dataUrls.length) {
       contentParts.push({ type: "text", text: `[Images for Listing ${i + 1}]` });
-      for (const dataUrl of batchDataUrls) {
+      for (const dataUrl of dataUrls) {
         contentParts.push({ type: "image_url", image_url: { url: dataUrl } });
       }
-      totalImages += batchDataUrls.length;
     }
 
     contentParts.push({ type: "text", text: `=== END LISTING ${i + 1} ===` });

@@ -2,9 +2,8 @@ import type { Request, Response } from "express";
 import type { Listing } from "../types/listing";
 
 import { searchEbayNormalized } from "../services/ebayService";
-import { searchMarketplaceNormalized, getMarketplaceListing } from "../services/marketplaceService";
+import { searchMarketplaceNormalized } from "../services/marketplaceService";
 import { scoreListings } from "../services/scoring/scoreListing";
-import { getLocationFromIp, extractClientIp } from "../utils/geoIp";
 
 function clampInt(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
@@ -64,9 +63,8 @@ export async function searchAll(req: Request, res: Response) {
   const sortByRaw = String(req.query.sortBy ?? "").trim();
   const sortBy = (sortByRaw === "price_asc" || sortByRaw === "price_desc") ? sortByRaw : undefined;
 
-  const buyerLocation = useEbay
-    ? await getLocationFromIp(extractClientIp(req as any)).catch(() => null)
-    : null;
+  const countryRaw = String(req.query.country ?? "").trim().toUpperCase();
+  const buyerLocation = countryRaw ? { country: countryRaw, zip: "" } : null;
 
   let ebayUnavailable = false;
   const runEbaySearch = async (target: number) => {
@@ -93,20 +91,7 @@ export async function searchAll(req: Request, res: Response) {
     useEbay ? runEbaySearch(ebayTarget) : Promise.resolve([]),
   ]);
 
-  // Enrich marketplace listings with full image galleries in parallel
-  const enrichedMarketplace = await Promise.all(
-    marketplace.map(async (listing: Listing) => {
-      const detail = await getMarketplaceListing(listing.id).catch((err) => {
-        console.error("getMarketplaceListing failed", listing.id, err);
-        return {} as Partial<Listing>;
-      });
-      if (detail.images && detail.images.length > 0) listing.images = detail.images;
-      if (detail.description) listing.description = detail.description;
-      return listing;
-    })
-  );
-
-  let merged = dedupe([...ebay, ...enrichedMarketplace]);
+  let merged = dedupe([...ebay, ...marketplace]);
 
   if (merged.length < limit && useEbay && !ebayUnavailable) {
     const need = limit - merged.length;

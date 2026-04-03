@@ -8,7 +8,46 @@ function average(nums: number[]) {
 }
 
 
-function parseAIAnalysis(analysis: string) {
+function buildEbayDebugInfo(listing: any): string {
+  const imageUrls: string[] = Array.isArray(listing.imageUrls)
+    ? listing.imageUrls.filter((u: any) => typeof u === "string" && u.trim())
+    : Array.isArray(listing.images)
+      ? listing.images.filter((u: any) => typeof u === "string" && u.trim())
+      : [];
+
+  const loc = listing.itemLocation ?? listing.location;
+  let locationStr: string;
+  if (loc && typeof loc === "object") {
+    locationStr = [loc.city, loc.stateOrProvince, loc.postalCode, loc.country].filter(Boolean).join(", ");
+  } else {
+    locationStr = loc ?? null;
+  }
+
+  return JSON.stringify({
+    title: listing.title ?? null,
+    price: listing.price ?? null,
+    currency: listing.currency ?? "USD",
+    seller: listing.seller ?? null,
+    feedback: listing.feedback ?? null,
+    score: listing.score ?? null,
+    condition: listing.condition ?? null,
+    conditionDescriptor: listing.conditionDescriptor ?? null,
+    itemLocation: locationStr,
+    buyingOptions: listing.buyingOptions ?? null,
+    shippingOptions: listing.shippingOptions ?? null,
+    originalPrice: listing.marketingPrice?.originalPrice ?? null,
+    discount: listing.marketingPrice?.discountPercentage ?? listing.marketingPrice?.discountPercent ?? null,
+    shortDescription: listing.shortDescription ?? null,
+    description_sent_to_llm: (() => {
+      const raw = listing.description || listing.fullDescription || "";
+      return raw.replace(/<[^>]*>/g, " ").replace(/\s{2,}/g, " ").trim() || null;
+    })(),
+    url: listing.link ?? listing.url ?? null,
+    images_provided: imageUrls.length,
+  }, null, 2);
+}
+
+function parseAIAnalysis(listing: any, analysis: string) {
   let jsonBlock: any = null;
 
   try {
@@ -16,7 +55,8 @@ function parseAIAnalysis(analysis: string) {
     if (jsonMatch) {
       jsonBlock = JSON.parse(jsonMatch[0]);
     } else {
-      console.error("⚠ No JSON block found in AI response.");
+      try { jsonBlock = JSON.parse(analysis); } catch { /* ignore */ }
+      if (!jsonBlock) console.error("⚠ No JSON block found in AI response.");
     }
   } catch (err) {
     console.error("Failed to parse AI JSON:", err);
@@ -31,14 +71,14 @@ function parseAIAnalysis(analysis: string) {
     aiScore,
     aiScores: scores,
     overview: jsonBlock?.overview || "No overview.",
-    debugInfo: analysis.split("DEBUG INFO:")[1]?.trim() || "No debug info.",
+    debugInfo: buildEbayDebugInfo(listing),
     rawAnalysis: analysis,
   };
 }
 
 export async function analyzeItemWithAI(merged: any) {
   const analysis = await analyzeListingWithImages(merged);
-  return parseAIAnalysis(analysis);
+  return parseAIAnalysis(merged, analysis);
 }
 
 export async function analyzeItemsWithAI(items: any[]) {
@@ -51,7 +91,7 @@ export async function analyzeItemsWithAI(items: any[]) {
     const chunk = items.slice(start, start + BATCH_SIZE);
     const rawStrings = await batchAnalyzeListingsWithImages(chunk);
     for (let i = 0; i < chunk.length; i++) {
-      results.push({ ...chunk[i], ...parseAIAnalysis(rawStrings[i]) });
+      results.push({ ...chunk[i], ...parseAIAnalysis(chunk[i], rawStrings[i]) });
     }
   }
 

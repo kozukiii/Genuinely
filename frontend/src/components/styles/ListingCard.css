@@ -154,6 +154,23 @@
   text-shadow: 0 0 16px rgba(57, 255, 157, 0.14);
 }
 
+.listing-price-accepts-offers {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.listing-price--offers {
+  color: rgba(255, 200, 80, 0.95);
+  text-shadow: 0 0 16px rgba(255, 200, 80, 0.14);
+}
+
+.listing-price--offers-hint {
+  font-size: 0.68rem;
+  color: rgba(255, 200, 80, 0.6);
+  font-style: italic;
+}
+
 .listing-condition {
   width: fit-content;
   margin-top: 0.4rem;

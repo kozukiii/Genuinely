@@ -75,7 +75,14 @@ export default function ListingCard({ data }: { data: Listing }) {
         <div className="price-rating">
           <div className="left-side">
             <div className="listing-price-row">
-              <p className="listing-price">{money}</p>
+              {data.acceptsOffers ? (
+                <div className="listing-price-accepts-offers">
+                  <p className="listing-price listing-price--offers">Accepts Offers</p>
+                  <span className="listing-price--offers-hint">Visit listing to determine price</span>
+                </div>
+              ) : (
+                <p className="listing-price">{money}</p>
+              )}
               {data.shippingPrice != null && (
                 <span className={`listing-shipping${data.shippingPrice === 0 ? " listing-shipping--free" : ""}`}>
                   {data.shippingPrice === 0

@@ -97,6 +97,10 @@ function formatDiscount(marketingPrice: any): string {
   return s ? (s.includes("%") ? s : `${s}%`) : "N/A";
 }
 
+function stripHtml(html: string): string {
+  return html.replace(/<[^>]*>/g, " ").replace(/\s{2,}/g, " ").trim();
+}
+
 export async function analyzeListingWithImages(listing: any) {
   const title = clean(listing.title) ?? "Untitled";
   const currency = clean(listing.currency) ?? "USD";
@@ -113,7 +117,8 @@ export async function analyzeListingWithImages(listing: any) {
   const shippingOptions = formatShippingOptions(listing.shippingOptions);
 
   const shortDesc = clean(listing.shortDescription) ?? "";
-  const description = clean(listing.description ?? listing.fullDescription) ?? "";
+  const rawDesc = listing.description || listing.fullDescription || "";
+  const description = clean(stripHtml(rawDesc)) ?? "";
 
   const imageUrls: string[] = Array.isArray(listing.imageUrls)
     ? listing.imageUrls.filter((u: any) => typeof u === "string" && u.trim())
@@ -194,8 +199,7 @@ DEBUG INFO:
     },
   ];
 
-  // Attach images — Groq supports max 5 per request
-  for (const url of imageUrls.slice(0, 5)) {
+  for (const url of imageUrls) {
     messages[1].content.push({
       type: "image_url",
       image_url: { url },
@@ -249,8 +253,6 @@ OUTPUT FORMAT — return ONLY a JSON array (no markdown, no backticks):
 
 async function _runEbayBatch(listings: any[]): Promise<string[]> {
   const contentParts: any[] = [];
-  let totalImages = 0;
-  const MAX_BATCH_IMAGES = 5;
 
   for (let i = 0; i < listings.length; i++) {
     const listing = listings[i];
@@ -265,7 +267,8 @@ async function _runEbayBatch(listings: any[]): Promise<string[]> {
     const buyingOptions = formatBuyingOptions(listing.buyingOptions);
     const shippingOptions = formatShippingOptions(listing.shippingOptions);
     const shortDesc = clean(listing.shortDescription) ?? "";
-    const description = clean(listing.description ?? listing.fullDescription) ?? "";
+    const rawDesc = listing.description || listing.fullDescription || "";
+    const description = clean(stripHtml(rawDesc)) ?? "";
 
     const imageUrls: string[] = Array.isArray(listing.imageUrls)
       ? listing.imageUrls.filter((u: any) => typeof u === "string" && u.trim())
@@ -290,14 +293,12 @@ async function _runEbayBatch(listings: any[]): Promise<string[]> {
     contentParts.push({ type: "text", text: `Listing URL: ${link}` });
     contentParts.push({ type: "text", text: `Images Provided: ${imageUrls.length}` });
 
-    const allowedImages = Math.max(0, MAX_BATCH_IMAGES - totalImages);
-    const batchImageUrls = imageUrls.slice(0, allowedImages);
+    const batchImageUrls = imageUrls;
     if (batchImageUrls.length) {
       contentParts.push({ type: "text", text: `[Images for Listing ${i + 1}]` });
       for (const url of batchImageUrls) {
         contentParts.push({ type: "image_url", image_url: { url } });
       }
-      totalImages += batchImageUrls.length;
     }
 
     contentParts.push({ type: "text", text: `=== END LISTING ${i + 1} ===` });

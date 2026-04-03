@@ -49,6 +49,9 @@ export interface Listing {
   // source ranking / score fields (optional)
   score?: number;
 
+  // true when price is 0 (listing uses negotiated/offer-based pricing)
+  acceptsOffers?: boolean;
+
   // --- AI scoring (optional; only present when analyze=1) ---
   aiScore?: number;
   aiScores?: {

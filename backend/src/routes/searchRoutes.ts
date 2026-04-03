@@ -3,7 +3,6 @@ import { searchAll } from "../controllers/searchController";
 import { scoreListings } from "../services/scoring/scoreListing";
 import { getEbayItemByNumericId } from "../services/ebayService";
 import { getMarketplaceListingFull } from "../services/marketplaceService";
-import { getLocationFromIp, extractClientIp } from "../utils/geoIp";
 
 const router = Router();
 
@@ -43,8 +42,8 @@ router.post("/from-url", async (req, res) => {
       });
     }
 
-    const clientIp = extractClientIp(req as any);
-    const buyerLocation = ebayMatch ? await getLocationFromIp(clientIp) : null;
+    const countryRaw = String(req.body.country ?? "").trim().toUpperCase();
+    const buyerLocation = ebayMatch && countryRaw ? { country: countryRaw, zip: "" } : null;
 
     const listing = ebayMatch
       ? await getEbayItemByNumericId(ebayMatch[1], buyerLocation)

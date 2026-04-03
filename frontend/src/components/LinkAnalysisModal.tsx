@@ -29,7 +29,7 @@ export default function LinkAnalysisModal({ onClose }: Props) {
       const res = await fetch(`${API_BASE}/api/search/from-url`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: trimmed }),
+        body: JSON.stringify({ url: trimmed, country: Intl.DateTimeFormat().resolvedOptions().locale.split("-")[1]?.toUpperCase() ?? "US" }),
       });
 
       if (!res.ok) {

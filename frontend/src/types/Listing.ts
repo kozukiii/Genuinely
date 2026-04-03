@@ -31,6 +31,9 @@ export interface Listing {
   description?: string;
   fullDescription?: string;
 
+  // true when price is 0 (listing uses negotiated/offer-based pricing)
+  acceptsOffers?: boolean;
+
   // AI scoring
   aiScore?: number;
 

@@ -6,7 +6,30 @@ function average(nums: number[]) {
   return Math.round(valid.reduce((a, b) => a + b, 0) / valid.length);
 }
 
+function buildMarketplaceDebugInfo(listing: any): string {
+  const acceptsOffers = !listing.price || Number(listing.price) === 0;
+  const imageUrls: string[] = Array.isArray(listing.imageUrls)
+    ? listing.imageUrls.filter((u: any) => typeof u === "string" && u.trim())
+    : Array.isArray(listing.images)
+      ? listing.images.filter((u: any) => typeof u === "string" && u.trim())
+      : [];
+
+  return JSON.stringify({
+    title: listing.title ?? null,
+    price: acceptsOffers ? "Accepts Offers" : listing.price,
+    currency: listing.currency ?? "USD",
+    location: listing.location ?? null,
+    delivery_types: listing.delivery_types ?? listing.raw?.delivery_types ?? null,
+    is_live: listing.is_live ?? listing.raw?.is_live ?? null,
+    is_pending: listing.is_pending ?? listing.raw?.is_pending ?? null,
+    is_sold: listing.is_sold ?? listing.raw?.is_sold ?? null,
+    url: listing.link ?? listing.url ?? null,
+    images_provided: imageUrls.length,
+  }, null, 2);
+}
+
 export async function scoreMarketplaceListing(listing: any) {
+  const acceptsOffers = listing.price === 0;
   const analysis = await analyzeMarketplaceListingWithImages(listing);
 
   let jsonBlock: any = null;
@@ -17,7 +40,9 @@ export async function scoreMarketplaceListing(listing: any) {
     if (jsonMatch) {
       jsonBlock = JSON.parse(jsonMatch[0]);
     } else {
-      console.error("⚠ No JSON block found in Marketplace AI response.");
+      // Try parsing the entire response as JSON (LLM may have omitted the DEBUG INFO section)
+      try { jsonBlock = JSON.parse(analysis); } catch { /* ignore */ }
+      if (!jsonBlock) console.error("⚠ No JSON block found in Marketplace AI response.");
     }
   } catch (err) {
     console.error("Failed to parse Marketplace AI JSON:", err);
@@ -33,25 +58,27 @@ export async function scoreMarketplaceListing(listing: any) {
     descriptionQuality,
   } = scores;
 
-  const aiScore = average([
-    priceFairness,
-    sellerTrust,
-    conditionHonesty,
-    shippingFairness,
-    descriptionQuality,
-  ]);
+  // Exclude priceFairness from the rating when listing uses offer-based pricing
+  const scoreValues = acceptsOffers
+    ? [sellerTrust, conditionHonesty, shippingFairness, descriptionQuality]
+    : [priceFairness, sellerTrust, conditionHonesty, shippingFairness, descriptionQuality];
+
+  const aiScore = average(scoreValues);
 
   return {
     ...listing,
+    acceptsOffers,
     aiScore,
     aiScores: scores,
     overview: jsonBlock?.overview || "No overview.",
-    debugInfo: analysis.split("DEBUG INFO:")[1]?.trim() || "No debug info.",
+    debugInfo: buildMarketplaceDebugInfo(listing),
     rawAnalysis: analysis,
   };
 }
 
 function parseMarketplaceAnalysis(listing: any, analysis: string) {
+  const acceptsOffers = listing.price === 0;
+
   let jsonBlock: any = null;
 
   try {
@@ -59,7 +86,8 @@ function parseMarketplaceAnalysis(listing: any, analysis: string) {
     if (jsonMatch) {
       jsonBlock = JSON.parse(jsonMatch[0]);
     } else {
-      console.error("⚠ No JSON block found in Marketplace AI response.");
+      try { jsonBlock = JSON.parse(analysis); } catch { /* ignore */ }
+      if (!jsonBlock) console.error("⚠ No JSON block found in Marketplace AI response.");
     }
   } catch (err) {
     console.error("Failed to parse Marketplace AI JSON:", err);
@@ -67,14 +95,21 @@ function parseMarketplaceAnalysis(listing: any, analysis: string) {
 
   const scores = jsonBlock?.scores || {};
   const { priceFairness, sellerTrust, conditionHonesty, shippingFairness, descriptionQuality } = scores;
-  const aiScore = average([priceFairness, sellerTrust, conditionHonesty, shippingFairness, descriptionQuality]);
+
+  // Exclude priceFairness from the rating when listing uses offer-based pricing
+  const scoreValues = acceptsOffers
+    ? [sellerTrust, conditionHonesty, shippingFairness, descriptionQuality]
+    : [priceFairness, sellerTrust, conditionHonesty, shippingFairness, descriptionQuality];
+
+  const aiScore = average(scoreValues);
 
   return {
     ...listing,
+    acceptsOffers,
     aiScore,
     aiScores: scores,
     overview: jsonBlock?.overview || "No overview.",
-    debugInfo: analysis.split("DEBUG INFO:")[1]?.trim() || "No debug info.",
+    debugInfo: buildMarketplaceDebugInfo(listing),
     rawAnalysis: analysis,
   };
 }

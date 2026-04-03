@@ -9,7 +9,8 @@ import "./styles/HomePage.css";
 import { setEbayNotice } from "../utils/ebayNotice";
 
 const PAGE_SIZE = 12;
-const PRELOAD_SIZE = PAGE_SIZE * 2; // always fetch 2 pages up-front
+const BUYER_COUNTRY = Intl.DateTimeFormat().resolvedOptions().locale.split("-")[1]?.toUpperCase() ?? "US";
+const PRELOAD_SIZE = PAGE_SIZE; // fetch first page, then background-prefetch next
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
 const SEARCH_QUERY_KEY = "search:query";
@@ -66,6 +67,7 @@ async function fetchFromApi(
     url += `&sortBy=${filters.sortBy}`;
   }
   if (offset > 0) url += `&offset=${offset}`;
+  url += `&country=${BUYER_COUNTRY}`;
 
   const res = await fetch(url);
   const text = await res.text();

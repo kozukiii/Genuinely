@@ -12,6 +12,40 @@ function sourceLabel(source?: Listing["source"]) {
   return "eBay";
 }
 
+function looksLikeDebugPayload(value?: string | null) {
+  if (!value) return false;
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+
+  return /DEBUG INFO:/i.test(trimmed)
+    || (/^\s*[\[{]/.test(trimmed) && /"scores"\s*:/.test(trimmed));
+}
+
+function sanitizeVisibleText(value?: string | null) {
+  if (!value) return null;
+
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (looksLikeDebugPayload(trimmed)) return null;
+
+  const withoutComments = trimmed.replace(/<!--[\s\S]*?-->/g, " ");
+  const withoutStyleAndScript = withoutComments
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ");
+  const withoutTags = withoutStyleAndScript.replace(/<[^>]+>/g, " ");
+  const decoded = withoutTags
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, "\"")
+    .replace(/&#39;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">");
+  const normalized = decoded.replace(/\s+/g, " ").trim();
+
+  if (!normalized) return null;
+  return normalized;
+}
+
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
 export default function ListingPage() {
@@ -127,6 +161,9 @@ export default function ListingPage() {
 
   // Merge live analysis result over listing when available
   const ai = analysisResult ?? listing;
+  const visibleOverview = sanitizeVisibleText(ai.overview) ?? (looksLikeDebugPayload(ai.overview)
+    ? "Analysis completed. Expand raw AI output if you want to inspect the underlying response."
+    : ai.overview);
 
   const scores = {
     priceFairness: ai.aiScores?.priceFairness,
@@ -153,28 +190,15 @@ export default function ListingPage() {
 
   const sellerLine = useMemo(() => {
     if (listing.source === "marketplace") {
-      return listing.location ? `📍 ${listing.location}` : null;
+      return listing.location ? `\u{1F4CD} ${listing.location}` : null;
     }
 
     const seller = listing.seller?.trim();
-    const feedback = listing.feedback?.trim();
-    const score = listing.score;
-
-    if (!seller && !feedback && score == null) return null;
-
-    const parts: string[] = [];
-    parts.push(`★ ${seller || "Seller"}`);
-
-    if (feedback) parts.push(`— ${feedback}`);
-    if (score != null) parts.push(`(${score})`);
-
-    return parts.join(" ");
+    return seller || null;
   }, [
     listing.source,
     listing.location,
     listing.seller,
-    listing.feedback,
-    listing.score,
   ]);
 
   return (
@@ -188,7 +212,7 @@ export default function ListingPage() {
               onError={(e) => (e.currentTarget.src = "/placeholder.jpg")}
             />
             {enrichLoading && listing.source === "marketplace" && (
-              <span className="image-loading-badge">Loading gallery…</span>
+              <span className="image-loading-badge">Loading gallery{"\u2026"}</span>
             )}
           </div>
 
@@ -199,7 +223,7 @@ export default function ListingPage() {
                   setImageIndex((i) => (i === 0 ? images.length - 1 : i - 1))
                 }
               >
-                ‹
+                {"\u2039"}
               </button>
 
               <span className="image-counter">
@@ -211,7 +235,7 @@ export default function ListingPage() {
                   setImageIndex((i) => (i === images.length - 1 ? 0 : i + 1))
                 }
               >
-                ›
+                {"\u203A"}
               </button>
             </div>
           )}
@@ -252,7 +276,7 @@ export default function ListingPage() {
                     setSaved(next);
                   }}
                 >
-                  {saved ? "♥" : "♡"}
+                  {saved ? "\u2665" : "\u2661"}
                 </button>
               </div>
 
@@ -271,10 +295,6 @@ export default function ListingPage() {
             )}
           </div>
 
-          {(enrichedDescription || listing.description) && (
-            <p className="page-description">{enrichedDescription || listing.description}</p>
-          )}
-
           <div className="analyze-row">
             <button
               className="analyze-btn"
@@ -282,7 +302,7 @@ export default function ListingPage() {
               disabled={analyzing}
             >
               {analyzing
-                ? "Analyzing…"
+                ? `Analyzing\u2026`
                 : analysisResult?.analyzedAt
                 ? "Re-analyze"
                 : ai.aiScore != null
@@ -309,7 +329,7 @@ export default function ListingPage() {
             target="_blank"
             rel="noopener noreferrer"
           >
-            View on {sourceLabel(listing.source)} →
+            View on {sourceLabel(listing.source)} {"\u2192"}
           </a>
         </div>
       </div>
@@ -327,7 +347,7 @@ export default function ListingPage() {
                 className="ai-toggle-btn"
                 onClick={() => setShowOverview(!showOverview)}
               >
-                {showOverview ? "Hide details ↑" : "Click to see why ↓"}
+                {showOverview ? "Hide details \u2191" : "Click to see why \u2193"}
               </button>
             </div>
           </div>
@@ -349,7 +369,7 @@ export default function ListingPage() {
               )}
 
               <h3>Summary</h3>
-              <p>{ai.overview}</p>
+              <p>{visibleOverview}</p>
 
               {ai.marketContext && (
                 <>
@@ -357,7 +377,7 @@ export default function ListingPage() {
                     className="ai-debug-toggle"
                     onClick={() => setShowContext(!showContext)}
                   >
-                    {showContext ? "Hide market context ↑" : "Show market context ↓"}
+                    {showContext ? "Hide market context \u2191" : "Show market context \u2193"}
                   </button>
                   {showContext && (
                     <pre className="debug-block">{ai.marketContext}</pre>
@@ -369,7 +389,7 @@ export default function ListingPage() {
                 className="ai-debug-toggle"
                 onClick={() => setShowDebug(!showDebug)}
               >
-                {showDebug ? "Hide debug ↑" : "Show debug info ↓"}
+                {showDebug ? "Hide debug \u2191" : "Show debug info \u2193"}
               </button>
 
               {showDebug && (
@@ -380,7 +400,7 @@ export default function ListingPage() {
                 className="ai-debug-toggle"
                 onClick={() => setShowRaw(!showRaw)}
               >
-                {showRaw ? "Hide raw AI output ↑" : "Show raw AI output ↓"}
+                {showRaw ? "Hide raw AI output \u2191" : "Show raw AI output \u2193"}
               </button>
 
               {showRaw && (

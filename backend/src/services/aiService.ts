@@ -1,13 +1,13 @@
 import { analyzeListingWithImages, batchAnalyzeListingsWithImages } from "../ai/ebayOverview.openai";
+import { extractStructuredAnalysis } from "../utils/extractStructuredAnalysis";
 import { calculatePriceFairness } from "./scoring/priceFairnessScore";
 
 // Helper for safe average
-function average(nums: number[]) {
-  const valid = nums.filter((n) => typeof n === "number" && !isNaN(n));
+function average(nums: Array<number | null | undefined>) {
+  const valid = nums.filter((n): n is number => typeof n === "number" && !isNaN(n));
   if (valid.length === 0) return null;
   return Math.round(valid.reduce((a, b) => a + b, 0) / valid.length);
 }
-
 
 function buildEbayDebugInfo(listing: any): string {
   const imageUrls: string[] = Array.isArray(listing.imageUrls)
@@ -49,18 +49,10 @@ function buildEbayDebugInfo(listing: any): string {
 }
 
 function parseAIAnalysis(listing: any, analysis: string, context?: string | null) {
-  let jsonBlock: any = null;
+  const jsonBlock = extractStructuredAnalysis(analysis);
 
-  try {
-    const jsonMatch = analysis.match(/^\s*\{[\s\S]*?\}\s*(?=DEBUG INFO:)/);
-    if (jsonMatch) {
-      jsonBlock = JSON.parse(jsonMatch[0]);
-    } else {
-      try { jsonBlock = JSON.parse(analysis); } catch { /* ignore */ }
-      if (!jsonBlock) console.error("⚠ No JSON block found in AI response.");
-    }
-  } catch (err) {
-    console.error("Failed to parse AI JSON:", err);
+  if (!jsonBlock) {
+    console.error("No JSON block found in AI response.");
   }
 
   const scores = { ...(jsonBlock?.scores || {}) };
@@ -77,7 +69,14 @@ function parseAIAnalysis(listing: any, analysis: string, context?: string | null
     scores.priceFairness = calculatedPriceFairness;
   }
 
-  const aiScore = average([scores.priceFairness, sellerTrust, conditionHonesty, shippingFairness, locationRisk, descriptionQuality]);
+  const aiScore = average([
+    scores.priceFairness,
+    sellerTrust,
+    conditionHonesty,
+    shippingFairness,
+    locationRisk,
+    descriptionQuality,
+  ]);
 
   return {
     aiScore,

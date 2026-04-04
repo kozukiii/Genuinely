@@ -15,24 +15,34 @@ function getProxyAgent() {
 }
 
 const GRAPHQL_URL = "https://www.facebook.com/api/graphql/";
+const FB_DESKTOP_USER_AGENT =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36";
 
-// function getFbCookie() {
-//   return [
-//     `c_user=${process.env.FB_C_USER}`,
-//     `xs=${decodeURIComponent(process.env.FB_XS ?? "")}`,
-//     `datr=${process.env.FB_DATR}`,
-//     `sb=${process.env.FB_SB}`,
-//   ].join("; ");
-// }
+function getFbCookie() {
+  const cookieParts = [
+    process.env.FB_C_USER ? `c_user=${process.env.FB_C_USER}` : "",
+    process.env.FB_XS ? `xs=${decodeURIComponent(process.env.FB_XS)}` : "",
+    process.env.FB_DATR ? `datr=${process.env.FB_DATR}` : "",
+    process.env.FB_SB ? `sb=${process.env.FB_SB}` : "",
+  ].filter(Boolean);
 
-// const FB_HEADERS = {
-//   "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-//   "content-type": "application/x-www-form-urlencoded",
-//   "accept": "*/*, application/json",
-//   "accept-language": "en-US,en;q=0.9",
-//   "origin": "https://www.facebook.com",
-//   "referer": "https://www.facebook.com/marketplace/",
-// };
+  return cookieParts.join("; ");
+}
+
+function getMarketplacePermalinkHeaders(cookie: string) {
+  return {
+    "user-agent": FB_DESKTOP_USER_AGENT,
+    "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "accept-language": "en-US,en;q=0.9",
+    "cache-control": "max-age=0",
+    "upgrade-insecure-requests": "1",
+    "sec-fetch-dest": "document",
+    "sec-fetch-mode": "navigate",
+    "sec-fetch-site": "none",
+    "sec-fetch-user": "?1",
+    ...(cookie ? { cookie } : {}),
+  };
+}
 
 const latLngCache = new Map<string, { lat: number; lng: number; expiresAt: number }>();
 
@@ -79,6 +89,90 @@ async function getLatLng(location: string) {
   }
 
   return result;
+}
+
+async function searchMarketplaceListingsByLatLng({
+  query,
+  lat,
+  lng,
+  limit = 10,
+  radiusKm = 16,
+}: {
+  query: string;
+  lat: number;
+  lng: number;
+  limit?: number;
+  radiusKm?: number;
+}) {
+  const variables = {
+    count: limit,
+    params: {
+      bqf: {
+        callsite: "COMMERCE_MKTPLACE_WWW",
+        query,
+      },
+      browse_request_params: {
+        filter_location_latitude: lat,
+        filter_location_longitude: lng,
+        filter_radius_km: radiusKm,
+      },
+      custom_request_params: {
+        surface: "SEARCH",
+      },
+    },
+  };
+
+  const body = new URLSearchParams({
+    variables: JSON.stringify(variables),
+    doc_id: "7111939778879383",
+  });
+
+  const res = await fetch(GRAPHQL_URL, {
+    method: "POST",
+    headers: {
+      "user-agent": "Mozilla/5.0",
+      "content-type": "application/x-www-form-urlencoded",
+    },
+    body,
+    ...(proxyUrls.length ? { agent: getProxyAgent() } : {}),
+  });
+
+  const json = await res.json();
+  const edges = json?.data?.marketplace_search?.feed_units?.edges ?? [];
+
+  return edges.map((edge: any) => {
+    const listing = edge?.node?.listing;
+
+    return {
+      id: String(listing?.id ?? ""),
+      source: "marketplace",
+      title: listing?.marketplace_listing_title ?? "Untitled listing",
+      price: Number(
+        String(listing?.listing_price?.formatted_amount ?? "0").replace(
+          /[^0-9.]/g,
+          ""
+        ) || 0
+      ),
+      currency: "USD",
+      url: listing?.id
+        ? `https://www.facebook.com/marketplace/item/${listing.id}`
+        : "",
+      images: extractMarketplaceImages(listing),
+      location: [
+        listing?.location?.reverse_geocode?.city,
+        listing?.location?.reverse_geocode?.state,
+      ]
+        .filter(Boolean)
+        .join(", "),
+      is_live: listing?.is_live ?? false,
+      is_pending: listing?.is_pending ?? false,
+      is_sold: listing?.is_sold ?? false,
+      delivery_types: Array.isArray(listing?.delivery_types)
+        ? listing.delivery_types
+        : [],
+      raw: listing,
+    };
+  });
 }
 
 function extractMarketplaceImages(listing: any): string[] {
@@ -174,6 +268,373 @@ function extractDescriptionFromHtml(html: string): string | undefined {
   return undefined;
 }
 
+function collectMarketplaceProductDetails(node: any, hits: any[]) {
+  if (!node || typeof node !== "object") return;
+
+  const details = node?.data?.viewer?.marketplace_product_details_page;
+  if (details) hits.push(details);
+
+  if (Array.isArray(node)) {
+    for (const item of node) collectMarketplaceProductDetails(item, hits);
+    return;
+  }
+
+  for (const value of Object.values(node)) {
+    collectMarketplaceProductDetails(value, hits);
+  }
+}
+
+function extractMarketplaceProductDetailPages(html: string): any[] {
+  const hits: any[] = [];
+  const scriptPattern = /<script type="application\/json"[^>]*data-sjs[^>]*>([\s\S]*?)<\/script>/g;
+
+  for (const match of html.matchAll(scriptPattern)) {
+    const scriptText = match[1];
+    if (!scriptText) continue;
+
+    try {
+      collectMarketplaceProductDetails(JSON.parse(scriptText), hits);
+    } catch {
+      // Ignore unrelated bootstrap blobs that are not valid standalone JSON.
+    }
+  }
+
+  return hits;
+}
+
+function getMarketplacePayloadId(payload: any): string | null {
+  const id = payload?.target?.id ?? payload?.marketplace_listing_renderable_target?.id;
+  return typeof id === "string" && id.trim() ? id.trim() : null;
+}
+
+function pickMarketplaceProductDetailPages(listingId: string, payloads: any[]) {
+  const matching = payloads.filter((payload) => getMarketplacePayloadId(payload) === listingId);
+
+  const details =
+    matching.find((payload) => typeof payload?.target?.marketplace_listing_title === "string") ??
+    null;
+
+  const media =
+    matching.find((payload) => Array.isArray(payload?.target?.listing_photos)) ??
+    null;
+
+  return { details, media };
+}
+
+function parseMarketplacePrice(value: any, formattedText?: string): number {
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && numeric >= 0) return numeric;
+
+  if (typeof formattedText === "string") {
+    const parsed = Number(formattedText.replace(/[^0-9.]/g, ""));
+    if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+  }
+
+  return 0;
+}
+
+function extractMarketplaceDescription(target: any): string | undefined {
+  const candidates = [
+    target?.redacted_description?.text,
+    target?.description?.text,
+    target?.story?.message?.text,
+    target?.story?.translated_message_for_viewer?.text,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+
+  return undefined;
+}
+
+function formatMarketplaceLocation(target: any): string | undefined {
+  const displayName = target?.location?.reverse_geocode?.city_page?.display_name;
+  if (typeof displayName === "string" && displayName.trim()) return displayName.trim();
+
+  const locationText = target?.location_text?.text;
+  if (typeof locationText === "string" && locationText.trim()) return locationText.trim();
+
+  const parts = [
+    target?.location?.reverse_geocode?.city,
+    target?.location?.reverse_geocode?.state,
+  ]
+    .filter((part): part is string => typeof part === "string" && part.trim().length > 0)
+    .map((part) => part.trim());
+
+  return parts.length ? parts.join(", ") : undefined;
+}
+
+function extractMarketplaceCoordinates(source: any): { lat: number; lng: number } | null {
+  const candidates = [
+    source?.location,
+    source?.marketplace_listing_renderable_target?.location,
+    source?.raw?.location,
+  ];
+
+  for (const candidate of candidates) {
+    const lat = Number(candidate?.latitude);
+    const lng = Number(candidate?.longitude);
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      return { lat, lng };
+    }
+  }
+
+  return null;
+}
+
+function attachSearchMetadataToMarketplaceListing(detailListing: Listing, searchMatch: any): Listing {
+  const mergedRaw =
+    detailListing.raw && typeof detailListing.raw === "object" && searchMatch?.raw && typeof searchMatch.raw === "object"
+      ? { ...(searchMatch.raw as Record<string, unknown>), ...(detailListing.raw as Record<string, unknown>) }
+      : detailListing.raw ?? searchMatch?.raw;
+
+  return {
+    ...detailListing,
+    raw: mergedRaw,
+  } as Listing;
+}
+
+function buildMarketplaceListingFromProductDetails(
+  listingId: string,
+  detailsPage: any,
+  mediaPage: any | null
+): Listing {
+  const target = detailsPage?.target;
+  const imageSources = [
+    mediaPage?.target,
+    target,
+    target?.product_item,
+    detailsPage?.marketplace_listing_renderable_target,
+  ];
+
+  const imageSet = new Set<string>();
+  for (const source of imageSources) {
+    for (const url of extractMarketplaceImages(source)) {
+      imageSet.add(url);
+    }
+  }
+
+  const description = extractMarketplaceDescription(target);
+  const location = formatMarketplaceLocation(target);
+  const seller =
+    target?.marketplace_listing_seller?.name ??
+    target?.seller?.name ??
+    target?.story?.actors?.[0]?.name;
+  const url =
+    (typeof target?.share_uri === "string" && target.share_uri.trim()) ||
+    `https://www.facebook.com/marketplace/item/${listingId}`;
+
+  return {
+    id: listingId,
+    source: "marketplace",
+    title: target?.marketplace_listing_title ?? "Marketplace Listing",
+    price: parseMarketplacePrice(target?.listing_price?.amount, target?.formatted_price?.text),
+    currency: target?.listing_price?.currency ?? "USD",
+    url,
+    link: url,
+    images: Array.from(imageSet),
+    seller: typeof seller === "string" && seller.trim() ? seller.trim() : undefined,
+    condition:
+      typeof target?.condition === "string" && target.condition.trim()
+        ? target.condition.trim()
+        : undefined,
+    location,
+    itemLocation: location,
+    description,
+    fullDescription: description,
+    raw: target,
+  };
+}
+
+const MARKETPLACE_PDP_CONTAINER_DOC_ID = "26924013917190310";
+
+const MARKETPLACE_PDP_RELAY_PROVIDERS = {
+  "__relay_internal__pv__ShouldUpdateMarketplaceBoostListingBoostedStatusrelayprovider": false,
+  "__relay_internal__pv__CometUFISingleLineUFIrelayprovider": false,
+  "__relay_internal__pv__CometUFIShareActionMigrationrelayprovider": true,
+  "__relay_internal__pv__CometUFIReactionsEnableShortNamerelayprovider": false,
+  "__relay_internal__pv__CometUFICommentAutoTranslationTyperelayprovider": "ORIGINAL",
+  "__relay_internal__pv__CometUFICommentAvatarStickerAnimatedImagerelayprovider": false,
+  "__relay_internal__pv__CometUFICommentActionLinksRewriteEnabledrelayprovider": false,
+  "__relay_internal__pv__IsWorkUserrelayprovider": false,
+  "__relay_internal__pv__GHLShouldChangeSponsoredDataFieldNamerelayprovider": false,
+  "__relay_internal__pv__GHLShouldChangeAdIdFieldNamerelayprovider": false,
+  "__relay_internal__pv__CometUFI_dedicated_comment_routable_dialog_gkrelayprovider": true,
+};
+
+const MARKETPLACE_PDP_MEDIA_DOC_ID = "10059604367394414";
+
+function makeGraphqlRequest(
+  listingId: string,
+  docId: string,
+  friendlyName: string,
+  variables: Record<string, unknown>,
+) {
+  const body = new URLSearchParams({
+    variables: JSON.stringify(variables),
+    doc_id: docId,
+    server_timestamps: "true",
+    fb_api_caller_class: "RelayModern",
+    fb_api_req_friendly_name: friendlyName,
+  });
+
+  return fetch(GRAPHQL_URL, {
+    method: "POST",
+    headers: {
+      "user-agent": FB_DESKTOP_USER_AGENT,
+      "content-type": "application/x-www-form-urlencoded",
+      "accept": "*/*",
+      "accept-language": "en-US,en;q=0.9",
+      "x-fb-friendly-name": friendlyName,
+      "referer": `https://www.facebook.com/marketplace/item/${listingId}/`,
+      "origin": "https://www.facebook.com",
+      "sec-fetch-dest": "empty",
+      "sec-fetch-mode": "cors",
+      "sec-fetch-site": "same-origin",
+    },
+    body,
+    ...(proxyUrls.length ? { agent: getProxyAgent() } : {}),
+  });
+}
+
+async function fetchMarketplaceListingByContainerQuery(listingId: string): Promise<{ details: any; media: any } | null> {
+  const containerVars = {
+    targetId: listingId,
+    feedLocation: "MARKETPLACE_MEGAMALL",
+    feedbackSource: 56,
+    scale: 1,
+    useDefaultActor: false,
+    enableJobEmployerActionBar: false,
+    enableJobSeekerActionBar: false,
+    referralCode: null,
+    referralSurfaceString: null,
+    ...MARKETPLACE_PDP_RELAY_PROVIDERS,
+  };
+
+  try {
+    const [containerRes, mediaRes] = await Promise.all([
+      makeGraphqlRequest(listingId, MARKETPLACE_PDP_CONTAINER_DOC_ID, "MarketplacePDPContainerQuery", containerVars),
+      makeGraphqlRequest(listingId, MARKETPLACE_PDP_MEDIA_DOC_ID, "MarketplacePDPC2CMediaViewerWithImagesQuery", { targetId: listingId }),
+    ]);
+
+    if (containerRes.status !== 200) {
+      console.warn(`[marketplace:containerQuery] HTTP ${containerRes.status} for listing ${listingId}`);
+      return null;
+    }
+
+    const containerJson = await containerRes.json() as any;
+    const details = containerJson?.data?.viewer?.marketplace_product_details_page ?? null;
+
+    if (!details?.target?.marketplace_listing_title) {
+      console.warn(`[marketplace:containerQuery] No listing data in response for ${listingId}`);
+      return null;
+    }
+
+    let media: any = null;
+    if (mediaRes.status === 200) {
+      const mediaJson = await mediaRes.json() as any;
+      media = mediaJson?.data?.viewer?.marketplace_product_details_page ?? null;
+    } else {
+      console.warn(`[marketplace:mediaQuery] HTTP ${mediaRes.status} for listing ${listingId}`);
+    }
+
+    return { details, media };
+  } catch (err) {
+    console.warn(`[marketplace:containerQuery] Failed for ${listingId}:`, err);
+    return null;
+  }
+}
+
+async function fetchMarketplaceListingByPermalinkHtml(listingId: string): Promise<Listing> {
+  const cookie = getFbCookie();
+  if (!cookie) {
+    throw new Error("Marketplace auth cookies are not configured.");
+  }
+
+  const res = await fetch(`https://www.facebook.com/marketplace/item/${listingId}/`, {
+    method: "GET",
+    headers: getMarketplacePermalinkHeaders(cookie),
+    ...(proxyUrls.length ? { agent: getProxyAgent() } : {}),
+  });
+
+  if (res.status !== 200) {
+    throw new Error(`Marketplace permalink fetch failed: HTTP ${res.status}`);
+  }
+
+  const html = await res.text();
+  const payloads = extractMarketplaceProductDetailPages(html);
+  const { details, media } = pickMarketplaceProductDetailPages(listingId, payloads);
+
+  if (!details?.target?.marketplace_listing_title) {
+    const pageTitle = extractTitleFromHtml(html) ?? "Unknown page";
+    throw new Error(`Marketplace listing unavailable or Facebook returned an unexpected page (${pageTitle}).`);
+  }
+
+  return buildMarketplaceListingFromProductDetails(listingId, details, media);
+}
+
+export async function getMarketplaceListingByGraphqlForAnalysis(listingId: string): Promise<Listing> {
+  const result = await fetchMarketplaceListingByContainerQuery(listingId);
+
+  if (result) {
+    return buildMarketplaceListingFromProductDetails(listingId, result.details, result.media);
+  }
+
+  // Fall back to authenticated HTML permalink fetch
+  console.log(`[marketplace] containerQuery returned no data for ${listingId}, falling back to permalink HTML`);
+  return fetchMarketplaceListingByPermalinkHtml(listingId);
+}
+
+export async function getMarketplaceListingBySearchForAnalysis(listingId: string): Promise<Listing> {
+  const seedListing = await getMarketplaceListingByGraphqlForAnalysis(listingId);
+  const title = typeof seedListing.title === "string" ? seedListing.title.trim() : "";
+
+  if (!title) return seedListing;
+
+  const exactMatchFromResults = async (resultsPromise: Promise<any[]>) => {
+    try {
+      const results = await resultsPromise;
+      return results.find((result) => String(result?.id ?? "") === listingId) ?? null;
+    } catch (err) {
+      console.warn("Marketplace link-analysis search fallback failed:", err);
+      return null;
+    }
+  };
+
+  const coords = extractMarketplaceCoordinates(seedListing.raw);
+  const locationText = seedListing.location ?? seedListing.itemLocation ?? null;
+
+  const exactMatch =
+    (coords
+      ? await exactMatchFromResults(
+          searchMarketplaceListingsByLatLng({
+            query: title,
+            lat: coords.lat,
+            lng: coords.lng,
+            limit: 24,
+          })
+        )
+      : null) ??
+    (locationText
+      ? await exactMatchFromResults(
+          searchMarketplaceListings({
+            query: title,
+            location: locationText,
+            limit: 24,
+          })
+        )
+      : null);
+
+  if (!exactMatch) {
+    return seedListing;
+  }
+
+  return attachSearchMetadataToMarketplaceListing(seedListing, exactMatch);
+}
+
 export async function getMarketplaceListing(listingId: string): Promise<Partial<Listing>> {
   try {
     // const cookie = [
@@ -263,75 +724,11 @@ export async function searchMarketplaceListings({
     throw new Error("Location lookup failed");
   }
 
-  const variables = {
-    count: limit,
-    params: {
-      bqf: {
-        callsite: "COMMERCE_MKTPLACE_WWW",
-        query,
-      },
-      browse_request_params: {
-        filter_location_latitude: lat,
-        filter_location_longitude: lng,
-        filter_radius_km: 16,
-      },
-      custom_request_params: {
-        surface: "SEARCH",
-      },
-    },
-  };
-
-  const body = new URLSearchParams({
-    variables: JSON.stringify(variables),
-    doc_id: "7111939778879383",
-  });
-
-  const res = await fetch(GRAPHQL_URL, {
-    method: "POST",
-    headers: {
-      "user-agent": "Mozilla/5.0",
-      "content-type": "application/x-www-form-urlencoded",
-    },
-    body,
-    ...(proxyUrls.length ? { agent: getProxyAgent() } : {}),
-  });
-
-  const json = await res.json();
-
-  const edges = json?.data?.marketplace_search?.feed_units?.edges ?? [];
-
-  return edges.map((edge: any) => {
-    const listing = edge?.node?.listing;
-
-    return {
-      id: String(listing?.id ?? ""),
-      source: "marketplace",
-      title: listing?.marketplace_listing_title ?? "Untitled listing",
-      price: Number(
-        String(listing?.listing_price?.formatted_amount ?? "0").replace(
-          /[^0-9.]/g,
-          ""
-        ) || 0
-      ),
-      currency: "USD",
-      url: listing?.id
-        ? `https://www.facebook.com/marketplace/item/${listing.id}`
-        : "",
-      images: extractMarketplaceImages(listing),
-      location: [
-        listing?.location?.reverse_geocode?.city,
-        listing?.location?.reverse_geocode?.state,
-      ]
-        .filter(Boolean)
-        .join(", "),
-      is_live: listing?.is_live ?? false,
-      is_pending: listing?.is_pending ?? false,
-      is_sold: listing?.is_sold ?? false,
-      delivery_types: Array.isArray(listing?.delivery_types)
-        ? listing.delivery_types
-        : [],
-      raw: listing,
-    };
+  return searchMarketplaceListingsByLatLng({
+    query,
+    lat,
+    lng,
+    limit,
   });
 }
 

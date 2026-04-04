@@ -155,6 +155,10 @@ function mapEbayInternalToListing(item: any): EbayListingRich {
     item.subtitle ??
     item.short_description ??
     undefined;
+  const fullDescription =
+    item.fullDescription ??
+    item.description ??
+    undefined;
 
   return {
     // --- required contract ---
@@ -216,8 +220,10 @@ function mapEbayInternalToListing(item: any): EbayListingRich {
     originalPrice,
     discountPercent,
     shortDescription,
-    description: item.description ?? undefined,
-    fullDescription: item.fullDescription ?? undefined,
+    // Keep the client/display path consistent across search and pasted-link flows:
+    // `description` is the compact summary text, `fullDescription` is the full body.
+    description: shortDescription ?? undefined,
+    fullDescription,
 
     // --- AI fields empty here; aiService fills when analyze=1 ---
     aiScore: undefined,

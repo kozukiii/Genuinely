@@ -60,7 +60,8 @@ export default function ListingPage() {
   const [imageIndex, setImageIndex] = useState(0);
   const [saved, setSaved] = useState(false);
   const [enrichedImages, setEnrichedImages] = useState<string[] | null>(null);
-  const [enrichedDescription, setEnrichedDescription] = useState<string | null>(null);
+  // NOTE: Kept for future ListingPage description UI work; currently not read anywhere.
+  // const [enrichedDescription, setEnrichedDescription] = useState<string | null>(null);
   const [enrichLoading, setEnrichLoading] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<Partial<Listing> & { analyzedAt?: string } | null>(
     listing?.aiScore != null ? { ...listing, analyzedAt: undefined } : null
@@ -86,9 +87,10 @@ export default function ListingPage() {
       .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
       .then((data) => {
         if (Array.isArray(data.images) && data.images.length > 0) setEnrichedImages(data.images);
-        if (typeof data.description === "string" && data.description.trim()) {
-          setEnrichedDescription(data.description.trim());
-        }
+        // NOTE: Preserved but intentionally disabled until description is rendered/consumed again.
+        // if (typeof data.description === "string" && data.description.trim()) {
+        //   setEnrichedDescription(data.description.trim());
+        // }
       })
       .catch((err) => console.warn("Marketplace enrichment failed:", err))
       .finally(() => setEnrichLoading(false));

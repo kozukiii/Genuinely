@@ -1,6 +1,7 @@
 import { useLocation, useNavigate } from "react-router-dom";
 import type { Listing } from "../types/Listing";
 import RatingRing from "../components/RatingRing";
+import ListingCard from "../components/ListingCard";
 import "./styles/ListingPage.css";
 import { useEffect, useMemo, useState } from "react";
 import { getHighResImage } from "../utils/imageHelpers";
@@ -47,6 +48,7 @@ function sanitizeVisibleText(value?: string | null) {
 }
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
+const SEARCH_LISTINGS_KEY = "search:listings";
 
 export default function ListingPage() {
   const { state } = useLocation();
@@ -202,6 +204,23 @@ export default function ListingPage() {
     listing.location,
     listing.seller,
   ]);
+
+  const similarListings = useMemo(() => {
+    try {
+      const raw = sessionStorage.getItem(SEARCH_LISTINGS_KEY);
+      if (!raw) return [] as Listing[];
+
+      const parsed = JSON.parse(raw) as Listing[];
+      if (!Array.isArray(parsed)) return [] as Listing[];
+
+      return parsed
+        .filter((item) => item && item.id && item.source && item.title)
+        .filter((item) => !(item.id === listing.id && item.source === listing.source))
+        .slice(0, 4);
+    } catch {
+      return [] as Listing[];
+    }
+  }, [listing.id, listing.source]);
 
   return (
     <div className="listing-page">
@@ -411,6 +430,19 @@ export default function ListingPage() {
             </div>
           )}
         </div>
+      )}
+
+      {similarListings.length > 0 && (
+        <section className="similar-listings-section" aria-label="You may like similar listings">
+          <h2 className="similar-listings-title">You may like</h2>
+          <div className="similar-listings-grid">
+            {similarListings.map((item) => (
+              <div className="similar-card" key={`${item.source}:${item.id}`}>
+                <ListingCard data={item} />
+              </div>
+            ))}
+          </div>
+        </section>
       )}
     </div>
   );

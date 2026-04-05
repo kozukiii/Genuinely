@@ -3,69 +3,75 @@ import dotenv from "dotenv";
 
 dotenv.config({ quiet: true });
 
-const TAVILY_URL = "https://api.tavily.com/search";
+const SERPER_URL = "https://google.serper.dev/search";
 const TIMEOUT_MS = 6000;
 
 export async function fetchMarketContext(query: string): Promise<string | null> {
-  const apiKey = process.env.TAVILY_API_KEY;
+  const apiKey = process.env.SERPER_API_KEY;
   if (!apiKey) {
-    console.warn("[priceContext] TAVILY_API_KEY not set — skipping market context");
+    console.warn("[priceContext] SERPER_API_KEY not set — skipping market context");
     return null;
   }
 
-  const tavilyQuery = `${query} current market price used resale value 2025`;
+  const searchQuery = `${query} used resale price 2025`;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
   try {
-    const res = await fetch(TAVILY_URL, {
+    const res = await fetch(SERPER_URL, {
       method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        api_key: apiKey,
-        query: tavilyQuery,
-        search_depth: "basic",
-        include_answer: true,
-        max_results: 3,
-        include_domains: [
-          "ebay.com",
-          "tcgplayer.com",
-          "pricecharting.com",
-          "stockx.com",
-          "swappa.com",
-          "mercari.com",
-          "craigslist.org",
-          "facebook.com",
-        ],
-      }),
+      headers: {
+        "X-API-KEY": apiKey,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ q: searchQuery, num: 5 }),
       signal: controller.signal as any,
     });
 
     if (!res.ok) {
-      console.error(`[priceContext] Tavily returned HTTP ${res.status}`);
+      console.error(`[priceContext] Serper returned HTTP ${res.status}`);
       return null;
     }
 
     const json: any = await res.json();
-    const answer: string = json?.answer ?? "";
-    const snippets: string[] = (json?.results ?? [])
-      .slice(0, 3)
-      .map((r: any) => r?.content ?? "")
-      .filter(Boolean);
-
-    if (!answer && snippets.length === 0) return null;
 
     const parts: string[] = [];
-    if (answer) parts.push(`Summary: ${answer}`);
-    if (snippets.length) parts.push(`Sources:\n${snippets.map((s, i) => `[${i + 1}] ${s}`).join("\n\n")}`);
 
+    // Answer box (Google's direct answer, e.g. AI Overview or featured snippet)
+    const answerBox = json?.answerBox;
+    if (answerBox?.answer) {
+      parts.push(`Answer: ${answerBox.answer}`);
+    } else if (answerBox?.snippet) {
+      parts.push(`Answer: ${answerBox.snippet}`);
+    }
+
+    // Knowledge graph snippet
+    if (json?.knowledgeGraph?.description) {
+      parts.push(`Overview: ${json.knowledgeGraph.description}`);
+    }
+
+    // Organic results — title + snippet
+    const organic: string[] = (json?.organic ?? [])
+      .slice(0, 5)
+      .map((r: any) => {
+        const title = r?.title ? `[${r.title}]` : "";
+        const snippet = r?.snippet ?? "";
+        return [title, snippet].filter(Boolean).join(" ");
+      })
+      .filter(Boolean);
+
+    if (organic.length) {
+      parts.push(`Results:\n${organic.map((s, i) => `[${i + 1}] ${s}`).join("\n\n")}`);
+    }
+
+    if (parts.length === 0) return null;
     return parts.join("\n\n");
   } catch (err: any) {
     if (err?.name === "AbortError") {
-      console.warn("[priceContext] Tavily request timed out");
+      console.warn("[priceContext] Serper request timed out");
     } else {
-      console.error("[priceContext] Tavily fetch error:", err);
+      console.error("[priceContext] Serper fetch error:", err);
     }
     return null;
   } finally {

@@ -214,17 +214,27 @@
     sans-serif;
 }
 
-/* Seller feedback (space so ring never collides) */
-.listing-feedback {
+/* Seller / location meta row (space so ring never collides) */
+.listing-seller-line,
+.listing-location {
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   overflow: hidden;
-  color: rgba(251, 191, 36, 0.92);
   font-size: 0.85rem;
   line-height: 1.35;
   margin-top: 0.55rem;
   min-height: calc(1.35em * 2);
+  color: var(--muted);
+}
+
+.listing-seller-name {
+  color: rgba(245, 245, 245, 0.82);
+  font-weight: 500;
+}
+
+.listing-seller-feedback {
+  color: var(--muted);
 }
 
 .listing-price-row {
@@ -393,6 +403,15 @@
   border-color: rgba(255, 120, 170, 0.45);
 }
 
+/* Pending ring spinner */
+.ring-pending {
+  animation: ringSpinPending 1s linear infinite;
+}
+
+@keyframes ringSpinPending {
+  to { transform: rotate(360deg); }
+}
+
 /* Mobile: keep it clean */
 @media (max-width: 520px) {
   .price-rating {
@@ -429,7 +448,8 @@
     font-size: 0.7rem;
   }
 
-  .listing-feedback {
+  .listing-seller-line,
+  .listing-location {
     font-size: 0.7rem;
     margin-top: 0.3rem;
   }

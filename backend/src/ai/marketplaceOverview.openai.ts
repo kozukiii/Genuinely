@@ -239,10 +239,11 @@ PRICE EVALUATION RULES:
 - If exact model/version is uncertain, stay conservative internally, but still write the overview around the inferred item identity
 - The overview must sound product-specific, not category-generic
 
-ACCEPTS OFFERS RULE (CRITICAL):
-- If the price field is "Accepts Offers" or $0, this listing uses offer-based / negotiated pricing — no fixed price is set.
-- In this case you MUST set priceFairness to null in the JSON output (output the literal JSON null, not a number).
-- In the overview, mention that this listing accepts offers and that the buyer should visit the listing to negotiate or determine the price.
+PRICE FAIRNESS RULES (CRITICAL):
+- If the Price field LITERALLY shows the text "Accepts Offers", set priceFairness to null and note it in the overview
+- If the Price field shows ANY real dollar amount, you MUST provide a numeric score — NEVER set it to null
+- Do NOT infer "Accepts Offers" from low price, vague title, or negotiable tone — only null when the price text is literally "Accepts Offers"
+- Any listing priced at or below the low end of the market range must score at minimum 80
 
 COMPARABLE LISTINGS (if provided below):
 Use them as your primary reference for priceFairness.
@@ -299,7 +300,7 @@ Do NOT wrap JSON in backticks.
         { type: "text", text: `Listing URL: ${link}` },
         { type: "text", text: `Images Provided: ${imageUrls.length}` },
         { type: "text", text: `Images Successfully Attached: ${dataUrls.length}` },
-        ...(context ? [{ type: "text", text: `\n--- MARKET CONTEXT (web search) ---\n${context}\n--- END MARKET CONTEXT ---` }] : []),
+        ...(context ? [{ type: "text", text: `\n--- PRODUCT CONTEXT ---\n${context}\n--- END PRODUCT CONTEXT ---` }] : []),
       ],
     },
   ];
@@ -330,8 +331,41 @@ Do NOT wrap JSON in backticks.
 const MARKETPLACE_BATCH_SIZE = 4;
 const MARKETPLACE_BATCH_IMAGES_PER_LISTING = 2;
 
-const MARKETPLACE_BATCH_SYSTEM_PROMPT = `
-You are an expert AI specializing in evaluating Facebook Marketplace listings.
+// Appended to any generated system prompt so the output shape stays consistent
+const MARKETPLACE_BATCH_OUTPUT_FORMAT = `
+You will receive multiple Facebook Marketplace listings numbered 1 through N (each wrapped in === LISTING N === / === END LISTING N ===).
+Analyze ALL of them and return results as a JSON array.
+
+MARKETPLACE RULES (always apply):
+- Marketplace listings often have sparse data — score FAIRLY, do not penalize missing metadata
+- Missing data = NEUTRAL (not negative)
+- sellerTrust = LISTING CONFIDENCE: active listing + real image + plausible title = 70–85 baseline
+- shippingFairness = pickup/delivery convenience: standard local pickup = 75–90; multiple options = 85–95
+- Infer specific item identity from title + images; speak as if that identification is correct
+- NEVER use vague phrases like "similar items" or "this category"
+- DO NOT include numeric scores inside the overview text
+- DO NOT add extra JSON fields
+
+PRICE FAIRNESS RULES (read carefully):
+- If the Price field for a listing LITERALLY shows the text "Accepts Offers" (not a dollar amount), set priceFairness to null and mention it in the overview
+- If the Price field shows ANY real dollar amount (e.g. "80 USD", "275 USD"), you MUST provide a numeric score — NEVER null
+- Do NOT set priceFairness to null just because you think the price seems negotiable or low — only null when the actual text is "Accepts Offers"
+- Use the PRODUCT CONTEXT price range (if provided) as your primary anchor for scoring
+- Any listing priced at or below the low end of the market range must score at minimum 80
+
+OUTPUT FORMAT — return ONLY a JSON array (no markdown, no backticks):
+[
+  {
+    "listingIndex": 0,
+    "scores": { "priceFairness": <number or null>, "sellerTrust": <number>, "conditionHonesty": <number>, "shippingFairness": <number>, "descriptionQuality": <number> },
+    "overview": "Short confident reasoning paragraph."
+  },
+  ...one entry per listing, zero-indexed
+]
+`.trim();
+
+export const MARKETPLACE_BATCH_SYSTEM_PROMPT = `
+You are an expert AI specializing in evaluating Facebook Marketplace listings for a deal-finding product.
 
 You will receive multiple listings numbered 1 through N (each wrapped in === LISTING N === / === END LISTING N ===).
 Analyze ALL of them using the scoring rules below and return results as a JSON array.
@@ -339,20 +373,31 @@ Analyze ALL of them using the scoring rules below and return results as a JSON a
 IMPORTANT: Marketplace listings often have sparse data. Score them FAIRLY without over-penalizing missing metadata.
 
 SCORING RULES (apply to every listing):
-- priceFairness (0–100 or null): judge price for the specific inferred item; be confident and specific, not generic. If the price is "Accepts Offers" or $0, set priceFairness to null (JSON null) — do NOT guess a score.
-- sellerTrust (0–100): interpret as LISTING CONFIDENCE — active listing + real image + plausible title = 70–85 baseline
-- conditionHonesty (0–100): images and title align well = 70–90; neutral/unclear = 55–70
-- shippingFairness (0–100): standard local pickup = 75–90; multiple options = 85–95
-- descriptionQuality (0–100): clear specific title + context = 70–90; vague = 30–50
+- priceFairness (0–100 or null): use PRODUCT CONTEXT price range and fairness guidance if provided; otherwise estimate confidently from the inferred item. If price is "Accepts Offers" or $0, set to null — do NOT guess a score.
+- sellerTrust (0–100): interpret as LISTING CONFIDENCE; apply PRODUCT CONTEXT red flags to lower score where relevant. Active listing + real image + plausible title = 70–85 baseline.
+- conditionHonesty (0–100): cross-reference PRODUCT CONTEXT condition signals against images and title. Images and title align well = 70–90; neutral/unclear = 55–70.
+- shippingFairness (0–100): Marketplace is typically local pickup. Standard pickup = 75–90; multiple delivery options = 85–95.
+- descriptionQuality (0–100): evaluate against PRODUCT CONTEXT description guidance if provided. Clear specific title + context = 70–90; vague = 30–50.
 
-ACCEPTS OFFERS RULE (CRITICAL):
-- If a listing's price is "Accepts Offers" or $0, set priceFairness to null in the JSON.
-- In the overview for that listing, mention that the price is negotiable and the buyer should visit the listing to determine the asking price.
+PRODUCT CONTEXT RULES:
+- A structured PRODUCT CONTEXT block may be provided at the end of the listings
+- When present, use it as your primary reference for scoring — it contains pre-researched price ranges, condition signals, red flags, and per-score guidance specific to this exact product
+- Apply the red flags list when scoring conditionHonesty and sellerTrust
+- If PRODUCT CONTEXT is absent, infer item identity from title + images and use your own knowledge
 
-CRITICAL:
+PRICE FAIRNESS RULES (CRITICAL):
+- If the Price field LITERALLY shows the text "Accepts Offers", set priceFairness to null and mention it in the overview
+- If the Price field shows ANY real dollar amount, you MUST provide a numeric score — NEVER null
+- Do NOT infer "Accepts Offers" from context or tone — only null when the price text is literally "Accepts Offers"
+- Use the PRODUCT CONTEXT price range as your primary anchor; listings at or below the market low must score at minimum 80
+
+IDENTITY RULES:
+- Infer specific item identity from title + images; speak as if that identification is correct
+- NEVER use vague phrases like "similar items", "this category", or "this type of product"
+- If uncertain, briefly acknowledge once then commit to the inferred identity
+
+GENERAL RULES:
 - Missing data = NEUTRAL (not negative)
-- Infer specific item identity from title + images; speak as if that ID is correct
-- NEVER use vague phrases like "similar items" or "this category"
 - DO NOT include numeric scores inside the overview text
 - DO NOT add extra JSON fields
 
@@ -367,7 +412,7 @@ OUTPUT FORMAT — return ONLY a JSON array (no markdown, no backticks):
 ]
 `.trim();
 
-async function _runMarketplaceBatch(listings: any[], allDataUrls: string[][], context?: string | null): Promise<string[]> {
+async function _runMarketplaceBatch(listings: any[], allDataUrls: string[][], context?: string | null, systemPrompt?: string | null): Promise<string[]> {
   const contentParts: any[] = [];
 
   for (let i = 0; i < listings.length; i++) {
@@ -401,15 +446,19 @@ async function _runMarketplaceBatch(listings: any[], allDataUrls: string[][], co
   }
 
   if (context) {
-    contentParts.push({ type: "text", text: `\n--- MARKET CONTEXT (web search) ---\n${context}\n--- END MARKET CONTEXT ---` });
+    contentParts.push({ type: "text", text: `\n--- PRODUCT CONTEXT ---\n${context}\n--- END PRODUCT CONTEXT ---` });
   }
+
+  const systemContent = systemPrompt
+    ? `${systemPrompt}\n\n${MARKETPLACE_BATCH_OUTPUT_FORMAT}`
+    : MARKETPLACE_BATCH_SYSTEM_PROMPT;
 
   let rawResponse: string;
   try {
     const response = await client.chat.completions.create({
       model: "meta-llama/llama-4-scout-17b-16e-instruct",
       messages: [
-        { role: "system", content: MARKETPLACE_BATCH_SYSTEM_PROMPT },
+        { role: "system", content: systemContent },
         { role: "user", content: contentParts },
       ],
       max_tokens: Math.min(listings.length * 800, 5000),
@@ -437,7 +486,7 @@ async function _runMarketplaceBatch(listings: any[], allDataUrls: string[][], co
   }
 }
 
-export async function batchAnalyzeMarketplaceListingsWithImages(listings: any[], context?: string | null): Promise<string[]> {
+export async function batchAnalyzeMarketplaceListingsWithImages(listings: any[], context?: string | null, systemPrompt?: string | null): Promise<string[]> {
   if (listings.length === 0) return [];
 
   const results: string[] = [];
@@ -459,7 +508,7 @@ export async function batchAnalyzeMarketplaceListingsWithImages(listings: any[],
       })
     );
 
-    const chunkResults = await _runMarketplaceBatch(chunk, allDataUrls, context);
+    const chunkResults = await _runMarketplaceBatch(chunk, allDataUrls, context, systemPrompt);
     results.push(...chunkResults);
   }
   return results;

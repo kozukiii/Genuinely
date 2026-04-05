@@ -35,6 +35,7 @@ export interface Listing {
   acceptsOffers?: boolean;
 
   // AI scoring
+  analysisPending?: boolean; // true while background analysis pipeline is running
   aiScore?: number;
 
   aiScores?: {
@@ -50,4 +51,5 @@ export interface Listing {
   debugInfo?: string;
   rawAnalysis?: string;
   marketContext?: string;
+  systemPrompt?: string;
 }

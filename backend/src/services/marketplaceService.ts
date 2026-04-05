@@ -91,18 +91,45 @@ async function getLatLng(location: string) {
   return result;
 }
 
+function normalizeMarketplaceImageUrl(url: unknown): string | null {
+  if (typeof url !== "string") return null;
+
+  const trimmed = url.trim();
+  if (!trimmed.startsWith("http")) return null;
+  if (/\/t1[._]/.test(trimmed)) return null;
+
+  return trimmed;
+}
+
+function mergeMarketplaceImageArrays(...lists: unknown[]): string[] {
+  const urls = new Set<string>();
+
+  for (const list of lists) {
+    if (!Array.isArray(list)) continue;
+
+    for (const url of list) {
+      const normalized = normalizeMarketplaceImageUrl(url);
+      if (normalized) urls.add(normalized);
+    }
+  }
+
+  return Array.from(urls);
+}
+
 async function searchMarketplaceListingsByLatLng({
   query,
   lat,
   lng,
   limit = 10,
   radiusKm = 16,
+  enrichImages = true,
 }: {
   query: string;
   lat: number;
   lng: number;
   limit?: number;
   radiusKm?: number;
+  enrichImages?: boolean;
 }) {
   const variables = {
     count: limit,
@@ -140,8 +167,14 @@ async function searchMarketplaceListingsByLatLng({
   const json = await res.json();
   const edges = json?.data?.marketplace_search?.feed_units?.edges ?? [];
 
-  return edges.map((edge: any) => {
+  const listings = edges.map((edge: any) => {
     const listing = edge?.node?.listing;
+    const images = buildMarketplaceImageGallery([
+      edge?.node,
+      listing,
+      listing?.product_item,
+      listing?.marketplace_listing_renderable_target,
+    ]);
 
     return {
       id: String(listing?.id ?? ""),
@@ -157,7 +190,7 @@ async function searchMarketplaceListingsByLatLng({
       url: listing?.id
         ? `https://www.facebook.com/marketplace/item/${listing.id}`
         : "",
-      images: extractMarketplaceImages(listing),
+      images,
       location: [
         listing?.location?.reverse_geocode?.city,
         listing?.location?.reverse_geocode?.state,
@@ -173,32 +206,74 @@ async function searchMarketplaceListingsByLatLng({
       raw: listing,
     };
   });
+
+  if (!enrichImages || listings.length === 0) {
+    return listings;
+  }
+
+  return enrichMarketplaceSearchListings(listings);
 }
 
 function extractMarketplaceImages(listing: any): string[] {
   const urls = new Set<string>();
 
-  const pushIfValid = (url: any) => {
-    if (typeof url !== "string" || !url.trim().startsWith("http")) return;
-    // Facebook profile pictures use /t1. CDN paths; listing photos use /t45.
-    // Filter out profile pics so they don't pollute listing image galleries.
-    if (/\/t1[._]/.test(url)) return;
-    urls.add(url.trim());
+  const pushIfValid = (url: unknown) => {
+    const normalized = normalizeMarketplaceImageUrl(url);
+    if (normalized) urls.add(normalized);
+  };
+
+  const pushImageCandidate = (candidate: any) => {
+    if (!candidate) return;
+
+    pushIfValid(candidate);
+    pushIfValid(candidate?.image?.uri);
+    pushIfValid(candidate?.image?.url);
+    pushIfValid(candidate?.uri);
+    pushIfValid(candidate?.url);
+    pushIfValid(candidate?.photo?.image?.uri);
+    pushIfValid(candidate?.listing_photo?.image?.uri);
+    pushIfValid(candidate?.node?.image?.uri);
+    pushIfValid(candidate?.node?.uri);
+    pushIfValid(candidate?.node?.url);
   };
 
   // Primary listing photo
   pushIfValid(listing?.primary_listing_photo?.image?.uri);
+  pushIfValid(listing?.primary_photo?.image?.uri);
 
-  // Only pull from the dedicated listing photos array, not generic photo/media fields
-  // which can include seller profile pictures
-  const listingPhotos = listing?.listing_photos;
-  if (Array.isArray(listingPhotos)) {
-    for (const item of listingPhotos) {
-      pushIfValid(item?.image?.uri);
+  const possibleArrays = [
+    listing?.listing_photos,
+    listing?.photos,
+    listing?.all_photos,
+    listing?.additional_photos,
+    listing?.media,
+    listing?.images,
+    listing?.photo_images,
+    listing?.media_set?.edges,
+    listing?.photo_groups?.edges,
+  ];
+
+  for (const arr of possibleArrays) {
+    if (!Array.isArray(arr)) continue;
+
+    for (const item of arr) {
+      pushImageCandidate(item);
     }
   }
 
   return Array.from(urls);
+}
+
+function buildMarketplaceImageGallery(sources: any[]): string[] {
+  const imageSet = new Set<string>();
+
+  for (const source of sources) {
+    for (const url of extractMarketplaceImages(source)) {
+      imageSet.add(url);
+    }
+  }
+
+  return Array.from(imageSet);
 }
 
 function extractImagesFromHtml(html: string, _listingId: string): string[] {
@@ -392,7 +467,9 @@ function attachSearchMetadataToMarketplaceListing(detailListing: Listing, search
       : detailListing.raw ?? searchMatch?.raw;
 
   return {
+    ...searchMatch,
     ...detailListing,
+    images: mergeMarketplaceImageArrays(detailListing.images, searchMatch?.images),
     raw: mergedRaw,
   } as Listing;
 }
@@ -403,19 +480,12 @@ function buildMarketplaceListingFromProductDetails(
   mediaPage: any | null
 ): Listing {
   const target = detailsPage?.target;
-  const imageSources = [
+  const images = buildMarketplaceImageGallery([
     mediaPage?.target,
     target,
     target?.product_item,
     detailsPage?.marketplace_listing_renderable_target,
-  ];
-
-  const imageSet = new Set<string>();
-  for (const source of imageSources) {
-    for (const url of extractMarketplaceImages(source)) {
-      imageSet.add(url);
-    }
-  }
+  ]);
 
   const description = extractMarketplaceDescription(target);
   const location = formatMarketplaceLocation(target);
@@ -435,7 +505,7 @@ function buildMarketplaceListingFromProductDetails(
     currency: target?.listing_price?.currency ?? "USD",
     url,
     link: url,
-    images: Array.from(imageSet),
+    images,
     seller: typeof seller === "string" && seller.trim() ? seller.trim() : undefined,
     condition:
       typeof target?.condition === "string" && target.condition.trim()
@@ -615,6 +685,7 @@ export async function getMarketplaceListingBySearchForAnalysis(listingId: string
             lat: coords.lat,
             lng: coords.lng,
             limit: 24,
+            enrichImages: false,
           })
         )
       : null) ??
@@ -624,6 +695,7 @@ export async function getMarketplaceListingBySearchForAnalysis(listingId: string
             query: title,
             location: locationText,
             limit: 24,
+            enrichImages: false,
           })
         )
       : null);
@@ -635,53 +707,56 @@ export async function getMarketplaceListingBySearchForAnalysis(listingId: string
   return attachSearchMetadataToMarketplaceListing(seedListing, exactMatch);
 }
 
-export async function getMarketplaceListing(listingId: string): Promise<Partial<Listing>> {
-  try {
-    // const cookie = [
-    //   `c_user=${process.env.FB_C_USER}`,
-    //   `xs=${decodeURIComponent(process.env.FB_XS ?? "")}`,
-    //   `datr=${process.env.FB_DATR}`,
-    //   `sb=${process.env.FB_SB}`,
-    // ].join("; ");
+const MARKETPLACE_SEARCH_IMAGE_ENRICHMENT_CONCURRENCY = 4;
 
-    const res = await fetch(`https://mbasic.facebook.com/marketplace/item/${listingId}/`, {
-      method: "GET",
-      headers: {
-        "user-agent": "Mozilla/5.0 (Linux; Android 9; SM-G960F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.157 Mobile Safari/537.36",
-        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "accept-language": "en-US,en;q=0.9",
-        // cookie,
-      },
-      ...(proxyUrls.length ? { agent: getProxyAgent() } : {}),
-    });
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  mapper: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
 
-    const html = await res.text();
-    if (res.status !== 200) return {};
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (true) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
 
-    const images = extractImagesFromHtml(html, listingId);
-    const description = extractDescriptionFromHtml(html);
-    return { images, description, fullDescription: description };
-  } catch (err) {
-    console.error("getMarketplaceListing error:", err);
-    return {};
-  }
+      if (currentIndex >= items.length) return;
+
+      results[currentIndex] = await mapper(items[currentIndex], currentIndex);
+    }
+  });
+
+  await Promise.all(workers);
+  return results;
 }
 
-export async function getMarketplaceListingFull(listingId: string): Promise<Listing> {
-  // const cookie = [
-  //   `c_user=${process.env.FB_C_USER}`,
-  //   `xs=${decodeURIComponent(process.env.FB_XS ?? "")}`,
-  //   `datr=${process.env.FB_DATR}`,
-  //   `sb=${process.env.FB_SB}`,
-  // ].join("; ");
+async function enrichMarketplaceSearchListings(listings: Listing[]): Promise<Listing[]> {
+  return mapWithConcurrency(
+    listings,
+    MARKETPLACE_SEARCH_IMAGE_ENRICHMENT_CONCURRENCY,
+    async (listing) => {
+      if (!listing.id) return listing;
 
+      try {
+        const detailListing = await getMarketplaceListingByGraphqlForAnalysis(listing.id);
+        return attachSearchMetadataToMarketplaceListing(detailListing, listing);
+      } catch (err) {
+        console.warn(`[marketplace:searchImages] Failed to enrich ${listing.id}:`, err);
+        return listing;
+      }
+    }
+  );
+}
+
+async function fetchMarketplaceListingByMbasicHtml(listingId: string): Promise<Listing> {
   const res = await fetch(`https://mbasic.facebook.com/marketplace/item/${listingId}/`, {
     method: "GET",
     headers: {
       "user-agent": "Mozilla/5.0 (Linux; Android 9; SM-G960F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.157 Mobile Safari/537.36",
       "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
       "accept-language": "en-US,en;q=0.9",
-      // cookie,
     },
     ...(proxyUrls.length ? { agent: getProxyAgent() } : {}),
   });
@@ -709,14 +784,43 @@ export async function getMarketplaceListingFull(listingId: string): Promise<List
   };
 }
 
+async function fetchMarketplaceListingWithCanonicalImages(listingId: string): Promise<Listing> {
+  try {
+    return await getMarketplaceListingByGraphqlForAnalysis(listingId);
+  } catch (err) {
+    console.warn(`[marketplace] canonical image fetch failed for ${listingId}, falling back to mbasic HTML`, err);
+    return fetchMarketplaceListingByMbasicHtml(listingId);
+  }
+}
+
+export async function getMarketplaceListing(listingId: string): Promise<Partial<Listing>> {
+  try {
+    const listing = await fetchMarketplaceListingWithCanonicalImages(listingId);
+    return {
+      images: listing.images,
+      description: listing.description,
+      fullDescription: listing.fullDescription,
+    };
+  } catch (err) {
+    console.error("getMarketplaceListing error:", err);
+    return {};
+  }
+}
+
+export async function getMarketplaceListingFull(listingId: string): Promise<Listing> {
+  return fetchMarketplaceListingWithCanonicalImages(listingId);
+}
+
 export async function searchMarketplaceListings({
   query,
   location,
   limit = 10,
+  enrichImages = true,
 }: {
   query: string;
   location: string;
   limit?: number;
+  enrichImages?: boolean;
 }) {
   const { lat, lng } = await getLatLng(location);
 
@@ -729,6 +833,7 @@ export async function searchMarketplaceListings({
     lat,
     lng,
     limit,
+    enrichImages,
   });
 }
 

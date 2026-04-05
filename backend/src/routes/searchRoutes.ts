@@ -2,6 +2,7 @@ import { Router } from "express";
 import { searchAll } from "../controllers/searchController";
 import { scoreListings } from "../services/scoring/scoreListing";
 import { fetchMarketContext } from "../ai/priceContext";
+import { groupAndContextualize } from "../ai/listingContext";
 import { getEbayItemByNumericId } from "../services/ebayService";
 import { getMarketplaceListingBySearchForAnalysis } from "../services/marketplaceService";
 
@@ -70,6 +71,46 @@ router.post("/from-url", async (req, res) => {
       ? 404
       : 500;
     return res.status(status).json({ error: message });
+  }
+});
+
+// POST /api/search/context
+// Takes listings + query, groups by product, fetches Tavily context per group.
+// Returns groups with indices into the listings array and market context strings.
+router.post("/context", async (req, res) => {
+  const { query, listings } = req.body;
+  if (!query || typeof query !== "string") {
+    return res.status(400).json({ error: "Missing query" });
+  }
+  if (!Array.isArray(listings)) {
+    return res.status(400).json({ error: "listings must be an array" });
+  }
+
+  try {
+    const titles: string[] = listings.map((l: any) => (typeof l.title === "string" ? l.title : ""));
+    const groups = await groupAndContextualize(titles, query);
+    return res.json({ groups });
+  } catch (err: any) {
+    console.error("context error:", err);
+    return res.status(500).json({ error: err?.message ?? "Context generation failed" });
+  }
+});
+
+// POST /api/search/batch-analyze
+// Accepts { listings, systemPrompt } — scores a batch with a pre-generated product-expert prompt.
+// systemPrompt replaces the static system prompt for this group of listings.
+router.post("/batch-analyze", async (req, res) => {
+  const { listings, systemPrompt } = req.body;
+  if (!Array.isArray(listings)) {
+    return res.status(400).json({ error: "listings must be an array" });
+  }
+
+  try {
+    const scored = await scoreListings(listings, null, systemPrompt ?? null);
+    return res.json(scored);
+  } catch (err: any) {
+    console.error("batch-analyze error:", err);
+    return res.status(500).json({ error: err?.message ?? "Batch analysis failed" });
   }
 });
 

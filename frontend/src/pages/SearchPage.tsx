@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigationType } from "react-router-dom";
 import SearchBar from "../components/SearchBar";
 import LinkAnalysisModal from "../components/LinkAnalysisModal";
@@ -46,7 +46,6 @@ async function fetchFromApi(
   query: string,
   targetTotal: number,
   filters: FilterState,
-  analyze: boolean,
   offset = 0
 ): Promise<{ items: Listing[]; ebayUnavailable: boolean }> {
   const activeSources =
@@ -58,8 +57,7 @@ async function fetchFromApi(
 
   let url =
     `${API_BASE}/api/search?query=${encodeURIComponent(query)}` +
-    `&limit=${targetTotal}&sources=${activeSources}` +
-    `&analyze=${analyze ? "1" : "0"}`;
+    `&limit=${targetTotal}&sources=${activeSources}&analyze=0`;
 
   if (minP !== null) url += `&minPrice=${minP}`;
   if (maxP !== null) url += `&maxPrice=${maxP}`;
@@ -79,6 +77,99 @@ async function fetchFromApi(
     items: data as Listing[],
     ebayUnavailable: res.headers.get("X-Ebay-Search-Status") === "unavailable",
   };
+}
+
+// ── Analysis pipeline ────────────────────────────────────────────────────────
+// Groups listings by product via context LLM, then batch-analyzes each group
+// in parallel. Calls setListings incrementally as each group resolves.
+async function runAnalysisPipeline(
+  query: string,
+  items: Listing[],
+  setListings: React.Dispatch<React.SetStateAction<Listing[]>>,
+  signal: AbortSignal,
+) {
+  // 1. Get product groups + Tavily context per group
+  let groups: Array<{
+    canonicalName: string;
+    specificity: string;
+    indices: number[];
+    context: string | null;
+  }>;
+
+  try {
+    const ctxRes = await fetch(`${API_BASE}/api/search/context`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query, listings: items }),
+      signal,
+    });
+    if (!ctxRes.ok) throw new Error(`context HTTP ${ctxRes.status}`);
+    const ctxData = await ctxRes.json();
+    groups = ctxData.groups ?? [];
+  } catch (err: any) {
+    if (err?.name === "AbortError") return;
+    console.error("[analysis] context call failed:", err);
+    // Fallback: one group with no context
+    groups = [{ canonicalName: query, specificity: "broad", indices: items.map((_, i) => i), context: null }];
+  }
+
+  // 2. Analyze each group in parallel — update state as each one resolves
+  await Promise.all(
+    groups.map(async (group) => {
+      const groupListings = group.indices
+        .map((i) => items[i])
+        .filter(Boolean);
+
+      if (groupListings.length === 0) return;
+
+      try {
+        const res = await fetch(`${API_BASE}/api/search/batch-analyze`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ listings: groupListings, systemPrompt: group.systemPrompt }),
+          signal,
+        });
+        if (!res.ok) throw new Error(`batch-analyze HTTP ${res.status}`);
+        const scored: Listing[] = await res.json();
+
+        if (signal.aborted) return;
+
+        // Merge scored listings back by id+source, then persist to sessionStorage
+        // so back-navigation restores scores without re-running the pipeline.
+        setListings((prev) => {
+          const updated = [...prev];
+          for (const s of scored) {
+            const idx = updated.findIndex(
+              (l) => l.id === s.id && l.source === s.source,
+            );
+            if (idx !== -1) updated[idx] = { ...s, analysisPending: false };
+          }
+          try {
+            const toSave = updated.map((l) => ({ ...l, analysisPending: undefined }));
+            sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(toSave));
+          } catch {}
+          return updated;
+        });
+      } catch (err: any) {
+        if (err?.name === "AbortError") return;
+        console.error(`[analysis] batch-analyze failed for group "${group.canonicalName}":`, err);
+
+        // Clear pending state for this group on failure and persist
+        setListings((prev) => {
+          const updated = [...prev];
+          for (const l of groupListings) {
+            const idx = updated.findIndex((u) => u.id === l.id && u.source === l.source);
+            if (idx !== -1) updated[idx] = { ...updated[idx], analysisPending: false };
+          }
+          try {
+            const toSave = updated.map((l) => ({ ...l, analysisPending: undefined }));
+            sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(toSave));
+          } catch {}
+          return updated;
+        });
+      }
+    }),
+  );
 }
 
 function applyFilters(listings: Listing[], filters: FilterState): Listing[] {
@@ -112,7 +203,6 @@ function applyFilters(listings: Listing[], filters: FilterState): Listing[] {
 export default function SearchPage() {
   const navType = useNavigationType();
 
-  const [demoMode, setDemoMode] = useState(true);
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const [listings, setListings] = useState<Listing[]>([]);
   const [hasMore, setHasMore] = useState(false);
@@ -135,6 +225,9 @@ export default function SearchPage() {
   const listingsRef = useRef(listings);
   listingsRef.current = listings;
 
+  // Abort controller for the active analysis pipeline — cancelled on new search
+  const analysisPipelineRef = useRef<AbortController | null>(null);
+
   const filtered = useMemo(
     () => applyFilters(listings, filters),
     [listings, filters]
@@ -155,6 +248,9 @@ export default function SearchPage() {
       const q = query.trim();
       if (!q) return;
 
+      // Cancel any in-flight analysis from a previous search
+      analysisPipelineRef.current?.abort();
+
       if (listingsRef.current.length > 0) {
         setSweeping(true);
         setTimeout(() => setSweeping(false), 300);
@@ -167,9 +263,12 @@ export default function SearchPage() {
 
       const fetchSize = limitOverride ?? PRELOAD_SIZE;
       try {
-        const { items, ebayUnavailable } = await fetchFromApi(q, fetchSize, filters, !demoMode);
+        const { items, ebayUnavailable } = await fetchFromApi(q, fetchSize, filters);
         setEbayNotice(filters.sources.ebay && ebayUnavailable);
-        setListings(items);
+
+        // Mark all listings as pending immediately so rings show spinners
+        const pending = items.map((l) => ({ ...l, analysisPending: true }));
+        setListings(pending);
         setResultKey((k) => k + 1);
         setHasMore(items.length >= fetchSize);
 
@@ -177,6 +276,11 @@ export default function SearchPage() {
         sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(items));
         sessionStorage.setItem(SEARCH_TIMESTAMP_KEY, Date.now().toString());
         sessionStorage.setItem(SEARCH_PAGE_KEY, "1");
+
+        // Kick off the background analysis pipeline
+        const controller = new AbortController();
+        analysisPipelineRef.current = controller;
+        runAnalysisPipeline(q, items, setListings, controller.signal);
       } catch (err) {
         setEbayNotice(filters.sources.ebay);
         setError(`Failed to load listings: ${err instanceof Error ? err.message : String(err)}`);
@@ -184,7 +288,7 @@ export default function SearchPage() {
         setLoading(false);
       }
     },
-    [demoMode, filters.sources]
+    [filters.sources]
   );
 
   // ── Next page ───────────────────────────────────────────────────────────
@@ -203,7 +307,6 @@ export default function SearchPage() {
           queryRef.current,
           PRELOAD_SIZE,
           filtersRef.current,
-          !demoMode,
           offset
         );
         setEbayNotice(filtersRef.current.sources.ebay && ebayUnavailable);
@@ -232,7 +335,7 @@ export default function SearchPage() {
     }
 
     window.scrollTo({ top: 0, behavior: "smooth" });
-  }, [canGoNext, loading, page, filtered.length, hasMore, demoMode]);
+  }, [canGoNext, loading, page, filtered.length, hasMore]);
 
   // ── Prev page ───────────────────────────────────────────────────────────
   const handlePrevPage = useCallback(() => {
@@ -249,25 +352,32 @@ export default function SearchPage() {
     const q = queryRef.current;
     if (!q) return;
 
+    analysisPipelineRef.current?.abort();
     setLoading(true);
     setError(null);
     setPage(1);
 
     try {
-      const { items, ebayUnavailable } = await fetchFromApi(q, PRELOAD_SIZE, next, !demoMode);
+      const { items, ebayUnavailable } = await fetchFromApi(q, PRELOAD_SIZE, next);
       setEbayNotice(next.sources.ebay && ebayUnavailable);
-      setListings(items);
+
+      const pending = items.map((l) => ({ ...l, analysisPending: true }));
+      setListings(pending);
       setResultKey((k) => k + 1);
       setHasMore(items.length >= PRELOAD_SIZE);
       sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(items));
       sessionStorage.setItem(SEARCH_PAGE_KEY, "1");
+
+      const controller = new AbortController();
+      analysisPipelineRef.current = controller;
+      runAnalysisPipeline(q, items, setListings, controller.signal);
     } catch (err) {
       setEbayNotice(next.sources.ebay);
       setError(`Failed to load listings: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setLoading(false);
     }
-  }, [demoMode]);
+  }, []);
 
 // ── Background prefetch: silently load next page while user reads current ──
   useEffect(() => {
@@ -276,7 +386,7 @@ export default function SearchPage() {
 
     prefetchingRef.current = true;
     const prefetchOffset = listings.length;
-    fetchFromApi(currentQuery, PAGE_SIZE, filtersRef.current, !demoMode, prefetchOffset)
+    fetchFromApi(currentQuery, PAGE_SIZE, filtersRef.current, prefetchOffset)
       .then(({ items: newItems, ebayUnavailable }) => {
         setEbayNotice(filtersRef.current.sources.ebay && ebayUnavailable);
         const combined = dedupeListings([...listingsRef.current, ...newItems]);
@@ -318,15 +428,6 @@ export default function SearchPage() {
       {linkModalOpen && <LinkAnalysisModal onClose={() => setLinkModalOpen(false)} />}
 
       <div className="search-controls">
-        <label className="demo-toggle">
-          <input
-            type="checkbox"
-            checked={demoMode}
-            onChange={(e) => setDemoMode(e.target.checked)}
-          />
-          Demo mode
-        </label>
-
         <button
           className="mobile-filter-toggle"
           onClick={() => setMobileFiltersOpen((o) => !o)}

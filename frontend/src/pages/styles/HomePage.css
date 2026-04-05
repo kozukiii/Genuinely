@@ -670,11 +670,11 @@ h6 {
   justify-content: center;
 }
 
-/* Center sections and their headers */
+/* Sections span full width; only the header block gets centered */
 .home-page .hero-banner,
 .home-page .featured-grid-section,
 .home-page .home-section {
-  text-align: center;
+  text-align: left;
 }
 
 /* Center the header block (title + subtext) */

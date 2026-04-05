@@ -1,4 +1,4 @@
-import { analyzeListingWithImages, batchAnalyzeListingsWithImages } from "../ai/ebayOverview.openai";
+import { analyzeListingWithImages, batchAnalyzeListingsWithImages, EBAY_BATCH_SYSTEM_PROMPT } from "../ai/ebayOverview.openai";
 import { extractStructuredAnalysis } from "../utils/extractStructuredAnalysis";
 import { calculatePriceFairness } from "./scoring/priceFairnessScore";
 
@@ -89,10 +89,14 @@ function parseAIAnalysis(listing: any, analysis: string, context?: string | null
 
 export async function analyzeItemWithAI(merged: any, context?: string | null) {
   const analysis = await analyzeListingWithImages(merged, context);
-  return { ...parseAIAnalysis(merged, analysis, context), marketContext: context ?? undefined };
+  return {
+    ...parseAIAnalysis(merged, analysis, context),
+    marketContext: context ?? undefined,
+    systemPrompt: EBAY_BATCH_SYSTEM_PROMPT,
+  };
 }
 
-export async function analyzeItemsWithAI(items: any[], context?: string | null) {
+export async function analyzeItemsWithAI(items: any[], context?: string | null, systemPrompt?: string | null) {
   if (items.length === 0) return [];
 
   const BATCH_SIZE = 8;
@@ -100,9 +104,13 @@ export async function analyzeItemsWithAI(items: any[], context?: string | null) 
 
   for (let start = 0; start < items.length; start += BATCH_SIZE) {
     const chunk = items.slice(start, start + BATCH_SIZE);
-    const rawStrings = await batchAnalyzeListingsWithImages(chunk, context);
+    const rawStrings = await batchAnalyzeListingsWithImages(chunk, context, systemPrompt);
     for (let i = 0; i < chunk.length; i++) {
-      results.push({ ...chunk[i], ...parseAIAnalysis(chunk[i], rawStrings[i], context), marketContext: context ?? undefined });
+      results.push({
+        ...chunk[i],
+        ...parseAIAnalysis(chunk[i], rawStrings[i], context),
+        systemPrompt: systemPrompt ?? EBAY_BATCH_SYSTEM_PROMPT,
+      });
     }
   }
 

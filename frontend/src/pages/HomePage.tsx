@@ -297,15 +297,7 @@ export default function HomePage() {
           {loadingYouMayLike && <p className="section-empty">Loading...</p>}
 
           {!loadingYouMayLike && youMayLikeItems.length > 0 && (
-            <div className="banner-viewport" aria-label="You may like carousel">
-              <div className="banner-track">
-                {[...youMayLikeItems, ...youMayLikeItems].map((item, idx) => (
-                  <div className="banner-card" key={`${item.source}:${item.id}:${idx}`}>
-                    <ListingCard data={item} />
-                  </div>
-                ))}
-              </div>
-            </div>
+            <HorizontalShelf items={youMayLikeItems} />
           )}
         </section>
       )}

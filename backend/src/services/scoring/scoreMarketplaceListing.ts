@@ -1,4 +1,4 @@
-import { analyzeMarketplaceListingWithImages, batchAnalyzeMarketplaceListingsWithImages } from "../../ai/marketplaceOverview.openai";
+import { analyzeMarketplaceListingWithImages, batchAnalyzeMarketplaceListingsWithImages, MARKETPLACE_BATCH_SYSTEM_PROMPT } from "../../ai/marketplaceOverview.openai";
 import { extractStructuredAnalysis } from "../../utils/extractStructuredAnalysis";
 import { calculatePriceFairness, isAcceptsOffersPrice } from "./priceFairnessScore";
 
@@ -30,7 +30,7 @@ function buildMarketplaceDebugInfo(listing: any): string {
   }, null, 2);
 }
 
-export async function scoreMarketplaceListing(listing: any, context?: string | null) {
+export async function scoreMarketplaceListing(listing: any, context?: string | null, systemPrompt?: string | null) {
   const acceptsOffers = isAcceptsOffersPrice(listing.price, context);
   const analysis = await analyzeMarketplaceListingWithImages(listing, context);
   const jsonBlock = extractStructuredAnalysis(analysis);
@@ -65,6 +65,7 @@ export async function scoreMarketplaceListing(listing: any, context?: string | n
     debugInfo: buildMarketplaceDebugInfo(listing),
     rawAnalysis: analysis,
     marketContext: context ?? undefined,
+    systemPrompt: MARKETPLACE_BATCH_SYSTEM_PROMPT,
   };
 }
 
@@ -101,11 +102,15 @@ function parseMarketplaceAnalysis(listing: any, analysis: string, context?: stri
     debugInfo: buildMarketplaceDebugInfo(listing),
     rawAnalysis: analysis,
     marketContext: context ?? undefined,
+    systemPrompt: MARKETPLACE_BATCH_SYSTEM_PROMPT,
   };
 }
 
-export async function scoreMarketplaceListings(listings: any[], context?: string | null) {
+export async function scoreMarketplaceListings(listings: any[], context?: string | null, systemPrompt?: string | null) {
   if (listings.length === 0) return [];
-  const rawStrings = await batchAnalyzeMarketplaceListingsWithImages(listings, context);
-  return listings.map((listing, i) => parseMarketplaceAnalysis(listing, rawStrings[i], context));
+  const rawStrings = await batchAnalyzeMarketplaceListingsWithImages(listings, context, systemPrompt);
+  return listings.map((listing, i) => ({
+    ...parseMarketplaceAnalysis(listing, rawStrings[i], context),
+    systemPrompt: systemPrompt ?? MARKETPLACE_BATCH_SYSTEM_PROMPT,
+  }));
 }

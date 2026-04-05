@@ -98,23 +98,39 @@ export default function ListingCard({ data }: { data: Listing }) {
 
             {data.source === "marketplace" ? (
               data.location && (
-                <p className="listing-feedback">📍 {data.location}</p>
+                <p className="listing-location">📍 {data.location}</p>
               )
             ) : (
               (data.feedback || data.seller) && (
-                <p className="listing-feedback">
-                  ★ {data.seller || "Seller"} — {data.feedback ?? "N/A"}%
+                <p className="listing-seller-line">
+                  <span className="listing-seller-name">{data.seller || "Seller"}</span>
+                  <span className="listing-seller-feedback"> — {data.feedback ?? "N/A"}%</span>
                 </p>
               )
             )}
           </div>
 
           <div className="card-badges">
-            {data.aiScore !== undefined && (
+            {data.aiScore !== undefined ? (
               <div className="badge-ring">
                 <RatingRing value={data.aiScore} />
               </div>
-            )}
+            ) : data.analysisPending ? (
+              <div className="badge-ring">
+                <svg className="ring-pending" width="50" height="50" viewBox="0 0 50 50">
+                  <circle cx="25" cy="25" r="18.5" stroke="#374151" strokeWidth="5" fill="none" />
+                  <circle
+                    cx="25" cy="25" r="18.5"
+                    stroke="rgba(77,166,255,0.6)"
+                    strokeWidth="5"
+                    fill="none"
+                    strokeDasharray="29 87"
+                    strokeLinecap="round"
+                    transform="rotate(-90 25 25)"
+                  />
+                </svg>
+              </div>
+            ) : null}
 
             <button
               type="button"

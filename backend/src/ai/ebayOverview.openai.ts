@@ -195,7 +195,7 @@ DEBUG INFO:
 
         { type: "text", text: `Listing URL: ${link}` },
         { type: "text", text: `Images Provided: ${imageUrls.length}` },
-        ...(context ? [{ type: "text", text: `\n--- MARKET CONTEXT (web search) ---\n${context}\n--- END MARKET CONTEXT ---` }] : []),
+        ...(context ? [{ type: "text", text: `\n--- PRODUCT CONTEXT ---\n${context}\n--- END PRODUCT CONTEXT ---` }] : []),
       ],
     },
   ];
@@ -223,23 +223,18 @@ DEBUG INFO:
 
 const EBAY_BATCH_SIZE = 4;
 
-const EBAY_BATCH_SYSTEM_PROMPT = `
-You are an expert AI specializing in evaluating online marketplace listings.
-
+// Appended to any generated system prompt so the output shape stays consistent
+const EBAY_BATCH_OUTPUT_FORMAT = `
 You will receive multiple eBay listings numbered 1 through N (each wrapped in === LISTING N === / === END LISTING N ===).
 Analyze ALL of them and return results as a JSON array.
 
-SCORING RULES (apply to every listing):
-- priceFairness (0–100): compare to recent similar listings
-- sellerTrust (0–100): based on feedback score and rating count; auto 100 if 99%+ feedback and 1000+ ratings
-- conditionHonesty (0–100): does description match images and stated condition
-- shippingFairness (0–100): is shipping reasonable; auto 100 if shipping is free; score 65 (neutral) if shippingCostType is CALCULATED or cost is unknown — never penalize for calculated shipping
-- descriptionQuality (0–100): is the description detailed, accurate, and well-written
-
-Missing data = NEUTRAL (no deduction unless truly critical).
-ALWAYS describe the images in the overview if they were provided.
-DO NOT include numeric scores inside the overview text.
-DO NOT add extra JSON fields.
+ALWAYS APPLY:
+- sellerTrust auto 100 if 99%+ feedback and 1000+ ratings
+- shippingFairness auto 100 if free; score 65 (neutral) if CALCULATED or unknown
+- Missing data = NEUTRAL (no deduction unless truly critical)
+- Describe images in the overview if provided
+- DO NOT include numeric scores inside the overview text
+- DO NOT add extra JSON fields
 
 OUTPUT FORMAT — return ONLY a JSON array (no markdown, no backticks):
 [
@@ -252,7 +247,43 @@ OUTPUT FORMAT — return ONLY a JSON array (no markdown, no backticks):
 ]
 `.trim();
 
-async function _runEbayBatch(listings: any[], context?: string | null): Promise<string[]> {
+export const EBAY_BATCH_SYSTEM_PROMPT = `
+You are an expert AI specializing in evaluating eBay listings for a deal-finding product.
+
+You will receive multiple listings numbered 1 through N (each wrapped in === LISTING N === / === END LISTING N ===).
+Analyze ALL of them and return results as a JSON array.
+
+SCORING RULES (apply to every listing):
+- priceFairness (0–100): use PRODUCT CONTEXT price range and fairness guidance if provided; otherwise estimate from listing data and your knowledge
+- sellerTrust (0–100): based on feedback score and rating count; auto 100 if 99%+ feedback and 1000+ ratings
+- conditionHonesty (0–100): cross-reference stated condition against PRODUCT CONTEXT condition signals and images; does the description match what is shown
+- shippingFairness (0–100): is shipping reasonable for the item; auto 100 if free; score 65 (neutral) if CALCULATED or unknown — never penalize calculated shipping
+- descriptionQuality (0–100): evaluate against PRODUCT CONTEXT description guidance if provided; otherwise judge on detail, accuracy, and completeness
+
+PRODUCT CONTEXT RULES:
+- A structured PRODUCT CONTEXT block may be provided at the end of the listings
+- When present, use it as your primary reference for scoring — it contains pre-researched price ranges, condition signals, red flags, and per-score guidance specific to this exact product
+- Apply the red flags list to conditionHonesty and sellerTrust scoring
+- If PRODUCT CONTEXT is absent, fall back to general knowledge
+
+GENERAL RULES:
+- Missing data = NEUTRAL (no deduction unless truly critical)
+- Describe images in the overview if provided
+- DO NOT include numeric scores inside the overview text
+- DO NOT add extra JSON fields
+
+OUTPUT FORMAT — return ONLY a JSON array (no markdown, no backticks):
+[
+  {
+    "listingIndex": 0,
+    "scores": { "priceFairness": <n>, "sellerTrust": <n>, "conditionHonesty": <n>, "shippingFairness": <n>, "descriptionQuality": <n> },
+    "overview": "Short reasoning paragraph."
+  },
+  ...one entry per listing, zero-indexed
+]
+`.trim();
+
+async function _runEbayBatch(listings: any[], context?: string | null, systemPrompt?: string | null): Promise<string[]> {
   const contentParts: any[] = [];
 
   for (let i = 0; i < listings.length; i++) {
@@ -306,15 +337,21 @@ async function _runEbayBatch(listings: any[], context?: string | null): Promise<
   }
 
   if (context) {
-    contentParts.push({ type: "text", text: `\n--- MARKET CONTEXT (web search) ---\n${context}\n--- END MARKET CONTEXT ---` });
+    contentParts.push({ type: "text", text: `\n--- PRODUCT CONTEXT ---\n${context}\n--- END PRODUCT CONTEXT ---` });
   }
+
+  // When a generated product-expert prompt is provided, use it as the system message
+  // and append the output format rules. Otherwise fall back to the static generic prompt.
+  const systemContent = systemPrompt
+    ? `${systemPrompt}\n\n${EBAY_BATCH_OUTPUT_FORMAT}`
+    : EBAY_BATCH_SYSTEM_PROMPT;
 
   let rawResponse: string;
   try {
     const response = await client.chat.completions.create({
       model: "meta-llama/llama-4-scout-17b-16e-instruct",
       messages: [
-        { role: "system", content: EBAY_BATCH_SYSTEM_PROMPT },
+        { role: "system", content: systemContent },
         { role: "user", content: contentParts },
       ],
       max_tokens: Math.min(listings.length * 800, 5000),
@@ -342,13 +379,13 @@ async function _runEbayBatch(listings: any[], context?: string | null): Promise<
   }
 }
 
-export async function batchAnalyzeListingsWithImages(listings: any[], context?: string | null): Promise<string[]> {
+export async function batchAnalyzeListingsWithImages(listings: any[], context?: string | null, systemPrompt?: string | null): Promise<string[]> {
   if (listings.length === 0) return [];
 
   const results: string[] = [];
   for (let start = 0; start < listings.length; start += EBAY_BATCH_SIZE) {
     const chunk = listings.slice(start, start + EBAY_BATCH_SIZE);
-    const chunkResults = await _runEbayBatch(chunk, context);
+    const chunkResults = await _runEbayBatch(chunk, context, systemPrompt);
     results.push(...chunkResults);
   }
   return results;

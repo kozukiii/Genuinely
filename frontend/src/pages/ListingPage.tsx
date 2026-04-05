@@ -59,6 +59,7 @@ export default function ListingPage() {
   const [showDebug, setShowDebug] = useState(false);
   const [showRaw, setShowRaw] = useState(false);
   const [showContext, setShowContext] = useState(false);
+  const [showPrompt, setShowPrompt] = useState(false);
   const [imageIndex, setImageIndex] = useState(0);
   const [saved, setSaved] = useState(false);
   const [enrichedImages, setEnrichedImages] = useState<string[] | null>(null);
@@ -70,6 +71,7 @@ export default function ListingPage() {
   );
   const [analyzing, setAnalyzing] = useState(false);
   const [analyzeError, setAnalyzeError] = useState<string | null>(null);
+  const [fetchedSimilar, setFetchedSimilar] = useState<Listing[]>([]);
 
   useEffect(() => {
     if (!listing?.id) return;
@@ -97,6 +99,35 @@ export default function ListingPage() {
       .catch((err) => console.warn("Marketplace enrichment failed:", err))
       .finally(() => setEnrichLoading(false));
   }, [listing?.id, listing?.source]);
+
+  useEffect(() => {
+    if (!listing?.title) return;
+
+    const raw = sessionStorage.getItem(SEARCH_LISTINGS_KEY);
+    if (raw) return; // sessionStorage already has results, useMemo will handle it
+
+    const stopWords = new Set(["the", "a", "an", "and", "or", "for", "of", "in", "with", "lot", "set"]);
+    const words = listing.title
+      .toLowerCase()
+      .replace(/[^a-z0-9 ]/g, " ")
+      .split(/\s+/)
+      .filter((w) => w.length > 3 && !stopWords.has(w));
+    const keyword = words.slice(0, 2).join(" ");
+    if (!keyword) return;
+
+    fetch(
+      `${API_BASE}/api/search?query=${encodeURIComponent(keyword)}&limit=8&sources=${listing.source}&analyze=0`
+    )
+      .then((r) => r.json())
+      .then((data: Listing[]) => {
+        if (!Array.isArray(data)) return;
+        const filtered = data.filter(
+          (item) => !(item.id === listing.id && item.source === listing.source)
+        );
+        setFetchedSimilar(filtered.slice(0, 4));
+      })
+      .catch(() => {});
+  }, [listing?.id, listing?.source, listing?.title]);
 
   async function runAnalysis() {
     if (!listing) return;
@@ -406,6 +437,20 @@ export default function ListingPage() {
                 </>
               )}
 
+              {ai.systemPrompt && (
+                <>
+                  <button
+                    className="ai-debug-toggle"
+                    onClick={() => setShowPrompt(!showPrompt)}
+                  >
+                    {showPrompt ? "Hide analysis prompt \u2191" : "Show analysis prompt \u2193"}
+                  </button>
+                  {showPrompt && (
+                    <pre className="debug-block">{ai.systemPrompt}</pre>
+                  )}
+                </>
+              )}
+
               <button
                 className="ai-debug-toggle"
                 onClick={() => setShowDebug(!showDebug)}
@@ -432,11 +477,11 @@ export default function ListingPage() {
         </div>
       )}
 
-      {similarListings.length > 0 && (
+      {(similarListings.length > 0 || fetchedSimilar.length > 0) && (
         <section className="similar-listings-section" aria-label="You may like similar listings">
           <h2 className="similar-listings-title">You may like</h2>
           <div className="similar-listings-grid">
-            {similarListings.map((item) => (
+            {(similarListings.length > 0 ? similarListings : fetchedSimilar).map((item) => (
               <div className="similar-card" key={`${item.source}:${item.id}`}>
                 <ListingCard data={item} />
               </div>

@@ -8,9 +8,8 @@ export interface Listing {
 
   title: string;
 
-  // Normalize price to a NUMBER so sorting/scoring is sane
-  // (formatting happens in UI)
-  price: number;
+  // null = price unavailable (cross-platform partner listing); 0 = Accepts Offers
+  price: number | null;
 
   currency?: string; // "USD" etc.
 
@@ -52,4 +51,7 @@ export interface Listing {
   rawAnalysis?: string;
   marketContext?: string;
   systemPrompt?: string;
+
+  // Set when a Marketplace listing was resolved to an eBay cross-listing
+  crossListedEbayId?: string;
 }

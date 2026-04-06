@@ -268,7 +268,11 @@ export async function getEbayItemsWithDetails(
   }
   if (sortBy === "price_asc") searchUrl += "&sort=price";
   else if (sortBy === "price_desc") searchUrl += "&sort=-price";
-  if (offset > 0) searchUrl += `&offset=${offset}`;
+  if (offset > 0) {
+    // eBay requires offset to be a multiple of limit
+    const safeOffset = Math.floor(offset / limit) * limit;
+    if (safeOffset > 0) searchUrl += `&offset=${safeOffset}`;
+  }
 
   const searchRes = await fetch(searchUrl, { headers: ebayHeaders });
 

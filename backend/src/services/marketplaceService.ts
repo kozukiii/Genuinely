@@ -73,7 +73,6 @@ async function getLatLng(location: string) {
   });
 
   const raw = await res.text();
-  console.log(`[marketplace:getLatLng] status=${res.status} body=${raw.slice(0, 300)}`);
   const json = JSON.parse(raw);
 
   const first =
@@ -396,16 +395,22 @@ function pickMarketplaceProductDetailPages(listingId: string, payloads: any[]) {
   return { details, media };
 }
 
-function parseMarketplacePrice(value: any, formattedText?: string): number {
+function parseMarketplacePrice(value: any, formattedText?: string): number | null {
+  // Explicit 0 means "Accepts Offers" on Facebook Marketplace — preserve it.
+  if (value === 0 || value === "0") return 0;
+
   const numeric = Number(value);
-  if (Number.isFinite(numeric) && numeric >= 0) return numeric;
+  if (Number.isFinite(numeric) && numeric > 0) return numeric;
 
   if (typeof formattedText === "string") {
-    const parsed = Number(formattedText.replace(/[^0-9.]/g, ""));
-    if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+    const stripped = formattedText.replace(/[^0-9.]/g, "");
+    if (stripped === "0") return 0;
+    const parsed = Number(stripped);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
   }
 
-  return 0;
+  // Price field was absent — not the same as "Accepts Offers"
+  return null;
 }
 
 function extractMarketplaceDescription(target: any): string | undefined {
@@ -440,6 +445,92 @@ function formatMarketplaceLocation(target: any): string | undefined {
     .map((part) => part.trim());
 
   return parts.length ? parts.join(", ") : undefined;
+}
+
+function collectExternalMarkLinkUrls(node: unknown, urls: string[], depth = 0, visited = new Set<unknown>()): void {
+  if (depth > 12 || !node || typeof node !== "object" || visited.has(node)) return;
+  visited.add(node);
+
+  if (!Array.isArray(node)) {
+    const obj = node as Record<string, unknown>;
+    if (obj.__typename === "ExternalMarkLink" && typeof obj.url === "string") {
+      urls.push(obj.url);
+      return; // no need to recurse further into this node
+    }
+    for (const value of Object.values(obj)) {
+      collectExternalMarkLinkUrls(value, urls, depth + 1, visited);
+    }
+  } else {
+    for (const item of node) {
+      collectExternalMarkLinkUrls(item, urls, depth + 1, visited);
+    }
+  }
+}
+
+function extractExternalMarkLinkUrlsFromHtml(html: string): string[] {
+  const urls: string[] = [];
+  const scriptPattern = /<script type="application\/json"[^>]*data-sjs[^>]*>([\s\S]*?)<\/script>/g;
+
+  for (const match of html.matchAll(scriptPattern)) {
+    try {
+      const parsed = JSON.parse(match[1]);
+      collectExternalMarkLinkUrls(parsed, urls);
+    } catch {}
+  }
+
+  return urls;
+}
+
+async function followFbRedirectForEbayId(redirectUrl: string): Promise<string | null> {
+  try {
+    const res = await fetch(redirectUrl, {
+      method: "GET",
+      redirect: "manual",
+      headers: { "user-agent": FB_DESKTOP_USER_AGENT },
+    });
+
+    const location = res.headers.get("location") ?? "";
+    const m = location.match(/ebay\.com\/itm\/(?:[^/?#]+\/)?(\d{8,})/);
+    return m ? m[1] : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function getEbayCrossListingId(listingId: string): Promise<string | null> {
+  const cookie = getFbCookie();
+  if (!cookie) return null;
+
+  try {
+    const res = await fetch(`https://www.facebook.com/marketplace/item/${listingId}/`, {
+      method: "GET",
+      headers: getMarketplacePermalinkHeaders(cookie),
+      ...(proxyUrls.length ? { agent: getProxyAgent() } : {}),
+    });
+    if (res.status !== 200) return null;
+
+    const html = await res.text();
+
+    // First pass: look for a direct eBay item URL in the page
+    const directMatch = html.match(/ebay\.com(?:\/|\\\/|%2F)itm(?:\/|\\\/|%2F)(?:[^"' \\<\s]+(?:\/|\\\/|%2F))?(\d{8,})/);
+    if (directMatch) return directMatch[1];
+
+    // Second pass: find ExternalMarkLink objects (the "Buy now on eBay" CTA)
+    // and follow any Facebook redirect URLs to retrieve the eBay item ID
+    const externalUrls = extractExternalMarkLinkUrlsFromHtml(html);
+    for (const url of externalUrls) {
+      if (/facebook\.com(?:\/|\\\/|%2F)l(?:\/|\\\/|%2F)/.test(url)) {
+        const cleanUrl = url.replace(/\\\//g, "/");
+        const ebayId = await followFbRedirectForEbayId(cleanUrl);
+        if (ebayId) return ebayId;
+      }
+    }
+
+    return null;
+  } catch (err) {
+    console.warn(`[marketplace:crossListing] Failed to check eBay cross-listing for ${listingId}:`, err);
+    return null;
+  }
 }
 
 function extractMarketplaceCoordinates(source: any): { lat: number; lng: number } | null {
@@ -501,7 +592,7 @@ function buildMarketplaceListingFromProductDetails(
     id: listingId,
     source: "marketplace",
     title: target?.marketplace_listing_title ?? "Marketplace Listing",
-    price: parseMarketplacePrice(target?.listing_price?.amount, target?.formatted_price?.text),
+    price: parseMarketplacePrice(target?.listing_price?.amount, target?.formatted_price?.text ?? target?.listing_price?.formatted_amount),
     currency: target?.listing_price?.currency ?? "USD",
     url,
     link: url,
@@ -654,7 +745,6 @@ export async function getMarketplaceListingByGraphqlForAnalysis(listingId: strin
   }
 
   // Fall back to authenticated HTML permalink fetch
-  console.log(`[marketplace] containerQuery returned no data for ${listingId}, falling back to permalink HTML`);
   return fetchMarketplaceListingByPermalinkHtml(listingId);
 }
 

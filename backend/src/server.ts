@@ -7,6 +7,7 @@ import searchRoutes from "./routes/searchRoutes";
 import ebayRoutes from "./routes/ebayRoutes";
 import imageProxyRoutes from "./routes/imageProxyRoutes";
 import marketplaceRoutes from "./routes/marketplaceRoutes";
+import featuredRoutes from "./routes/featuredRoutes";
 
 
 
@@ -16,7 +17,7 @@ app.disable("x-powered-by");
 
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: "5mb" }));
 
 // --- API router (keeps server.ts clean as the app grows) ---
 const api = express.Router();
@@ -31,6 +32,7 @@ api.use("/search", searchRoutes);
 api.use("/ebay", ebayRoutes);
 api.use("/marketplace", marketplaceRoutes);
 api.use("/proxy-image", imageProxyRoutes);
+api.use("/featured", featuredRoutes);
 
 // Mount all API routes under /api
 app.use("/api", api);

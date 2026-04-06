@@ -3,6 +3,37 @@ import { Link, useLocation } from "react-router-dom";
 import "./styles/NavBar.css";
 import { getEbayNotice, onEbayNoticeChange } from "../utils/ebayNotice";
 
+function GenuinelyLogo() {
+  return (
+    <svg
+      className="nav-logo-mark"
+      viewBox="0 0 44 44"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+    >
+      <defs>
+        <linearGradient id="ringGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#3dff8f" />
+          <stop offset="100%" stopColor="#1aad54" />
+        </linearGradient>
+      </defs>
+      <circle cx="22" cy="22" r="18.5" stroke="url(#ringGrad)" strokeWidth="3.5" />
+      <text
+        x="22"
+        y="29"
+        textAnchor="middle"
+        fill="white"
+        fontFamily="system-ui, -apple-system, sans-serif"
+        fontWeight="700"
+        fontSize="20"
+      >
+        G
+      </text>
+    </svg>
+  );
+}
+
 export default function NavBar() {
   const { pathname } = useLocation();
   const [showEbayNotice, setShowEbayNotice] = useState(false);
@@ -13,41 +44,34 @@ export default function NavBar() {
   }, []);
 
   return (
-    <nav className="navbar">
-      <div className="nav-left">
-        <Link to="/" className="nav-logo">
-          Genuinely
+    <header className="navbar-wrapper">
+      <nav className="navbar">
+        <Link to="/" className="nav-logo" aria-label="Genuinely home">
+          <GenuinelyLogo />
+          <span className="nav-logo-text">
+            <span className="nav-logo-name">GENUINELY</span>
+            <span className="nav-logo-tagline">SHOP GENUINELY</span>
+          </span>
         </Link>
-      </div>
+
+        <div className="nav-right">
+          <Link to="/" className={pathname === "/" ? "nav-item active" : "nav-item"}>
+            Home
+          </Link>
+          <Link to="/search" className={pathname === "/search" ? "nav-item active" : "nav-item"}>
+            Search
+          </Link>
+          <Link to="/cart" className={pathname === "/cart" ? "nav-item active" : "nav-item"}>
+            Saved
+          </Link>
+        </div>
+      </nav>
 
       {showEbayNotice && (
         <div className="nav-notice" role="status" aria-live="polite">
           There is an issue with eBay searching right now. Marketplace fallback is active where possible. Message Zach @ admin.genuinely@gmail.com.
         </div>
       )}
-
-      <div className="nav-right">
-        <Link
-          to="/"
-          className={pathname === "/" ? "nav-item active" : "nav-item"}
-        >
-          Home
-        </Link>
-
-        <Link
-          to="/search"
-          className={pathname === "/search" ? "nav-item active" : "nav-item"}
-        >
-          Search
-        </Link>
-
-        <Link
-          to="/cart"
-          className={pathname === "/cart" ? "nav-item active" : "nav-item"}
-        >
-          Saved
-        </Link>
-      </div>
-    </nav>
+    </header>
   );
 }

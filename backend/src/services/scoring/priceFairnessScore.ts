@@ -71,10 +71,11 @@ function isNewCondition(condition?: string, title?: string): boolean {
  *  - context is available and price is more than 10× the market high
  */
 export function isAcceptsOffersPrice(
-  price: number,
+  price: number | null,
   context?: string | null,
 ): boolean {
-  if (!price || price <= 0) return true;
+  if (price === null) return false; // null = unavailable, not "Accepts Offers"
+  if (price <= 0) return true;
   if (FB_PLACEHOLDER_PRICES.has(Math.round(price))) return true;
 
   // Context-based: if price is 10× above the market high it's clearly not a real ask
@@ -91,12 +92,12 @@ export function isAcceptsOffersPrice(
  * a usable price range (caller should fall back to LLM score).
  */
 export function calculatePriceFairness(
-  price: number,
+  price: number | null,
   context: string | null | undefined,
   condition?: string,
   title?: string,
 ): number | null {
-  if (!context || !price || price <= 0) return null;
+  if (!context || price == null || price <= 0) return null;
 
   const range = extractPriceRange(context);
   if (!range) return null;

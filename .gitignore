@@ -36,3 +36,4 @@ pnpm-debug.log*
 Thumbs.db
 # runtime cache
 .cache/
+backend/data/

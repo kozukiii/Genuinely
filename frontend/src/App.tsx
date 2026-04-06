@@ -7,6 +7,7 @@ import SearchPage from "./pages/SearchPage";
 import CartPage from "./pages/CartPage";
 import HomePage from "./pages/HomePage";
 import ListingPage from "./pages/ListingPage";
+import ListingCardDemo from "./pages/ListingCardDemo";
 
 import "./pages/styles/HomePage.css";
 
@@ -25,6 +26,7 @@ export default function App() {
 
         {/* Individual listing */}
         <Route path="/listing/:id" element={<ListingPage />} />
+        <Route path="/listingcard-demo" element={<ListingCardDemo />} />
       </Routes>
     </BrowserRouter>
   );

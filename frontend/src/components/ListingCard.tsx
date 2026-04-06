@@ -44,11 +44,13 @@ export default function ListingCard({ data }: { data: Listing }) {
   const activeImage = images[imageIndex];
   const proxiedImage = getHighResImage(activeImage, data.source);
 
-  const money = new Intl.NumberFormat(undefined, {
-    style: "currency",
-    currency: data.currency ?? "USD",
-    maximumFractionDigits: 0,
-  }).format(data.price);
+  const money = data.price != null
+    ? new Intl.NumberFormat(undefined, {
+        style: "currency",
+        currency: data.currency ?? "USD",
+        maximumFractionDigits: 0,
+      }).format(data.price)
+    : null;
 
   return (
     <div className="listing-card-wrapper">
@@ -78,11 +80,11 @@ export default function ListingCard({ data }: { data: Listing }) {
               {data.acceptsOffers ? (
                 <div className="listing-price-accepts-offers">
                   <p className="listing-price listing-price--offers">Accepts Offers</p>
-                  <span className="listing-price--offers-hint">Visit listing to determine price</span>
+                  <span className="listing-price--offers-hint">View listing for more info</span>
                 </div>
-              ) : (
+              ) : money != null ? (
                 <p className="listing-price">{money}</p>
-              )}
+              ) : null}
               {data.shippingPrice != null && (
                 <span className={`listing-shipping${data.shippingPrice === 0 ? " listing-shipping--free" : ""}`}>
                   {data.shippingPrice === 0

@@ -39,6 +39,26 @@ export default function LinkAnalysisModal({ onClose }: Props) {
 
       const listing: Listing = await res.json();
       onClose();
+
+      // If this resolved to an eBay cross-listing, check whether that eBay item
+      // is already in the current search results to avoid a duplicate listing page.
+      if (listing.source === "ebay" && listing.crossListedEbayId) {
+        try {
+          const sessionRaw = sessionStorage.getItem("search:listings");
+          if (sessionRaw) {
+            const sessionListings: Listing[] = JSON.parse(sessionRaw);
+            const existing = sessionListings.find(
+              (l) => l.source === "ebay" && l.id === listing.id
+            );
+            if (existing) {
+              // Already in search results — navigate to the known listing
+              navigate(`/listing/${listing.id}`, { state: { listing: existing } });
+              return;
+            }
+          }
+        } catch {}
+      }
+
       navigate(`/listing/${listing.id}`, { state: { listing } });
     } catch (err) {
       setPhase("error");

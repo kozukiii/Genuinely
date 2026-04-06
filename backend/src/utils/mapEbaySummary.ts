@@ -9,7 +9,7 @@ export function mapEbaySummary(item: any) {
   return {
     id: item.itemId,
     title: item.title,
-    price: item.price?.value,
+    price: item.price?.value ?? null,
     currency: item.price?.currency,
 
     condition: item.condition,

@@ -92,10 +92,14 @@ export async function searchAll(req: Request, res: Response) {
           return [] as Listing[];
         })
       : Promise.resolve([]),
-    useEbay ? runEbaySearch(ebayTarget) : Promise.resolve([]),
+    useEbay && ebayTarget > 0 ? runEbaySearch(ebayTarget) : Promise.resolve([]),
   ]);
 
-  let merged = dedupe([...ebay, ...marketplace]);
+  // Drop marketplace listings where price is null — that means the price field
+  // was absent from the API response (e.g. cross-platform partner listings).
+  // price===0 is valid and means "Accepts Offers".
+  const validMarketplace = marketplace.filter((l: Listing) => l.price !== null);
+  let merged = dedupe([...ebay, ...validMarketplace]);
 
   if (merged.length < limit && useEbay && !ebayUnavailable) {
     const need = limit - merged.length;

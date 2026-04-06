@@ -656,59 +656,130 @@ h6 {
   margin-top: 1rem;
 }
 /* =========================
-   HomePage centering overrides
+   Hero section
    ========================= */
-
-/* Center the top branding text */
-.home-page .logo-title,
-.home-page .tagline{
+.home-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 3.5rem 1rem 2.5rem;
   text-align: center;
 }
 
-/* Center the actions row */
-.home-page .home-actions{
+.home-hero-logo {
+  margin-bottom: 1.1rem;
+  filter: drop-shadow(0 0 22px rgba(57, 255, 157, 0.3));
+}
+
+.home-hero-logo svg {
+  width: 64px;
+  height: 64px;
+}
+
+.home-hero-wordmark {
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 2.6rem;
+  font-weight: 800;
+  letter-spacing: 0.22em;
+  color: rgba(255, 255, 255, 0.97);
+  margin: 0 0 0.4rem;
+}
+
+.home-hero-sub {
+  font-size: 1rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: rgba(57, 255, 157, 0.8);
+  margin: 0 0 2rem;
+}
+
+.home-hero-search {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  width: 100%;
+  max-width: 520px;
+  margin-bottom: 1.6rem;
+
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.45);
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.home-hero-search:focus-within {
+  border-color: rgba(57, 255, 157, 0.4);
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.45), 0 0 0 3px rgba(57, 255, 157, 0.1);
+}
+
+.home-hero-input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  padding: 0.85rem 1.1rem;
+  font-size: 0.97rem;
+  color: rgba(245, 245, 245, 0.95);
+}
+
+.home-hero-input::placeholder {
+  color: rgba(209, 213, 219, 0.45);
+}
+
+.home-hero-btn {
+  flex-shrink: 0;
+  padding: 0.85rem 1.4rem;
+  background: rgba(57, 255, 157, 0.12);
+  border: none;
+  border-left: 1px solid rgba(57, 255, 157, 0.2);
+  color: rgba(57, 255, 157, 0.95);
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  transition: background 150ms ease;
+}
+
+.home-hero-btn:hover {
+  background: rgba(57, 255, 157, 0.22);
+}
+
+/* =========================
+   HomePage layout overrides
+   ========================= */
+.home-page .home-actions {
   justify-content: center;
 }
 
-/* Sections span full width; only the header block gets centered */
 .home-page .hero-banner,
 .home-page .featured-grid-section,
 .home-page .home-section {
   text-align: left;
 }
 
-/* Center the header block (title + subtext) */
-.home-page .section-head{
-  justify-content: center;
+.home-page .section-head {
+  justify-content: space-between;
   align-items: center;
-  text-align: center;
 }
 
-/* Banner viewport centered */
-.home-page .banner-viewport{
+.home-page .banner-viewport {
   margin: 0 auto;
 }
 
-/* Keep banner cards vertically centered within track */
-.home-page .banner-track{
+.home-page .banner-track {
   align-items: stretch;
+  animation-duration: 55s;
 }
 
-/* Center the grid container */
-.home-page .featured-grid{
+.home-page .featured-grid {
   justify-items: center;
 }
 
-/* Keep cards full width inside their grid cells (prevents skinny cards) */
-.home-page .featured-grid .listing-card-wrapper{
+.home-page .featured-grid .listing-card-wrapper {
   width: 100%;
-}
-
-/* =========================
-   Slower banner scroll
-   ========================= */
-.home-page .banner-track{
-  animation-duration: 55s; /* was 42s — slower */
 }
 
 /* =========================

@@ -61,6 +61,7 @@ export default function ListingPage() {
   const [showContext, setShowContext] = useState(false);
   const [showPrompt, setShowPrompt] = useState(false);
   const [imageIndex, setImageIndex] = useState(0);
+  const [viewerOpen, setViewerOpen] = useState(false);
   const [saved, setSaved] = useState(false);
   const [enrichedImages, setEnrichedImages] = useState<string[] | null>(null);
   // NOTE: Kept for future ListingPage description UI work; currently not read anywhere.
@@ -128,6 +129,21 @@ export default function ListingPage() {
       })
       .catch(() => {});
   }, [listing?.id, listing?.source, listing?.title]);
+
+  useEffect(() => {
+    if (!viewerOpen) return;
+    const imgCount = (enrichedImages !== null && enrichedImages.length > 0
+      ? enrichedImages
+      : listing?.images ?? []
+    ).length;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setViewerOpen(false);
+      if (e.key === "ArrowRight") setImageIndex((i) => (i === imgCount - 1 ? 0 : i + 1));
+      if (e.key === "ArrowLeft") setImageIndex((i) => (i === 0 ? imgCount - 1 : i - 1));
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [viewerOpen, enrichedImages, listing?.images]);
 
   async function runAnalysis() {
     if (!listing) return;
@@ -262,6 +278,9 @@ export default function ListingPage() {
               src={currentImage || "/placeholder.jpg"}
               alt={listing.title}
               onError={(e) => (e.currentTarget.src = "/placeholder.jpg")}
+              className="image-frame-clickable"
+              onClick={() => setViewerOpen(true)}
+              title="Click to view full size"
             />
             {enrichLoading && listing.source === "marketplace" && (
               <span className="image-loading-badge">Loading gallery{"\u2026"}</span>
@@ -472,6 +491,54 @@ export default function ListingPage() {
               {showRaw && (
                 <pre className="debug-block">{ai.rawAnalysis}</pre>
               )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {viewerOpen && (
+        <div
+          className="image-viewer-overlay"
+          onClick={() => setViewerOpen(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Image viewer"
+        >
+          <button
+            className="image-viewer-close"
+            onClick={() => setViewerOpen(false)}
+            aria-label="Close image viewer"
+          >
+            &times;
+          </button>
+
+          <button
+            className="image-viewer-nav image-viewer-nav--prev"
+            onClick={(e) => { e.stopPropagation(); setImageIndex((i) => (i === 0 ? images.length - 1 : i - 1)); }}
+            aria-label="Previous image"
+          >
+            {"\u2039"}
+          </button>
+
+          <div className="image-viewer-content" onClick={(e) => e.stopPropagation()}>
+            <img
+              src={currentImage || "/placeholder.jpg"}
+              alt={listing.title}
+              onError={(e) => (e.currentTarget.src = "/placeholder.jpg")}
+            />
+          </div>
+
+          <button
+            className="image-viewer-nav image-viewer-nav--next"
+            onClick={(e) => { e.stopPropagation(); setImageIndex((i) => (i === images.length - 1 ? 0 : i + 1)); }}
+            aria-label="Next image"
+          >
+            {"\u203A"}
+          </button>
+
+          {images.length > 1 && (
+            <div className="image-viewer-counter">
+              {safeIndex + 1} / {images.length}
             </div>
           )}
         </div>

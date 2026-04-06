@@ -58,9 +58,17 @@ router.post("/from-url", async (req, res) => {
     const countryRaw = String(req.body.country ?? "").trim().toUpperCase();
     const buyerLocation = ebayMatch && countryRaw ? { country: countryRaw, zip: "" } : null;
 
-    const listing = ebayMatch
+    let listing = ebayMatch
       ? await getEbayItemByNumericId(ebayMatch[1], buyerLocation)
       : await getMarketplaceListingBySearchForAnalysis(mpMatch![1]);
+
+    // price===null means the price field was absent from the API response —
+    // not the same as "Accepts Offers". Reject rather than analyze bad data.
+    if (!ebayMatch && listing.price === null) {
+      return res.status(404).json({
+        error: "This Marketplace listing's price couldn't be retrieved. It may be a cross-platform listing — try finding it directly on eBay.",
+      });
+    }
 
     const analyzed = await scoreSingleListingWithContext(listing);
     return res.json({ ...analyzed, analyzedAt: new Date().toISOString() });

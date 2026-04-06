@@ -221,7 +221,6 @@ DEBUG INFO:
 // Batch analysis — analyzes multiple listings in a single API call
 // ---------------------------------------------------------------------------
 
-const EBAY_BATCH_SIZE = 4;
 
 // Appended to any generated system prompt so the output shape stays consistent
 const EBAY_BATCH_OUTPUT_FORMAT = `
@@ -283,11 +282,56 @@ OUTPUT FORMAT — return ONLY a JSON array (no markdown, no backticks):
 ]
 `.trim();
 
-async function _runEbayBatch(listings: any[], context?: string | null, systemPrompt?: string | null): Promise<string[]> {
-  const contentParts: any[] = [];
+const MAX_IMAGES_PER_BATCH = 5;
 
-  for (let i = 0; i < listings.length; i++) {
-    const listing = listings[i];
+type BatchEntry = { listing: any; imageCount: number };
+
+function getListingImageUrls(listing: any): string[] {
+  return (
+    Array.isArray(listing.imageUrls)
+      ? listing.imageUrls
+      : Array.isArray(listing.images)
+        ? listing.images
+        : []
+  ).filter((u: any) => typeof u === "string" && u.trim());
+}
+
+function buildImageAwareBatches(listings: any[]): BatchEntry[][] {
+  const batches: BatchEntry[][] = [];
+  let current: BatchEntry[] = [];
+  let currentTotal = 0;
+
+  for (const listing of listings) {
+    const available = getListingImageUrls(listing).length;
+    // Cap any single listing at MAX_IMAGES_PER_BATCH
+    const imgCount = Math.min(available, MAX_IMAGES_PER_BATCH);
+
+    if (imgCount === 0) {
+      // No images — always fits, just append
+      current.push({ listing, imageCount: 0 });
+      continue;
+    }
+
+    if (currentTotal + imgCount <= MAX_IMAGES_PER_BATCH) {
+      current.push({ listing, imageCount: imgCount });
+      currentTotal += imgCount;
+    } else {
+      if (current.length > 0) batches.push(current);
+      current = [{ listing, imageCount: imgCount }];
+      currentTotal = imgCount;
+    }
+  }
+
+  if (current.length > 0) batches.push(current);
+  return batches;
+}
+
+async function _runEbayBatch(entries: BatchEntry[], context?: string | null, systemPrompt?: string | null): Promise<string[]> {
+  const contentParts: any[] = [];
+  const listings = entries.map((e) => e.listing);
+
+  for (let i = 0; i < entries.length; i++) {
+    const { listing, imageCount } = entries[i];
     const title = clean(listing.title) ?? "Untitled";
     const currency = clean(listing.currency) ?? "USD";
     const link = clean(listing.link ?? listing.url) ?? "";
@@ -301,12 +345,7 @@ async function _runEbayBatch(listings: any[], context?: string | null, systemPro
     const shortDesc = clean(listing.shortDescription) ?? "";
     const rawDesc = listing.description || listing.fullDescription || "";
     const description = clean(stripHtml(rawDesc)) ?? "";
-
-    const imageUrls: string[] = Array.isArray(listing.imageUrls)
-      ? listing.imageUrls.filter((u: any) => typeof u === "string" && u.trim())
-      : Array.isArray(listing.images)
-        ? listing.images.filter((u: any) => typeof u === "string" && u.trim())
-        : [];
+    const imageUrls = getListingImageUrls(listing).slice(0, imageCount);
 
     contentParts.push({ type: "text", text: `=== LISTING ${i + 1} ===` });
     contentParts.push({ type: "text", text: `Title: ${title}` });
@@ -325,10 +364,9 @@ async function _runEbayBatch(listings: any[], context?: string | null, systemPro
     contentParts.push({ type: "text", text: `Listing URL: ${link}` });
     contentParts.push({ type: "text", text: `Images Provided: ${imageUrls.length}` });
 
-    const batchImageUrls = imageUrls.slice(0, 2);
-    if (batchImageUrls.length) {
+    if (imageUrls.length > 0) {
       contentParts.push({ type: "text", text: `[Images for Listing ${i + 1}]` });
-      for (const url of batchImageUrls) {
+      for (const url of imageUrls) {
         contentParts.push({ type: "image_url", image_url: { url } });
       }
     }
@@ -340,8 +378,6 @@ async function _runEbayBatch(listings: any[], context?: string | null, systemPro
     contentParts.push({ type: "text", text: `\n--- PRODUCT CONTEXT ---\n${context}\n--- END PRODUCT CONTEXT ---` });
   }
 
-  // When a generated product-expert prompt is provided, use it as the system message
-  // and append the output format rules. Otherwise fall back to the static generic prompt.
   const systemContent = systemPrompt
     ? `${systemPrompt}\n\n${EBAY_BATCH_OUTPUT_FORMAT}`
     : EBAY_BATCH_SYSTEM_PROMPT;
@@ -382,11 +418,11 @@ async function _runEbayBatch(listings: any[], context?: string | null, systemPro
 export async function batchAnalyzeListingsWithImages(listings: any[], context?: string | null, systemPrompt?: string | null): Promise<string[]> {
   if (listings.length === 0) return [];
 
+  const batches = buildImageAwareBatches(listings);
   const results: string[] = [];
-  for (let start = 0; start < listings.length; start += EBAY_BATCH_SIZE) {
-    const chunk = listings.slice(start, start + EBAY_BATCH_SIZE);
-    const chunkResults = await _runEbayBatch(chunk, context, systemPrompt);
-    results.push(...chunkResults);
+  for (const batch of batches) {
+    const batchResults = await _runEbayBatch(batch, context, systemPrompt);
+    results.push(...batchResults);
   }
   return results;
 }

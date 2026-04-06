@@ -6,9 +6,10 @@ export interface Listing {
   source: ListingSource;
   title: string;
 
-  // Normalize price to a NUMBER so sorting/scoring is sane
-  // (formatting happens in UI)
-  price: number;
+  // Normalize price to a NUMBER so sorting/scoring is sane (formatting happens in UI).
+  // null means the price data was unavailable (e.g. a cross-platform partner listing) —
+  // distinct from 0 which means "Accepts Offers" on Facebook Marketplace.
+  price: number | null;
   currency?: string; // "USD" etc.
 
   url: string;
@@ -70,6 +71,10 @@ export interface Listing {
 
   // --- “never lose data” escape hatch ---
   raw?: unknown;
+
+  // Set when a Facebook Marketplace listing is actually an eBay cross-listing.
+  // The from-url route will resolve this to an eBay listing instead.
+  crossListedEbayId?: string;
 
   // backwards compat if anything still uses `link`
   link?: string;

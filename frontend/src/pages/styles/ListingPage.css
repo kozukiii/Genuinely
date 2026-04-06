@@ -296,6 +296,7 @@
   box-shadow: none;
 
   transform: translateY(8px);
+  animation: ringFadeIn 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .page-rating-ring .rating-ring {
@@ -304,10 +305,101 @@
   filter: drop-shadow(0 18px 24px rgba(0, 0, 0, 0.55));
 }
 
+.page-pending-ring {
+  width: 100px;
+  height: 100px;
+  filter: drop-shadow(0 18px 24px rgba(0, 0, 0, 0.55));
+  overflow: visible;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.page-pending-ring__track {
+  stroke: #374151;
+  fill: none;
+}
+
+.page-pending-ring__arc {
+  stroke: #39ff9d;
+  fill: none;
+  shape-rendering: geometricPrecision;
+  vector-effect: non-scaling-stroke;
+}
+
+.page-pending-ring--loading {
+  animation: pageRingSpinLoading 3s linear forwards;
+}
+
+.page-pending-ring--compressing {
+  animation: none;
+}
+
+.page-pending-ring__arc--loading {
+  animation: pageRingColorCycle 1.8s linear infinite;
+}
+
+.page-pending-ring__arc--compressing {
+  stroke: var(--demo-fill-color, #22c55e);
+}
+
+.page-rating-ring--filling .rating-ring text {
+  opacity: 0;
+}
+
+.page-rating-ring--filling .rating-ring circle:last-of-type {
+  stroke: var(--demo-fill-color, #22c55e);
+}
+
 .page-rating-label {
   font-size: 1.25rem;
   font-weight: 600;
   color: rgba(255, 255, 255, 0.9);
+}
+
+@keyframes pageRingSpinLoading {
+  to {
+    transform: rotate(1080deg);
+  }
+}
+
+@keyframes ringFadeIn {
+  from {
+    opacity: 0;
+    translate: 0 4px;
+    scale: 0.92;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+    scale: 1;
+  }
+}
+
+
+@keyframes pageRingColorCycle {
+  0% {
+    stroke: #39ff9d;
+  }
+
+  20% {
+    stroke: #facc15;
+  }
+
+  40% {
+    stroke: #ef4444;
+  }
+
+  60% {
+    stroke: #39ff9d;
+  }
+
+  80% {
+    stroke: #facc15;
+  }
+
+  100% {
+    stroke: #ef4444;
+  }
 }
 
 .ring-title {
@@ -527,6 +619,7 @@
 
   .page-rating-ring {
     transform: none;
+    animation: ringFadeIn 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
   }
 }
 
@@ -740,4 +833,132 @@
   width: 28px;
   height: 28px;
   font-size: 0.9rem;
+}
+
+/* =========================
+   Clickable image hint
+   ========================= */
+.image-frame-clickable {
+  cursor: zoom-in;
+}
+
+/* =========================
+   Image Viewer Overlay
+   ========================= */
+.image-viewer-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  background: rgba(0, 0, 0, 0.88);
+  backdrop-filter: blur(10px);
+
+  animation: viewerFadeIn 160ms ease both;
+}
+
+@keyframes viewerFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.image-viewer-content {
+  max-width: 90vw;
+  max-height: 90vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.image-viewer-content img {
+  max-width: 90vw;
+  max-height: 90vh;
+  object-fit: contain;
+  border-radius: 10px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.7);
+  user-select: none;
+}
+
+.image-viewer-close {
+  position: fixed;
+  top: 20px;
+  right: 24px;
+  z-index: 1001;
+
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+
+  background: rgba(20, 20, 20, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: rgba(245, 245, 245, 0.92);
+  font-size: 1.6rem;
+  line-height: 1;
+
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+
+  transition: background 140ms ease, transform 140ms ease;
+}
+
+.image-viewer-close:hover {
+  background: rgba(40, 40, 40, 0.9);
+  transform: scale(1.1);
+}
+
+.image-viewer-nav {
+  position: fixed;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 1001;
+
+  width: 52px;
+  height: 52px;
+  border-radius: 16px;
+
+  background: rgba(20, 20, 20, 0.65);
+  border: 1px solid var(--line);
+  color: rgba(245, 245, 245, 0.92);
+  font-size: 2rem;
+  line-height: 1;
+
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+
+  transition: background 140ms ease, border-color 140ms ease, transform 140ms ease;
+}
+
+.image-viewer-nav--prev {
+  left: 20px;
+}
+
+.image-viewer-nav--next {
+  right: 20px;
+}
+
+.image-viewer-nav:hover {
+  background: rgba(40, 40, 40, 0.9);
+  border-color: rgba(57, 255, 157, 0.38);
+  transform: translateY(-50%) scale(1.08);
+}
+
+.image-viewer-counter {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1001;
+
+  background: rgba(20, 20, 20, 0.7);
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  color: rgba(245, 245, 245, 0.82);
+  font-size: 0.85rem;
+  padding: 0.36rem 0.9rem;
+  letter-spacing: 0.4px;
 }

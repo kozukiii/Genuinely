@@ -7,6 +7,7 @@ import FiltersSidebar, { type FilterState } from "../components/FiltersSidebar";
 import type { Listing } from "../types/Listing";
 import "./styles/HomePage.css";
 import { setEbayNotice } from "../utils/ebayNotice";
+import { addToSearchCache } from "../utils/searchCache";
 
 const PAGE_SIZE = 12;
 const BUYER_COUNTRY = Intl.DateTimeFormat().resolvedOptions().locale.split("-")[1]?.toUpperCase() ?? "US";
@@ -94,6 +95,7 @@ async function runAnalysisPipeline(
     specificity: string;
     indices: number[];
     context: string | null;
+    systemPrompt?: string;
   }>;
 
   try {
@@ -175,10 +177,13 @@ async function runAnalysisPipeline(
 function applyFilters(listings: Listing[], filters: FilterState): Listing[] {
   let result = listings.slice();
 
+  if (!filters.sources.ebay) result = result.filter((l) => l.source !== "ebay");
+  if (!filters.sources.marketplace) result = result.filter((l) => l.source !== "marketplace");
+
   const minP = parsePriceInput(filters.minPrice);
   const maxP = parsePriceInput(filters.maxPrice);
-  if (minP !== null) result = result.filter((l) => l.price >= minP);
-  if (maxP !== null) result = result.filter((l) => l.price <= maxP);
+  if (minP !== null) result = result.filter((l) => l.price != null && l.price >= minP);
+  if (maxP !== null) result = result.filter((l) => l.price != null && l.price <= maxP);
 
   if (filters.condition !== "any") {
     result = result.filter((l) => {
@@ -191,8 +196,8 @@ function applyFilters(listings: Listing[], filters: FilterState): Listing[] {
     result = result.filter((l) => l.shippingPrice === 0 || l.shippingPrice == null);
   }
 
-  if (filters.sortBy === "price_asc") result.sort((a, b) => a.price - b.price);
-  else if (filters.sortBy === "price_desc") result.sort((a, b) => b.price - a.price);
+  if (filters.sortBy === "price_asc") result.sort((a, b) => (a.price ?? 0) - (b.price ?? 0));
+  else if (filters.sortBy === "price_desc") result.sort((a, b) => (b.price ?? 0) - (a.price ?? 0));
   else if (filters.sortBy === "ai_score") {
     result.sort((a, b) => (b.aiScore ?? -1) - (a.aiScore ?? -1));
   }
@@ -417,6 +422,12 @@ export default function SearchPage() {
 
   useEffect(() => { hydrate(); }, []);
   useEffect(() => { if (navType === "POP") hydrate(); }, [navType]);
+
+  // Persist scored listings to the search cache as they arrive
+  useEffect(() => {
+    const scored = listings.filter((l) => l.aiScore != null && !l.analysisPending);
+    if (scored.length > 0) addToSearchCache(scored);
+  }, [listings]);
 
   return (
     <div className="home-page">

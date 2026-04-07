@@ -16,6 +16,8 @@ export interface ProductGroup {
   specificity: "specific" | "broad" | "outlier";
   indices: number[];
   systemPrompt: string | null; // fully generated product-expert system prompt
+  priceLow: number | null;
+  priceHigh: number | null;
 }
 
 interface RawGroup {
@@ -31,31 +33,36 @@ const GROUPING_SYSTEM_PROMPT = `
 You are a product classification specialist for a secondhand marketplace search tool.
 
 TASK:
-Given a list of listing titles from a search query, group them by distinct product model.
+Given a list of listing titles from a search query, group them by exact product.
 Generate a targeted web search query per group to find current used market pricing.
 
 GROUPING RULES:
-- Group listings that share the same brand + model series
-- Canonical name must be specific (e.g. "Ping G440 3 Wood" not "golf club")
+- Only group listings you are CERTAIN are the exact same product — same brand, same model, same variant.
+- When in doubt, give each listing its own group. Never merge items speculatively.
+- Different storage tiers are different products (128GB ≠ 256GB).
+- Different loft or shaft specs are different products (9° driver ≠ 10.5° driver).
+- Different club types are always different products (driver ≠ 3 wood, even same series).
+- Different generations are different products (iPhone 14 ≠ iPhone 15).
+- A listing missing key specs (e.g. no storage size, no loft) cannot be grouped with one that has them — treat it as its own group.
+- Canonical name must be as specific as the listing allows (e.g. "Ping G440 Max Driver 9°", "iPhone 14 Pro 256GB Space Black").
 - Classify each group:
-  - "specific" — clear brand + model (e.g. "Ping G440 3 Wood", "iPhone 14 Pro 256GB")
-  - "broad"    — product type only, no clear model (e.g. "3 wood", "used phone")
-  - "outlier"  — vague, junk, or unrelated titles
-- Merge close variants (colors, minor storage tiers) into one group
-- Max 8 groups — combine leftovers into "outlier"
+  - "specific" — exact brand + model + variant is clear (e.g. "Ping G440 Max Driver 10.5°", "iPhone 14 Pro 256GB")
+  - "broad"    — product type is clear but key specs are missing or ambiguous (e.g. "golf driver", "used iPhone")
+  - "outlier"  — vague, junk, unrelated, or impossible to classify
+- Max 8 groups — any excess listings beyond 8 groups go into "outlier".
 
 TAVILY QUERY RULES:
-- Make each tavilyQuery tight and specific to the exact product
+- Make each tavilyQuery exact and specific to the product and variant
 - Always include pricing intent (e.g. "used resale price 2025")
 - Do NOT use vague phrases like "secondhand item" or "marketplace listing"
 
 OUTPUT FORMAT — return ONLY a JSON array (no markdown, no backticks):
 [
   {
-    "canonicalName": "Ping G440 3 Wood",
+    "canonicalName": "Ping G440 Max Driver 10.5°",
     "specificity": "specific",
-    "indices": [0, 3, 7],
-    "tavilyQuery": "Ping G440 3 wood used resale price 2025"
+    "indices": [0, 3],
+    "tavilyQuery": "Ping G440 Max Driver 10.5 degree used resale price 2025"
   }
 ]
 `.trim();
@@ -84,8 +91,50 @@ RULES:
 - Write in second person ("You are an expert…", "Watch for…", "Check whether…")
 - Do NOT use generic language like "similar items", "this category", or "this type of product"
 - If market data is sparse, draw on your own product knowledge — do not say "data unavailable"
-- Return ONLY the prompt text — no markdown headers, no JSON, no explanation
+- Return ONLY valid JSON (no markdown, no backticks) in exactly this shape:
+  { "priceLow": <number>, "priceHigh": <number>, "systemPrompt": "<the full prompt text>" }
+- priceLow and priceHigh must be integers in USD representing the typical used market range
 `.trim();
+
+// ─── JSON sanitizer ───────────────────────────────────────────────────────────
+// LLMs often embed literal newlines/tabs inside JSON string values, which is
+// invalid JSON. This finds every "..." region and escapes bare control chars.
+function sanitizeJsonStrings(raw: string): string {
+  return raw.replace(/"(?:[^"\\]|\\.)*"/gs, (match) =>
+    match
+      .replace(/\t/g, "\\t")
+      .replace(/\n/g, "\\n")
+      .replace(/\r/g, "\\r")
+      .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, (c) =>
+        `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`
+      )
+  );
+}
+
+function parsePromptJson(raw: string): { priceLow: number | null; priceHigh: number | null; systemPrompt: string | null } {
+  // Strip markdown fences if present
+  const stripped = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+
+  for (const attempt of [stripped, sanitizeJsonStrings(stripped)]) {
+    try {
+      const parsed = JSON.parse(attempt);
+      return {
+        priceLow:     typeof parsed.priceLow     === "number" ? parsed.priceLow     : null,
+        priceHigh:    typeof parsed.priceHigh    === "number" ? parsed.priceHigh    : null,
+        systemPrompt: typeof parsed.systemPrompt === "string" ? parsed.systemPrompt : null,
+      };
+    } catch {}
+  }
+
+  // Last resort: pull numbers out with regex (systemPrompt lost, but prices survive)
+  const low  = stripped.match(/"priceLow"\s*:\s*(\d+)/)?.[1];
+  const high = stripped.match(/"priceHigh"\s*:\s*(\d+)/)?.[1];
+  return {
+    priceLow:     low  ? parseInt(low,  10) : null,
+    priceHigh:    high ? parseInt(high, 10) : null,
+    systemPrompt: null,
+  };
+}
 
 // ─── Main export ──────────────────────────────────────────────────────────────
 
@@ -151,7 +200,7 @@ export async function groupAndContextualize(
   const withPrompts: ProductGroup[] = await Promise.all(
     rawGroups.map(async (group): Promise<ProductGroup> => {
       if (group.specificity === "outlier") {
-        return { canonicalName: group.canonicalName, specificity: "outlier", indices: group.indices, systemPrompt: null };
+        return { canonicalName: group.canonicalName, specificity: "outlier", indices: group.indices, systemPrompt: null, priceLow: null, priceHigh: null };
       }
 
       // Step 2: Tavily market data
@@ -176,11 +225,12 @@ export async function groupAndContextualize(
           temperature: 0.25,
         });
 
-        const systemPrompt = promptResponse.choices[0].message.content?.trim() ?? null;
-        return { canonicalName: group.canonicalName, specificity: group.specificity, indices: group.indices, systemPrompt };
+        const raw = promptResponse.choices[0].message.content?.trim() ?? "{}";
+        const { systemPrompt, priceLow, priceHigh } = parsePromptJson(raw);
+        return { canonicalName: group.canonicalName, specificity: group.specificity, indices: group.indices, systemPrompt, priceLow, priceHigh };
       } catch (err) {
         console.error(`[listingContext] prompt generation failed for "${group.canonicalName}":`, err);
-        return { canonicalName: group.canonicalName, specificity: group.specificity, indices: group.indices, systemPrompt: null };
+        return { canonicalName: group.canonicalName, specificity: group.specificity, indices: group.indices, systemPrompt: null, priceLow: null, priceHigh: null };
       }
     }),
   );

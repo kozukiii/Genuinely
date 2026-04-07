@@ -328,8 +328,7 @@ Do NOT wrap JSON in backticks.
 // Batch analysis — analyzes multiple listings in a single API call
 // ---------------------------------------------------------------------------
 
-const MARKETPLACE_BATCH_SIZE = 4;
-const MARKETPLACE_BATCH_IMAGES_PER_LISTING = 2;
+const MODEL_IMAGE_LIMIT = 5; // hard cap imposed by the vision model
 
 // Appended to any generated system prompt so the output shape stays consistent
 const MARKETPLACE_BATCH_OUTPUT_FORMAT = `
@@ -489,27 +488,51 @@ async function _runMarketplaceBatch(listings: any[], allDataUrls: string[][], co
 export async function batchAnalyzeMarketplaceListingsWithImages(listings: any[], context?: string | null, systemPrompt?: string | null): Promise<string[]> {
   if (listings.length === 0) return [];
 
-  const results: string[] = [];
-  for (let start = 0; start < listings.length; start += MARKETPLACE_BATCH_SIZE) {
-    const chunk = listings.slice(start, start + MARKETPLACE_BATCH_SIZE);
+  // Fetch all images for every listing in parallel, capped at the model's hard limit
+  const allDataUrls = await Promise.all(
+    listings.map(async (listing) => {
+      const imageUrls: string[] = Array.isArray(listing.imageUrls)
+        ? listing.imageUrls.filter((u: any) => typeof u === "string" && u.trim())
+        : Array.isArray(listing.images)
+          ? listing.images.filter((u: any) => typeof u === "string" && u.trim())
+          : [];
+      const fetched = await Promise.all(
+        imageUrls.slice(0, MODEL_IMAGE_LIMIT).map(fetchImageAsDataUrl)
+      );
+      return fetched.filter(Boolean) as string[];
+    })
+  );
 
-    // Fetch all images for this chunk in parallel
-    const allDataUrls = await Promise.all(
-      chunk.map(async (listing) => {
-        const imageUrls: string[] = Array.isArray(listing.imageUrls)
-          ? listing.imageUrls.filter((u: any) => typeof u === "string" && u.trim())
-          : Array.isArray(listing.images)
-            ? listing.images.filter((u: any) => typeof u === "string" && u.trim())
-            : [];
-        const fetched = await Promise.all(
-          imageUrls.slice(0, MARKETPLACE_BATCH_IMAGES_PER_LISTING).map(fetchImageAsDataUrl)
-        );
-        return fetched.filter(Boolean) as string[];
-      })
-    );
+  // Greedy bin-pack: accumulate listings into a batch while total images ≤ MODEL_IMAGE_LIMIT.
+  // Close the batch and start a new one whenever the next listing wouldn't fit.
+  const batches: number[][] = [];
+  let current: number[] = [];
+  let currentImages = 0;
 
-    const chunkResults = await _runMarketplaceBatch(chunk, allDataUrls, context, systemPrompt);
-    results.push(...chunkResults);
+  for (let i = 0; i < listings.length; i++) {
+    const imgCount = allDataUrls[i].length;
+    if (current.length > 0 && currentImages + imgCount > MODEL_IMAGE_LIMIT) {
+      batches.push(current);
+      current = [];
+      currentImages = 0;
+    }
+    current.push(i);
+    currentImages += imgCount;
   }
+  if (current.length > 0) batches.push(current);
+
+  // Run all batches in parallel
+  const results = new Array<string>(listings.length);
+  await Promise.all(
+    batches.map(async (indices) => {
+      const batchListings = indices.map((i) => listings[i]);
+      const batchDataUrls = indices.map((i) => allDataUrls[i]);
+      const batchResults = await _runMarketplaceBatch(batchListings, batchDataUrls, context, systemPrompt);
+      indices.forEach((origIdx, batchIdx) => {
+        results[origIdx] = batchResults[batchIdx];
+      });
+    })
+  );
+
   return results;
 }

@@ -52,6 +52,10 @@ export interface Listing {
   marketContext?: string;
   systemPrompt?: string;
 
+  // Market price range from context analysis
+  priceLow?: number;
+  priceHigh?: number;
+
   // Set when a Marketplace listing was resolved to an eBay cross-listing
   crossListedEbayId?: string;
 }

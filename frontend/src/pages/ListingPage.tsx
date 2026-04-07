@@ -3,7 +3,7 @@ import type { Listing } from "../types/Listing";
 import RatingRing from "../components/RatingRing";
 import ListingCard from "../components/ListingCard";
 import "./styles/ListingPage.css";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { getHighResImage } from "../utils/imageHelpers";
 import { isSaved, toggleSaved, updateSavedListing } from "../utils/savedListings";
 import { recordView, updateRecentlyViewed } from "../utils/recentlyViewed";
@@ -17,18 +17,15 @@ function looksLikeDebugPayload(value?: string | null) {
   if (!value) return false;
   const trimmed = value.trim();
   if (!trimmed) return false;
-
   return /DEBUG INFO:/i.test(trimmed)
     || (/^\s*[\[{]/.test(trimmed) && /"scores"\s*:/.test(trimmed));
 }
 
 function sanitizeVisibleText(value?: string | null) {
   if (!value) return null;
-
   const trimmed = value.trim();
   if (!trimmed) return null;
   if (looksLikeDebugPayload(trimmed)) return null;
-
   const withoutComments = trimmed.replace(/<!--[\s\S]*?-->/g, " ");
   const withoutStyleAndScript = withoutComments
     .replace(/<style[\s\S]*?<\/style>/gi, " ")
@@ -42,7 +39,6 @@ function sanitizeVisibleText(value?: string | null) {
     .replace(/&lt;/gi, "<")
     .replace(/&gt;/gi, ">");
   const normalized = decoded.replace(/\s+/g, " ").trim();
-
   if (!normalized) return null;
   return normalized;
 }
@@ -50,41 +46,150 @@ function sanitizeVisibleText(value?: string | null) {
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 const SEARCH_LISTINGS_KEY = "search:listings";
 
+function buildPriceBarProps(priceLow: number, priceHigh: number, listingPrice: number | null) {
+  const ext      = (priceHigh - priceLow) * 0.18;
+  const barMin   = priceLow  - ext;
+  const barMax   = priceHigh + ext;
+  const barRange = barMax - barMin;
+  const lowPct   = ((priceLow  - barMin) / barRange) * 100;
+  const midPct   = (((priceLow + priceHigh) / 2 - barMin) / barRange) * 100;
+  const highPct  = ((priceHigh - barMin) / barRange) * 100;
+  const fillPct  = listingPrice != null
+    ? Math.min(Math.max(((listingPrice - barMin) / barRange) * 100, 0), 100)
+    : null;
+  return { lowPct, midPct, highPct, fillPct };
+}
+
+// ─── Animation ───────────────────────────────────────────────────────────────
+
+const COMPRESS_DURATION_MS        = 1000;
+const COMPRESS_AFTER_TOP_PROGRESS = 0.12;
+const COMPRESS_HOLD_MS            = 90;
+const FILL_DURATION_MS            = 700;
+const FILL_HOLD_MS                = 120;
+const LOADING_ARC_FRACTION        = 0.32;
+const LOADING_SCORE               = LOADING_ARC_FRACTION * 100;
+const HUE_SHIFT_DELAY_MS          = 400;
+
+const easeInOutQuad = (t: number) => t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+const easeOutCubic  = (t: number) => 1 - (1 - t) ** 3;
+
+function scoreColor(score: number) {
+  if (score >= 67) return "#22c55e";
+  if (score >= 33) return "#facc15";
+  return "#ef4444";
+}
+
+type AnalysisPhase = "idle" | "loading" | "compressing" | "filling" | "done";
+
+function AnimatedRing({
+  phase, fillProgress, compressProgress, targetValue, size,
+}: {
+  phase: AnalysisPhase;
+  fillProgress: number;
+  compressProgress: number;
+  targetValue: number;
+  size: number;
+}) {
+  const [colorReady, setColorReady] = useState(false);
+
+  useEffect(() => {
+    if (phase !== "done") { setColorReady(false); return; }
+    const t = window.setTimeout(() => setColorReady(true), HUE_SHIFT_DELAY_MS);
+    return () => window.clearTimeout(t);
+  }, [phase]);
+
+  const center        = size / 2;
+  const radius        = size * 0.37;
+  const strokeW       = size * 0.10;
+  const circumference = 2 * Math.PI * radius;
+  const loadingOffset = circumference * (1 - LOADING_ARC_FRACTION);
+
+  const compressBlend  = Math.min(
+    Math.max((compressProgress - COMPRESS_AFTER_TOP_PROGRESS) / (1 - COMPRESS_AFTER_TOP_PROGRESS), 0), 1,
+  );
+  const compressScore  = LOADING_SCORE * (1 - compressBlend);
+  const compressOffset = circumference - (compressScore / 100) * circumference;
+
+  const fillColor    = scoreColor(targetValue);
+  const displayValue = fillProgress * targetValue;
+
+  if (phase === "loading" || phase === "compressing") {
+    return (
+      <svg
+        className={phase === "loading" ? "page-pending-ring--loading" : undefined}
+        style={{
+          width: size, height: size,
+          overflow: "visible",
+          transformBox: "fill-box",
+          transformOrigin: "center",
+          flexShrink: 0,
+          "--demo-fill-color": fillColor,
+          transform: phase === "compressing" ? `rotate(${360 * compressProgress}deg)` : undefined,
+        } as CSSProperties}
+        width={size} height={size}
+        viewBox={`0 0 ${size} ${size}`}
+      >
+        <circle className="page-pending-ring__track"
+          cx={center} cy={center} r={radius} strokeWidth={strokeW} fill="none" />
+        <circle
+          className={`page-pending-ring__arc ${
+            phase === "loading" ? "page-pending-ring__arc--loading" : "page-pending-ring__arc--compressing"
+          }`}
+          cx={center} cy={center} r={radius}
+          strokeWidth={strokeW} fill="none" strokeLinecap="round"
+          transform={`rotate(-90 ${center} ${center})`}
+          style={{ strokeDasharray: circumference, strokeDashoffset: phase === "loading" ? loadingOffset : compressOffset }}
+        />
+      </svg>
+    );
+  }
+
+  const ringColor = colorReady ? fillColor : "#3b82f6";
+  return <RatingRing value={displayValue} size={size} color={ringColor} />;
+}
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
+
 export default function ListingPage() {
   const { state } = useLocation();
   const navigate = useNavigate();
   const listing = (state as any)?.listing as Listing | undefined;
 
-  const [showOverview, setShowOverview] = useState(false);
-  const [showDebug, setShowDebug] = useState(false);
-  const [showRaw, setShowRaw] = useState(false);
+  const [showDebug,   setShowDebug]   = useState(false);
+  const [showRaw,     setShowRaw]     = useState(false);
   const [showContext, setShowContext] = useState(false);
-  const [showPrompt, setShowPrompt] = useState(false);
-  const [imageIndex, setImageIndex] = useState(0);
-  const [viewerOpen, setViewerOpen] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [enrichedImages, setEnrichedImages] = useState<string[] | null>(null);
-  // NOTE: Kept for future ListingPage description UI work; currently not read anywhere.
-  // const [enrichedDescription, setEnrichedDescription] = useState<string | null>(null);
-  const [enrichLoading, setEnrichLoading] = useState(false);
-  const [analysisResult, setAnalysisResult] = useState<Partial<Listing> & { analyzedAt?: string } | null>(
+  const [showPrompt,  setShowPrompt]  = useState(false);
+  const [imageIndex,  setImageIndex]  = useState(0);
+  const [viewerOpen,  setViewerOpen]  = useState(false);
+  const [saved,       setSaved]       = useState(false);
+  const [enrichedImages,  setEnrichedImages]  = useState<string[] | null>(null);
+  const [enrichLoading,   setEnrichLoading]   = useState(false);
+  const [analysisResult,  setAnalysisResult]  = useState<Partial<Listing> & { analyzedAt?: string } | null>(
     listing?.aiScore != null ? { ...listing, analyzedAt: undefined } : null
   );
-  const [analyzing, setAnalyzing] = useState(false);
+  const [analyzing,    setAnalyzing]   = useState(false);
   const [analyzeError, setAnalyzeError] = useState<string | null>(null);
   const [fetchedSimilar, setFetchedSimilar] = useState<Listing[]>([]);
 
+  // ── Animation state ───────────────────────────────────────────────────────
+  const hasInitialScore = listing?.aiScore != null;
+  const [analysisPhase,    setAnalysisPhase]    = useState<AnalysisPhase>(hasInitialScore ? "filling" : "idle");
+  const [compressProgress, setCompressProgress] = useState(0);
+  const [fillValue,        setFillValue]        = useState(0);
+  const targetScoreRef = useRef<number>(listing?.aiScore ?? 0);
+
+  // ── Save / view tracking ──────────────────────────────────────────────────
   useEffect(() => {
     if (!listing?.id) return;
-
     recordView(listing);
     setSaved(isSaved(listing.id));
-
     const onChange = () => setSaved(isSaved(listing.id));
     window.addEventListener("saved:listings:changed", onChange);
     return () => window.removeEventListener("saved:listings:changed", onChange);
   }, [listing?.id]);
 
+  // ── Marketplace image enrichment ──────────────────────────────────────────
   useEffect(() => {
     if (listing?.source !== "marketplace" || !listing?.id) return;
     setEnrichLoading(true);
@@ -92,21 +197,16 @@ export default function ListingPage() {
       .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
       .then((data) => {
         if (Array.isArray(data.images) && data.images.length > 0) setEnrichedImages(data.images);
-        // NOTE: Preserved but intentionally disabled until description is rendered/consumed again.
-        // if (typeof data.description === "string" && data.description.trim()) {
-        //   setEnrichedDescription(data.description.trim());
-        // }
       })
       .catch((err) => console.warn("Marketplace enrichment failed:", err))
       .finally(() => setEnrichLoading(false));
   }, [listing?.id, listing?.source]);
 
+  // ── Similar listings fetch ────────────────────────────────────────────────
   useEffect(() => {
     if (!listing?.title) return;
-
     const raw = sessionStorage.getItem(SEARCH_LISTINGS_KEY);
-    if (raw) return; // sessionStorage already has results, useMemo will handle it
-
+    if (raw) return;
     const stopWords = new Set(["the", "a", "an", "and", "or", "for", "of", "in", "with", "lot", "set"]);
     const words = listing.title
       .toLowerCase()
@@ -115,40 +215,84 @@ export default function ListingPage() {
       .filter((w) => w.length > 3 && !stopWords.has(w));
     const keyword = words.slice(0, 2).join(" ");
     if (!keyword) return;
-
-    fetch(
-      `${API_BASE}/api/search?query=${encodeURIComponent(keyword)}&limit=8&sources=${listing.source}&analyze=0`
-    )
+    fetch(`${API_BASE}/api/search?query=${encodeURIComponent(keyword)}&limit=8&sources=${listing.source}&analyze=0`)
       .then((r) => r.json())
       .then((data: Listing[]) => {
         if (!Array.isArray(data)) return;
-        const filtered = data.filter(
-          (item) => !(item.id === listing.id && item.source === listing.source)
+        setFetchedSimilar(
+          data.filter((item) => !(item.id === listing.id && item.source === listing.source)).slice(0, 4)
         );
-        setFetchedSimilar(filtered.slice(0, 4));
       })
       .catch(() => {});
   }, [listing?.id, listing?.source, listing?.title]);
 
+  // ── Image viewer keyboard nav ─────────────────────────────────────────────
   useEffect(() => {
     if (!viewerOpen) return;
     const imgCount = (enrichedImages !== null && enrichedImages.length > 0
-      ? enrichedImages
-      : listing?.images ?? []
-    ).length;
+      ? enrichedImages : listing?.images ?? []).length;
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setViewerOpen(false);
-      if (e.key === "ArrowRight") setImageIndex((i) => (i === imgCount - 1 ? 0 : i + 1));
-      if (e.key === "ArrowLeft") setImageIndex((i) => (i === 0 ? imgCount - 1 : i - 1));
+      if (e.key === "Escape")      setViewerOpen(false);
+      if (e.key === "ArrowRight")  setImageIndex((i) => (i === imgCount - 1 ? 0 : i + 1));
+      if (e.key === "ArrowLeft")   setImageIndex((i) => (i === 0 ? imgCount - 1 : i - 1));
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [viewerOpen, enrichedImages, listing?.images]);
 
+  // ── Compressing → Filling ─────────────────────────────────────────────────
+  useEffect(() => {
+    if (analysisPhase !== "compressing") return;
+    let frameId = 0;
+    let holdTimeout: number | null = null;
+    const start = performance.now();
+    const animate = (now: number) => {
+      const raw = Math.min((now - start) / COMPRESS_DURATION_MS, 1);
+      setCompressProgress(easeInOutQuad(raw));
+      if (raw < 1) { frameId = window.requestAnimationFrame(animate); return; }
+      holdTimeout = window.setTimeout(() => {
+        setFillValue(0);
+        setAnalysisPhase("filling");
+      }, COMPRESS_HOLD_MS);
+    };
+    frameId = window.requestAnimationFrame(animate);
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      if (holdTimeout !== null) window.clearTimeout(holdTimeout);
+    };
+  }, [analysisPhase]);
+
+  // ── Filling → Done ────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (analysisPhase !== "filling") return;
+    const target = targetScoreRef.current;
+    let frameId = 0;
+    let holdTimeout: number | null = null;
+    const start = performance.now();
+    const animate = (now: number) => {
+      const raw = Math.min((now - start) / FILL_DURATION_MS, 1);
+      setFillValue(target * easeOutCubic(raw));
+      if (raw < 1) { frameId = window.requestAnimationFrame(animate); return; }
+      holdTimeout = window.setTimeout(() => {
+        setFillValue(target);
+        setAnalysisPhase("done");
+      }, FILL_HOLD_MS);
+    };
+    frameId = window.requestAnimationFrame(animate);
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      if (holdTimeout !== null) window.clearTimeout(holdTimeout);
+    };
+  }, [analysisPhase]);
+
+  // ── Analyze ───────────────────────────────────────────────────────────────
   async function runAnalysis() {
     if (!listing) return;
     setAnalyzing(true);
     setAnalyzeError(null);
+    setAnalysisPhase("loading");
+    setCompressProgress(0);
+    setFillValue(0);
     try {
       const res = await fetch(`${API_BASE}/api/search/analyze`, {
         method: "POST",
@@ -162,16 +306,15 @@ export default function ListingPage() {
       const data = await res.json();
       const enriched: Listing = { ...listing, ...data, analyzedAt: undefined };
       const withTs = { ...enriched, analyzedAt: data.analyzedAt ?? new Date().toISOString() };
+      targetScoreRef.current = data.aiScore ?? 0;
       setAnalysisResult(withTs);
-
-      // Persist enriched listing back to stores so cards reflect the score
       updateSavedListing(enriched);
       updateRecentlyViewed(enriched);
-
-      // Replace router state so back-navigation restores the scored listing
       navigate(".", { replace: true, state: { listing: enriched } });
+      setAnalysisPhase("compressing");
     } catch (err) {
       setAnalyzeError(err instanceof Error ? err.message : "Analysis failed");
+      setAnalysisPhase(hasInitialScore || analysisResult != null ? "done" : "idle");
     } finally {
       setAnalyzing(false);
     }
@@ -185,333 +328,328 @@ export default function ListingPage() {
     );
   }
 
-  const images =
-    enrichedImages !== null && enrichedImages.length > 0
-      ? enrichedImages
-      : listing.images ?? [];
-  const safeIndex = Math.min(
-    Math.max(imageIndex, 0),
-    Math.max(images.length - 1, 0)
-  );
-  const currentImage = getHighResImage(
-    images[safeIndex] ?? "",
-    listing.source
-  );
+  // ── Derived values ────────────────────────────────────────────────────────
+
+  const images = enrichedImages !== null && enrichedImages.length > 0
+    ? enrichedImages : listing.images ?? [];
+  const safeIndex    = Math.min(Math.max(imageIndex, 0), Math.max(images.length - 1, 0));
+  const currentImage = getHighResImage(images[safeIndex] ?? "", listing.source);
 
   const money = useMemo(() => {
     try {
       return new Intl.NumberFormat(undefined, {
-        style: "currency",
-        currency: listing.currency ?? "USD",
-        maximumFractionDigits: 0,
+        style: "currency", currency: listing.currency ?? "USD", maximumFractionDigits: 0,
       }).format(listing.price ?? 0);
-    } catch {
-      return `$${listing.price ?? 0}`;
-    }
+    } catch { return `$${listing.price ?? 0}`; }
   }, [listing.price, listing.currency]);
 
-  // Merge live analysis result over listing when available
-  const ai = analysisResult ?? listing;
+  const ai          = analysisResult ?? listing;
+  const targetScore = ai.aiScore ?? 0;
+  const fillProgress = targetScore > 0
+    ? Math.min(fillValue / targetScore, 1)
+    : (analysisPhase === "done" ? 1 : 0);
+
   const visibleOverview = sanitizeVisibleText(ai.overview) ?? (looksLikeDebugPayload(ai.overview)
     ? "Analysis completed. Expand raw AI output if you want to inspect the underlying response."
     : ai.overview);
 
   const scores = {
-    priceFairness: ai.aiScores?.priceFairness,
-    sellerTrust: ai.aiScores?.sellerTrust,
-    conditionHonesty: ai.aiScores?.conditionHonesty,
-    shippingFairness: ai.aiScores?.shippingFairness,
+    priceFairness:      ai.aiScores?.priceFairness,
+    sellerTrust:        ai.aiScores?.sellerTrust,
+    conditionHonesty:   ai.aiScores?.conditionHonesty,
+    shippingFairness:   ai.aiScores?.shippingFairness,
     descriptionQuality: ai.aiScores?.descriptionQuality,
   };
 
   const readableLabels: Record<string, string> = {
-    priceFairness: "Price Fairness",
-    sellerTrust:
-      listing.source === "marketplace" ? "Listing Confidence" : "Seller Trust",
-    conditionHonesty: "Condition Honesty",
-    shippingFairness:
-      listing.source === "marketplace"
-        ? "Pickup / Delivery Ease"
-        : "Shipping Fairness",
-    descriptionQuality:
-      listing.source === "marketplace"
-        ? "Listing Quality"
-        : "Description Detail",
+    priceFairness:      "Price Fairness",
+    sellerTrust:        listing.source === "marketplace" ? "Listing Confidence" : "Seller Trust",
+    conditionHonesty:   "Condition Honesty",
+    shippingFairness:   listing.source === "marketplace" ? "Pickup / Delivery Ease" : "Shipping Fairness",
+    descriptionQuality: listing.source === "marketplace" ? "Listing Quality" : "Description Detail",
   };
 
   const sellerLine = useMemo(() => {
-    if (listing.source === "marketplace") {
-      return listing.location ? `\u{1F4CD} ${listing.location}` : null;
-    }
-
-    const seller = listing.seller?.trim();
-    return seller || null;
-  }, [
-    listing.source,
-    listing.location,
-    listing.seller,
-  ]);
+    if (listing.source === "marketplace") return listing.location ? `\u{1F4CD} ${listing.location}` : null;
+    return listing.seller?.trim() || null;
+  }, [listing.source, listing.location, listing.seller]);
 
   const similarListings = useMemo(() => {
     try {
       const raw = sessionStorage.getItem(SEARCH_LISTINGS_KEY);
       if (!raw) return [] as Listing[];
-
       const parsed = JSON.parse(raw) as Listing[];
       if (!Array.isArray(parsed)) return [] as Listing[];
-
       return parsed
         .filter((item) => item && item.id && item.source && item.title)
         .filter((item) => !(item.id === listing.id && item.source === listing.source))
         .slice(0, 4);
-    } catch {
-      return [] as Listing[];
-    }
+    } catch { return [] as Listing[]; }
   }, [listing.id, listing.source]);
+
+  const showRing    = analysisPhase !== "idle";
+  const showSummary = analysisPhase === "done" && ai.aiScore != null;
+
+  // ── Summary typing effect ─────────────────────────────────────────────────
+  const [summaryChars, setSummaryChars] = useState(0);
+
+  useEffect(() => {
+    if (analysisPhase !== "done") { setSummaryChars(0); return; }
+    const text = visibleOverview ?? "";
+    let chars = 0;
+    const delay = window.setTimeout(() => {
+      const interval = window.setInterval(() => {
+        chars++;
+        setSummaryChars(chars);
+        if (chars >= text.length) window.clearInterval(interval);
+      }, 12);
+      return () => window.clearInterval(interval);
+    }, 600);
+    return () => window.clearTimeout(delay);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [analysisPhase]);
+
+  // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <div className="listing-page">
-      <div className="listing-card-block">
-        <div className="page-image">
-          <div className="image-frame">
-            <img
-              src={currentImage || "/placeholder.jpg"}
-              alt={listing.title}
-              onError={(e) => (e.currentTarget.src = "/placeholder.jpg")}
-              className="image-frame-clickable"
-              onClick={() => setViewerOpen(true)}
-              title="Click to view full size"
-            />
-            {enrichLoading && listing.source === "marketplace" && (
-              <span className="image-loading-badge">Loading gallery{"\u2026"}</span>
-            )}
-          </div>
+      <div className="listing-card-block" style={{ flexDirection: "column" }}>
+        <div style={{ display: "flex", gap: "2.4rem" }}>
 
-          {images.length > 1 && (
-            <div className="image-nav">
-              <button
-                onClick={() =>
-                  setImageIndex((i) => (i === 0 ? images.length - 1 : i - 1))
-                }
-              >
-                {"\u2039"}
-              </button>
-
-              <span className="image-counter">
-                {safeIndex + 1} / {images.length}
-              </span>
-
-              <button
-                onClick={() =>
-                  setImageIndex((i) => (i === images.length - 1 ? 0 : i + 1))
-                }
-              >
-                {"\u203A"}
-              </button>
+          {/* Image panel */}
+          <div className="page-image">
+            <div className="image-frame">
+              <img
+                src={currentImage || "/placeholder.jpg"}
+                alt={listing.title}
+                onError={(e) => (e.currentTarget.src = "/placeholder.jpg")}
+                className="image-frame-clickable"
+                onClick={() => setViewerOpen(true)}
+                title="Click to view full size"
+              />
+              {enrichLoading && listing.source === "marketplace" && (
+                <span className="image-loading-badge">Loading gallery{"\u2026"}</span>
+              )}
             </div>
-          )}
-        </div>
 
-        <div className="page-info">
-          <h1 className="page-title">{listing.title}</h1>
-
-          <div className="info-ring-row">
-            <div className="info-column">
-              <div className="price-heart-row">
-                {listing.acceptsOffers ? (
-                  <div className="page-price-accepts-offers">
-                    <p className="page-price page-price--offers">Accepts Offers</p>
-                    <span className="page-price--offers-hint">Visit listing to determine price</span>
-                  </div>
-                ) : (
-                  <p className="page-price">{money}</p>
-                )}
-
-                {listing.shippingPrice != null && (
-                  <span className="page-shipping">
-                    {listing.shippingPrice === 0
-                      ? "Free shipping"
-                      : `+ ${new Intl.NumberFormat(undefined, { style: "currency", currency: listing.currency ?? "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(listing.shippingPrice)} shipping`}
-                  </span>
-                )}
-
-                <button
-                  type="button"
-                  className="page-heart-inline"
-                  aria-pressed={saved}
-                  aria-label={saved ? "Unsave listing" : "Save listing"}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    const next = toggleSaved(listing);
-                    setSaved(next);
-                  }}
-                >
-                  {saved ? "\u2665" : "\u2661"}
+            {images.length > 1 && (
+              <div className="image-nav">
+                <button onClick={() => setImageIndex((i) => (i === 0 ? images.length - 1 : i - 1))}>
+                  {"\u2039"}
+                </button>
+                <span className="image-counter">{safeIndex + 1} / {images.length}</span>
+                <button onClick={() => setImageIndex((i) => (i === images.length - 1 ? 0 : i + 1))}>
+                  {"\u203A"}
                 </button>
               </div>
+            )}
+          </div>
 
-              {listing.condition && (
-                <span className="page-condition">{listing.condition}</span>
-              )}
+          {/* Info panel */}
+          <div className="page-info" style={{ position: "relative" }}>
 
-              {sellerLine && <p className="page-seller">{sellerLine}</p>}
+            {/* Title + heart */}
+            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+              <h1 className="page-title" style={{ margin: 0 }}>{listing.title}</h1>
+              <button
+                type="button"
+                className="page-heart-inline"
+                aria-pressed={saved}
+                aria-label={saved ? "Unsave listing" : "Save listing"}
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); setSaved(toggleSaved(listing)); }}
+              >
+                {saved ? "\u2665" : "\u2661"}
+              </button>
             </div>
 
-            {ai.aiScore != null && (
-              <div className="page-rating-ring">
-                <RatingRing value={ai.aiScore} size={80} />
-                <p className="page-rating-label">{ai.aiScore}/100</p>
+            {/* Price / ring row */}
+            <div className="info-ring-row" style={{ justifyContent: "flex-start", gap: "32px" }}>
+              <div className="info-column">
+                <div className="price-heart-row" style={{ alignItems: "center" }}>
+                  {listing.acceptsOffers ? (
+                    <div className="page-price-accepts-offers">
+                      <p className="page-price page-price--offers">Accepts Offers</p>
+                      <span className="page-price--offers-hint">Visit listing to determine price</span>
+                    </div>
+                  ) : (
+                    <p className="page-price">{money}</p>
+                  )}
+                  {listing.shippingPrice != null && (
+                    <span className="page-shipping">
+                      {listing.shippingPrice === 0
+                        ? "Free shipping"
+                        : `+ ${new Intl.NumberFormat(undefined, { style: "currency", currency: listing.currency ?? "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(listing.shippingPrice)} shipping`}
+                    </span>
+                  )}
+                </div>
+                {listing.condition && <span className="page-condition">{listing.condition}</span>}
+                {sellerLine && <p className="page-seller">{sellerLine}</p>}
+              </div>
+
+              <div style={{ display: "flex", alignItems: "flex-start", gap: "56px" }}>
+                {/* Price bar */}
+                {showRing && ai.priceLow != null && ai.priceHigh != null && (() => {
+                  const { lowPct, midPct, highPct, fillPct } = buildPriceBarProps(
+                    ai.priceLow, ai.priceHigh, listing.price
+                  );
+                  return (
+                    <div
+                      className={`demo-score-bar-wrap${analysisPhase !== "done" ? " demo-score-bar-wrap--pending" : ""}`}
+                      style={{ marginTop: "30px" }}
+                    >
+                      <div className="demo-score-bar-title">Price Data</div>
+                      <div className="demo-score-bar-box">
+                        <div className="demo-score-bar-track">
+                          {analysisPhase === "done" && fillPct != null && (
+                            <div className="demo-score-bar-fill demo-fade-in" style={{ left: `${fillPct}%` }} />
+                          )}
+                          <span className="demo-score-tick" style={{ left: `${lowPct}%` }} />
+                          <span className="demo-score-tick" style={{ left: `${midPct}%`, transform: "translateX(-50%)" }} />
+                          <span className="demo-score-tick" style={{ left: `${highPct}%`, transform: "translateX(-100%)" }} />
+                          {analysisPhase === "done" && fillPct != null && (
+                            <div className="demo-score-bar-price-label demo-fade-in" style={{ left: `${fillPct}%` }}>
+                              <span>Listing Price</span>
+                              <span className="demo-price-arrow" />
+                            </div>
+                          )}
+                          <span className="demo-score-label-end" style={{ left: `${lowPct}%` }}>Low · ${ai.priceLow}</span>
+                          <span className="demo-score-label-end" style={{ left: `${highPct}%` }}>High · ${ai.priceHigh}</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Main ring */}
+                {showRing && (
+                  <div style={{ position: "relative", width: "150px", height: "190px", flexShrink: 0, left: "28px" }}>
+                    <div className="page-rating-ring demo-ring" style={{ position: "absolute", top: 0, left: 0 }}>
+                      <AnimatedRing
+                        phase={analysisPhase}
+                        fillProgress={fillProgress}
+                        compressProgress={compressProgress}
+                        targetValue={targetScore}
+                        size={150}
+                      />
+                      {analysisPhase === "done" && ai.aiScore != null && (
+                        <p className="page-rating-label" style={{ position: "absolute", top: "155px", width: "100%", textAlign: "center", margin: 0 }}>
+                          {ai.aiScore}/100
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Analyze button */}
+            <div className="analyze-row" style={{ position: "absolute", left: 0, right: 0, top: "calc(22rem - 92px)" }}>
+              <button
+                className="analyze-btn"
+                onClick={runAnalysis}
+                disabled={analyzing}
+              >
+                {analyzing
+                  ? `Analyzing\u2026`
+                  : analysisResult?.analyzedAt
+                  ? "Re-analyze"
+                  : ai.aiScore != null
+                  ? "Re-analyze"
+                  : "Analyze listing"}
+              </button>
+              {analysisResult?.analyzedAt && (
+                <p className="analyze-subtext">
+                  Last analyzed {new Date(analysisResult.analyzedAt).toLocaleString()}
+                </p>
+              )}
+              {!analysisResult?.analyzedAt && ai.aiScore != null && (
+                <p className="analyze-subtext">Previously analyzed</p>
+              )}
+              {analyzeError && <p className="analyze-error">{analyzeError}</p>}
+            </div>
+
+            {/* External link */}
+            <a
+              className="external-ebay-link demo-external-link"
+              href={listing.url}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              View on {sourceLabel(listing.source)} {"\u2192"}
+            </a>
+
+            {/* Sub-rings */}
+            {showRing && (
+              <div className="ai-score-grid" style={{ marginTop: "calc(1rem + 84px)" }}>
+                {Object.entries(scores).map(([key, value]) => (
+                  <div key={key} className="ai-score-item">
+                    <AnimatedRing
+                      phase={analysisPhase}
+                      fillProgress={fillProgress}
+                      compressProgress={compressProgress}
+                      targetValue={value ?? 0}
+                      size={50}
+                    />
+                    <p className="ring-title">{readableLabels[key]}</p>
+                  </div>
+                ))}
               </div>
             )}
           </div>
-
-          <div className="analyze-row">
-            <button
-              className="analyze-btn"
-              onClick={runAnalysis}
-              disabled={analyzing}
-            >
-              {analyzing
-                ? `Analyzing\u2026`
-                : analysisResult?.analyzedAt
-                ? "Re-analyze"
-                : ai.aiScore != null
-                ? "Re-analyze"
-                : "Analyze listing"}
-            </button>
-
-            {analysisResult?.analyzedAt && (
-              <p className="analyze-subtext">
-                Last analyzed {new Date(analysisResult.analyzedAt).toLocaleString()}
-              </p>
-            )}
-            {!analysisResult?.analyzedAt && ai.aiScore != null && (
-              <p className="analyze-subtext">Previously analyzed</p>
-            )}
-            {analyzeError && (
-              <p className="analyze-error">{analyzeError}</p>
-            )}
-          </div>
-
-          <a
-            className="external-ebay-link"
-            href={listing.url}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            View on {sourceLabel(listing.source)} {"\u2192"}
-          </a>
         </div>
+
+        {/* Summary + debug */}
+        {showSummary && (
+          <div className="ai-overview-dropdown demo-fade-in" style={{ borderTop: "none", paddingTop: 0, marginTop: "1rem" }}>
+            <h3>Summary</h3>
+            <p>
+              {(visibleOverview ?? "").slice(0, summaryChars)}
+              {summaryChars < (visibleOverview?.length ?? 0) && (
+                <span className="demo-typing-cursor" />
+              )}
+            </p>
+
+            {ai.marketContext && (
+              <>
+                <button className="ai-debug-toggle" onClick={() => setShowContext(!showContext)}>
+                  {showContext ? "Hide market context \u2191" : "Show market context \u2193"}
+                </button>
+                {showContext && <pre className="debug-block">{ai.marketContext}</pre>}
+              </>
+            )}
+
+            {ai.systemPrompt && (
+              <>
+                <button className="ai-debug-toggle" onClick={() => setShowPrompt(!showPrompt)}>
+                  {showPrompt ? "Hide analysis prompt \u2191" : "Show analysis prompt \u2193"}
+                </button>
+                {showPrompt && <pre className="debug-block">{ai.systemPrompt}</pre>}
+              </>
+            )}
+
+            <button className="ai-debug-toggle" onClick={() => setShowDebug(!showDebug)}>
+              {showDebug ? "Hide debug \u2191" : "Show debug info \u2193"}
+            </button>
+            {showDebug && <pre className="debug-block">{ai.debugInfo}</pre>}
+
+            <button className="ai-debug-toggle" onClick={() => setShowRaw(!showRaw)}>
+              {showRaw ? "Hide raw AI output \u2191" : "Show raw AI output \u2193"}
+            </button>
+            {showRaw && <pre className="debug-block">{ai.rawAnalysis}</pre>}
+          </div>
+        )}
       </div>
 
-      {ai.aiScore != null && (
-        <div className="ai-analysis-box">
-          <div className="ai-analysis-header">
-            <RatingRing value={ai.aiScore} size={80} />
-            <div>
-              <p className="ai-analysis-main">
-                Our AI analysis rated this listing {ai.aiScore}/100.
-              </p>
-
-              <button
-                className="ai-toggle-btn"
-                onClick={() => setShowOverview(!showOverview)}
-              >
-                {showOverview ? "Hide details \u2191" : "Click to see why \u2193"}
-              </button>
-            </div>
-          </div>
-
-          {showOverview && (
-            <div className="ai-overview-dropdown">
-              {ai.aiScores && (
-                <div className="ai-score-grid">
-                  {Object.entries(scores).map(([key, value]) => {
-                    if (value == null) return null;
-                    return (
-                      <div key={key} className="ai-score-item">
-                        <p className="ring-title">{readableLabels[key]}</p>
-                        <RatingRing value={value} size={65} />
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-
-              <h3>Summary</h3>
-              <p>{visibleOverview}</p>
-
-              {ai.marketContext && (
-                <>
-                  <button
-                    className="ai-debug-toggle"
-                    onClick={() => setShowContext(!showContext)}
-                  >
-                    {showContext ? "Hide market context \u2191" : "Show market context \u2193"}
-                  </button>
-                  {showContext && (
-                    <pre className="debug-block">{ai.marketContext}</pre>
-                  )}
-                </>
-              )}
-
-              {ai.systemPrompt && (
-                <>
-                  <button
-                    className="ai-debug-toggle"
-                    onClick={() => setShowPrompt(!showPrompt)}
-                  >
-                    {showPrompt ? "Hide analysis prompt \u2191" : "Show analysis prompt \u2193"}
-                  </button>
-                  {showPrompt && (
-                    <pre className="debug-block">{ai.systemPrompt}</pre>
-                  )}
-                </>
-              )}
-
-              <button
-                className="ai-debug-toggle"
-                onClick={() => setShowDebug(!showDebug)}
-              >
-                {showDebug ? "Hide debug \u2191" : "Show debug info \u2193"}
-              </button>
-
-              {showDebug && (
-                <pre className="debug-block">{ai.debugInfo}</pre>
-              )}
-
-              <button
-                className="ai-debug-toggle"
-                onClick={() => setShowRaw(!showRaw)}
-              >
-                {showRaw ? "Hide raw AI output \u2191" : "Show raw AI output \u2193"}
-              </button>
-
-              {showRaw && (
-                <pre className="debug-block">{ai.rawAnalysis}</pre>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
+      {/* Image viewer */}
       {viewerOpen && (
         <div
           className="image-viewer-overlay"
           onClick={() => setViewerOpen(false)}
-          role="dialog"
-          aria-modal="true"
-          aria-label="Image viewer"
+          role="dialog" aria-modal="true" aria-label="Image viewer"
         >
-          <button
-            className="image-viewer-close"
-            onClick={() => setViewerOpen(false)}
-            aria-label="Close image viewer"
-          >
+          <button className="image-viewer-close" onClick={() => setViewerOpen(false)} aria-label="Close image viewer">
             &times;
           </button>
-
           <button
             className="image-viewer-nav image-viewer-nav--prev"
             onClick={(e) => { e.stopPropagation(); setImageIndex((i) => (i === 0 ? images.length - 1 : i - 1)); }}
@@ -519,7 +657,6 @@ export default function ListingPage() {
           >
             {"\u2039"}
           </button>
-
           <div className="image-viewer-content" onClick={(e) => e.stopPropagation()}>
             <img
               src={currentImage || "/placeholder.jpg"}
@@ -527,7 +664,6 @@ export default function ListingPage() {
               onError={(e) => (e.currentTarget.src = "/placeholder.jpg")}
             />
           </div>
-
           <button
             className="image-viewer-nav image-viewer-nav--next"
             onClick={(e) => { e.stopPropagation(); setImageIndex((i) => (i === images.length - 1 ? 0 : i + 1)); }}
@@ -535,15 +671,13 @@ export default function ListingPage() {
           >
             {"\u203A"}
           </button>
-
           {images.length > 1 && (
-            <div className="image-viewer-counter">
-              {safeIndex + 1} / {images.length}
-            </div>
+            <div className="image-viewer-counter">{safeIndex + 1} / {images.length}</div>
           )}
         </div>
       )}
 
+      {/* Similar listings */}
       {(similarListings.length > 0 || fetchedSimilar.length > 0) && (
         <section className="similar-listings-section" aria-label="You may like similar listings">
           <h2 className="similar-listings-title">You may like</h2>

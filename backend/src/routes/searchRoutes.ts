@@ -1,7 +1,6 @@
 import { Router } from "express";
 import { searchAll } from "../controllers/searchController";
 import { scoreListings } from "../services/scoring/scoreListing";
-import { fetchMarketContext } from "../ai/priceContext";
 import { groupAndContextualize } from "../ai/listingContext";
 import { getEbayItemByNumericId } from "../services/ebayService";
 import { getMarketplaceListingBySearchForAnalysis } from "../services/marketplaceService";
@@ -9,14 +8,26 @@ import { getMarketplaceListingBySearchForAnalysis } from "../services/marketplac
 const router = Router();
 
 async function scoreSingleListingWithContext(listing: any) {
-  const contextQuery =
+  const title =
     typeof listing?.title === "string" && listing.title.trim()
       ? listing.title.trim()
       : null;
 
-  const context = contextQuery ? await fetchMarketContext(contextQuery) : null;
-  const [result] = await scoreListings([listing], context);
-  return result;
+  if (!title) {
+    const [result] = await scoreListings([listing], null);
+    return result;
+  }
+
+  const groups = await groupAndContextualize([title], title);
+  const group = groups[0] ?? null;
+
+  const [result] = await scoreListings([listing], null, group?.systemPrompt ?? null);
+
+  return {
+    ...result,
+    ...(group?.priceLow  != null ? { priceLow:  group.priceLow  } : {}),
+    ...(group?.priceHigh != null ? { priceHigh: group.priceHigh } : {}),
+  };
 }
 
 // GET /api/search?query=...&limit=16

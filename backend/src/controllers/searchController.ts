@@ -87,6 +87,7 @@ export async function searchAll(req: Request, res: Response) {
           query,
           location,
           limit: marketplaceTarget || 10,
+          enrichImages: false,
         }).catch((err) => {
           console.error("searchMarketplaceNormalized failed", err);
           return [] as Listing[];

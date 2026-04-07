@@ -7,6 +7,7 @@ export interface FilterState {
   sources: { ebay: boolean; marketplace: boolean };
   freeShippingOnly: boolean;
   sortBy: string;
+  limit: string;
 }
 
 const DEFAULT_FILTERS: FilterState = {
@@ -16,6 +17,7 @@ const DEFAULT_FILTERS: FilterState = {
   sources: { ebay: true, marketplace: true },
   freeShippingOnly: false,
   sortBy: "default",
+  limit: "",
 };
 
 interface Props {
@@ -149,6 +151,19 @@ export default function FiltersSidebar({ filters, onChange, onSortChange, mobile
               />
               Free shipping only
             </label>
+          </div>
+
+          {/* Result limit */}
+          <div className="filter-group">
+            <label className="filter-label">Max results</label>
+            <input
+              className="filter-input"
+              type="number"
+              placeholder="Default"
+              min={1}
+              value={draft.limit}
+              onChange={(e) => setDraftField("limit", e.target.value)}
+            />
           </div>
 
           <button className="filter-apply" onClick={handleApply}>

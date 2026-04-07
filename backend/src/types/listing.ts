@@ -69,6 +69,10 @@ export interface Listing {
   rawAnalysis?: string;
   marketContext?: string;
 
+  // Market price range from context analysis
+  priceLow?: number;
+  priceHigh?: number;
+
   // --- “never lose data” escape hatch ---
   raw?: unknown;
 

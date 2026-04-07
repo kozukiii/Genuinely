@@ -1,9 +1,10 @@
 interface RatingRingProps {
   value: number;   // 0–100
   size?: number;   // optional size (default 48)
+  color?: string;  // override arc color
 }
 
-export default function RatingRing({ value, size = 48 }: RatingRingProps) {
+export default function RatingRing({ value, size = 48, color: colorProp }: RatingRingProps) {
   const center = size / 2;
   const radius = size * 0.37;            // scales with size
   const strokeWidth = size * 0.10;       // scales with size
@@ -11,9 +12,10 @@ export default function RatingRing({ value, size = 48 }: RatingRingProps) {
   const offset = circumference - (value / 100) * circumference;
 
   const color =
-    value >= 67 ? "#22c55e" :
-    value >= 33 ? "#facc15" :
-                  "#ef4444";
+    colorProp ??
+    (value >= 67 ? "#22c55e" :
+     value >= 33 ? "#facc15" :
+                   "#ef4444");
 
   return (
     <svg
@@ -42,6 +44,7 @@ export default function RatingRing({ value, size = 48 }: RatingRingProps) {
         strokeDashoffset={offset}
         strokeLinecap="round"
         transform={`rotate(-90 ${center} ${center})`}
+        style={{ transition: "stroke 900ms ease" }}
       />
 
       <text

@@ -3,6 +3,7 @@ import { useNavigationType } from "react-router-dom";
 import SearchBar from "../components/SearchBar";
 import LinkAnalysisModal from "../components/LinkAnalysisModal";
 import ListingCard from "../components/ListingCard";
+import SkeletonCard from "../components/SkeletonCard";
 import FiltersSidebar, { type FilterState } from "../components/FiltersSidebar";
 import type { Listing } from "../types/Listing";
 import "./styles/HomePage.css";
@@ -26,6 +27,7 @@ const DEFAULT_FILTERS: FilterState = {
   sources: { ebay: true, marketplace: true },
   freeShippingOnly: false,
   sortBy: "default",
+  limit: "",
 };
 
 function parsePriceInput(raw: string): number | null {
@@ -96,6 +98,8 @@ async function runAnalysisPipeline(
     indices: number[];
     context: string | null;
     systemPrompt?: string;
+    priceLow?: number | null;
+    priceHigh?: number | null;
   }>;
 
   try {
@@ -136,6 +140,11 @@ async function runAnalysisPipeline(
 
         if (signal.aborted) return;
 
+        // Attach price range from the context group onto every scored listing
+        const priceRange: Partial<Listing> = {};
+        if (group.priceLow  != null) priceRange.priceLow  = group.priceLow;
+        if (group.priceHigh != null) priceRange.priceHigh = group.priceHigh;
+
         // Merge scored listings back by id+source, then persist to sessionStorage
         // so back-navigation restores scores without re-running the pipeline.
         setListings((prev) => {
@@ -144,7 +153,7 @@ async function runAnalysisPipeline(
             const idx = updated.findIndex(
               (l) => l.id === s.id && l.source === s.source,
             );
-            if (idx !== -1) updated[idx] = { ...s, analysisPending: false };
+            if (idx !== -1) updated[idx] = { ...s, ...priceRange, analysisPending: false };
           }
           try {
             const toSave = updated.map((l) => ({ ...l, analysisPending: undefined }));
@@ -218,6 +227,7 @@ export default function SearchPage() {
   const [initialQuery, setInitialQuery] = useState("");
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
   const [sweeping, setSweeping] = useState(false);
+  const [fetchingNew, setFetchingNew] = useState(false);
   const [resultKey, setResultKey] = useState(0);
   const [linkModalOpen, setLinkModalOpen] = useState(false);
 
@@ -249,7 +259,7 @@ export default function SearchPage() {
 
   // ── Initial search (new query) ──────────────────────────────────────────
   const handleSearch = useCallback(
-    async (query: string, limitOverride?: number) => {
+    async (query: string) => {
       const q = query.trim();
       if (!q) return;
 
@@ -261,12 +271,14 @@ export default function SearchPage() {
         setTimeout(() => setSweeping(false), 300);
       }
 
+      setFetchingNew(true);
       setLoading(true);
       setError(null);
       setCurrentQuery(q);
       setPage(1);
 
-      const fetchSize = limitOverride ?? PRELOAD_SIZE;
+      const parsedLimit = filtersRef.current.limit !== "" ? Math.max(1, parseInt(filtersRef.current.limit, 10)) : undefined;
+      const fetchSize = parsedLimit ?? PRELOAD_SIZE;
       try {
         const { items, ebayUnavailable } = await fetchFromApi(q, fetchSize, filters);
         setEbayNotice(filters.sources.ebay && ebayUnavailable);
@@ -274,6 +286,7 @@ export default function SearchPage() {
         // Mark all listings as pending immediately so rings show spinners
         const pending = items.map((l) => ({ ...l, analysisPending: true }));
         setListings(pending);
+        setFetchingNew(false);
         setResultKey((k) => k + 1);
         setHasMore(items.length >= fetchSize);
 
@@ -287,6 +300,7 @@ export default function SearchPage() {
         analysisPipelineRef.current = controller;
         runAnalysisPipeline(q, items, setListings, controller.signal);
       } catch (err) {
+        setFetchingNew(false);
         setEbayNotice(filters.sources.ebay);
         setError(`Failed to load listings: ${err instanceof Error ? err.message : String(err)}`);
       } finally {
@@ -358,18 +372,22 @@ export default function SearchPage() {
     if (!q) return;
 
     analysisPipelineRef.current?.abort();
+    setFetchingNew(true);
     setLoading(true);
     setError(null);
     setPage(1);
 
     try {
-      const { items, ebayUnavailable } = await fetchFromApi(q, PRELOAD_SIZE, next);
+      const parsedLimit = next.limit !== "" ? Math.max(1, parseInt(next.limit, 10)) : undefined;
+      const fetchSize = parsedLimit ?? PRELOAD_SIZE;
+      const { items, ebayUnavailable } = await fetchFromApi(q, fetchSize, next);
       setEbayNotice(next.sources.ebay && ebayUnavailable);
 
       const pending = items.map((l) => ({ ...l, analysisPending: true }));
       setListings(pending);
+      setFetchingNew(false);
       setResultKey((k) => k + 1);
-      setHasMore(items.length >= PRELOAD_SIZE);
+      setHasMore(items.length >= fetchSize);
       sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(items));
       sessionStorage.setItem(SEARCH_PAGE_KEY, "1");
 
@@ -377,6 +395,7 @@ export default function SearchPage() {
       analysisPipelineRef.current = controller;
       runAnalysisPipeline(q, items, setListings, controller.signal);
     } catch (err) {
+      setFetchingNew(false);
       setEbayNotice(next.sources.ebay);
       setError(`Failed to load listings: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
@@ -465,18 +484,20 @@ export default function SearchPage() {
 
         <div className="search-main">
           <div className="results-wrapper">
-            {/* Spinner — shown only after sweep completes, while still loading */}
-            {loading && !sweeping && (
-              <div className="results-full-spinner">
-                <div className="results-spinner" />
+            {/* Skeleton cards — shown while fetch is in flight, after any sweep */}
+            {fetchingNew && !sweeping && (
+              <div className="results-container results-sweep-in">
+                {Array.from({ length: PAGE_SIZE }, (_, i) => (
+                  <SkeletonCard key={i} />
+                ))}
               </div>
             )}
 
-            {/* Cards — hidden after sweep, shown while sweeping out or when done */}
-            {(!loading || sweeping) && (
+            {/* Cards — shown while sweeping out or once listings are available */}
+            {(!fetchingNew || sweeping) && (
               <div
                 key={resultKey}
-                className={`results-container${sweeping ? " results-sweep-out" : ""}${!loading && resultKey > 0 ? " results-sweep-in" : ""}`}
+                className={`results-container${sweeping ? " results-sweep-out" : ""}${!fetchingNew && !sweeping && resultKey > 0 ? " results-sweep-in" : ""}`}
               >
                 {pageItems.map((item) => (
                   <ListingCard key={`${item.source}:${item.id}`} data={item} />

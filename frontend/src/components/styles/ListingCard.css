@@ -412,6 +412,90 @@
   to { transform: rotate(360deg); }
 }
 
+/* =========================
+   Skeleton shimmer
+   ========================= */
+
+@keyframes shimmer {
+  from { background-position: -600px 0; }
+  to   { background-position:  600px 0; }
+}
+
+.listing-card--skeleton {
+  pointer-events: none;
+  cursor: default;
+}
+
+.skeleton-image,
+.skeleton-title,
+.skeleton-price,
+.skeleton-pill,
+.skeleton-ring,
+.skeleton-heart,
+.skeleton-button {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.05) 25%,
+    rgba(255, 255, 255, 0.11) 50%,
+    rgba(255, 255, 255, 0.05) 75%
+  );
+  background-size: 1200px 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+.skeleton-image {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: 16px;
+}
+
+.skeleton-title {
+  height: 1rem;
+  margin-top: 0.85rem;
+  border-radius: 6px;
+}
+
+.skeleton-title--short {
+  width: 58%;
+  margin-top: 0.45rem;
+}
+
+.skeleton-price {
+  height: 1.25rem;
+  width: 72px;
+  border-radius: 6px;
+  margin-bottom: 0.4rem;
+}
+
+.skeleton-pill {
+  height: 0.9rem;
+  width: 52px;
+  border-radius: 999px;
+  margin-top: 0.35rem;
+}
+
+.skeleton-pill--wide {
+  width: 88px;
+}
+
+.skeleton-ring {
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+}
+
+.skeleton-heart {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+}
+
+.skeleton-button {
+  margin-top: auto;
+  height: 2.2rem;
+  border-radius: 14px;
+}
+
 /* Mobile: keep it clean */
 @media (max-width: 520px) {
   .price-rating {

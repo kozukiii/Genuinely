@@ -261,7 +261,6 @@
 .page-shipping {
   font-size: 0.85rem;
   color: var(--muted);
-  align-self: baseline;
 }
 
 .page-seller {

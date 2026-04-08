@@ -81,6 +81,7 @@ export async function searchAll(req: Request, res: Response) {
     }
   };
 
+  let marketplaceUnavailable = false;
   const [marketplace, ebay] = await Promise.all([
     useMarketplace
       ? searchMarketplaceNormalized({
@@ -89,6 +90,7 @@ export async function searchAll(req: Request, res: Response) {
           limit: marketplaceTarget || 10,
           enrichImages: false,
         }).catch((err) => {
+          marketplaceUnavailable = true;
           console.error("searchMarketplaceNormalized failed", err);
           return [] as Listing[];
         })
@@ -122,6 +124,10 @@ export async function searchAll(req: Request, res: Response) {
   res.setHeader(
     "X-Ebay-Search-Status",
     useEbay ? (ebayUnavailable ? "unavailable" : "ok") : "not-requested"
+  );
+  res.setHeader(
+    "X-Marketplace-Search-Status",
+    useMarketplace ? (marketplaceUnavailable ? "unavailable" : "ok") : "not-requested"
   );
 
   if (analyze) {

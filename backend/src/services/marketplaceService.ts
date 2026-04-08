@@ -8,10 +8,18 @@ const proxyUrls = process.env.PROXY_URL
   ? process.env.PROXY_URL.split(",").map((s) => s.trim()).filter(Boolean)
   : [];
 
+const FETCH_TIMEOUT_MS = 12_000;
+
 function getProxyAgent() {
   if (proxyUrls.length === 0) return undefined;
   const url = proxyUrls[Math.floor(Math.random() * proxyUrls.length)];
   return new HttpsProxyAgent(url);
+}
+
+function fetchWithTimeout(url: string, options: Parameters<typeof fetch>[1]): ReturnType<typeof fetch> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  return fetch(url, { ...options, signal: controller.signal as any }).finally(() => clearTimeout(timer));
 }
 
 const GRAPHQL_URL = "https://www.facebook.com/api/graphql/";
@@ -62,7 +70,7 @@ async function getLatLng(location: string) {
     doc_id: "5585904654783609",
   });
 
-  const res = await fetch(GRAPHQL_URL, {
+  const res = await fetchWithTimeout(GRAPHQL_URL, {
     method: "POST",
     headers: {
       "user-agent": "Mozilla/5.0",
@@ -153,7 +161,7 @@ async function searchMarketplaceListingsByLatLng({
     doc_id: "7111939778879383",
   });
 
-  const res = await fetch(GRAPHQL_URL, {
+  const res = await fetchWithTimeout(GRAPHQL_URL, {
     method: "POST",
     headers: {
       "user-agent": "Mozilla/5.0",
@@ -164,6 +172,9 @@ async function searchMarketplaceListingsByLatLng({
   });
 
   const json = await res.json();
+  if (json?.errors?.some((e: any) => e.code === 1675004)) {
+    throw new Error("Marketplace rate limit exceeded");
+  }
   const edges = json?.data?.marketplace_search?.feed_units?.edges ?? [];
 
   const listings = edges.map((edge: any) => {
@@ -502,7 +513,7 @@ export async function getEbayCrossListingId(listingId: string): Promise<string |
   if (!cookie) return null;
 
   try {
-    const res = await fetch(`https://www.facebook.com/marketplace/item/${listingId}/`, {
+    const res = await fetchWithTimeout(`https://www.facebook.com/marketplace/item/${listingId}/`, {
       method: "GET",
       headers: getMarketplacePermalinkHeaders(cookie),
       ...(proxyUrls.length ? { agent: getProxyAgent() } : {}),
@@ -642,7 +653,7 @@ function makeGraphqlRequest(
     fb_api_req_friendly_name: friendlyName,
   });
 
-  return fetch(GRAPHQL_URL, {
+  return fetchWithTimeout(GRAPHQL_URL, {
     method: "POST",
     headers: {
       "user-agent": FB_DESKTOP_USER_AGENT,

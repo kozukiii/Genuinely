@@ -240,8 +240,21 @@ export default function SearchPage() {
   const listingsRef = useRef(listings);
   listingsRef.current = listings;
 
-  // Abort controller for the active analysis pipeline — cancelled on new search
-  const analysisPipelineRef = useRef<AbortController | null>(null);
+  // All active analysis controllers — all cancelled on new search/filter
+  const analysisControllersRef = useRef<AbortController[]>([]);
+
+  function abortAllAnalysis() {
+    for (const ctrl of analysisControllersRef.current) ctrl.abort();
+    analysisControllersRef.current = [];
+  }
+
+  function startAnalysis(query: string, items: Listing[]) {
+    const ctrl = new AbortController();
+    analysisControllersRef.current.push(ctrl);
+    runAnalysisPipeline(query, items, setListings, ctrl.signal).finally(() => {
+      analysisControllersRef.current = analysisControllersRef.current.filter((c) => c !== ctrl);
+    });
+  }
 
   const filtered = useMemo(
     () => applyFilters(listings, filters),
@@ -264,7 +277,7 @@ export default function SearchPage() {
       if (!q) return;
 
       // Cancel any in-flight analysis from a previous search
-      analysisPipelineRef.current?.abort();
+      abortAllAnalysis();
 
       if (listingsRef.current.length > 0) {
         setSweeping(true);
@@ -296,9 +309,7 @@ export default function SearchPage() {
         sessionStorage.setItem(SEARCH_PAGE_KEY, "1");
 
         // Kick off the background analysis pipeline
-        const controller = new AbortController();
-        analysisPipelineRef.current = controller;
-        runAnalysisPipeline(q, items, setListings, controller.signal);
+        startAnalysis(q, items);
       } catch (err) {
         setFetchingNew(false);
         setEbayNotice(filters.sources.ebay);
@@ -330,7 +341,8 @@ export default function SearchPage() {
         );
         setEbayNotice(filtersRef.current.sources.ebay && ebayUnavailable);
 
-        const combined = dedupeListings([...listingsRef.current, ...newItems]);
+        const pendingNew = newItems.map((l) => ({ ...l, analysisPending: true }));
+        const combined = dedupeListings([...listingsRef.current, ...pendingNew]);
         setListings(combined);
         setHasMore(newItems.length >= PAGE_SIZE);
 
@@ -341,6 +353,8 @@ export default function SearchPage() {
         setPage(targetPage);
         sessionStorage.setItem(SEARCH_PAGE_KEY, String(targetPage));
         sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(combined));
+
+        startAnalysis(queryRef.current, newItems);
       } catch (err) {
         setEbayNotice(filtersRef.current.sources.ebay);
         setError(`Failed to load more listings: ${err instanceof Error ? err.message : String(err)}`);
@@ -371,7 +385,7 @@ export default function SearchPage() {
     const q = queryRef.current;
     if (!q) return;
 
-    analysisPipelineRef.current?.abort();
+    abortAllAnalysis();
     setFetchingNew(true);
     setLoading(true);
     setError(null);
@@ -391,9 +405,7 @@ export default function SearchPage() {
       sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(items));
       sessionStorage.setItem(SEARCH_PAGE_KEY, "1");
 
-      const controller = new AbortController();
-      analysisPipelineRef.current = controller;
-      runAnalysisPipeline(q, items, setListings, controller.signal);
+      startAnalysis(q, items);
     } catch (err) {
       setFetchingNew(false);
       setEbayNotice(next.sources.ebay);
@@ -413,10 +425,12 @@ export default function SearchPage() {
     fetchFromApi(currentQuery, PAGE_SIZE, filtersRef.current, prefetchOffset)
       .then(({ items: newItems, ebayUnavailable }) => {
         setEbayNotice(filtersRef.current.sources.ebay && ebayUnavailable);
-        const combined = dedupeListings([...listingsRef.current, ...newItems]);
+        const pendingNew = newItems.map((l) => ({ ...l, analysisPending: true }));
+        const combined = dedupeListings([...listingsRef.current, ...pendingNew]);
         setListings(combined);
         setHasMore(newItems.length >= PAGE_SIZE);
         sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(combined));
+        startAnalysis(currentQuery, newItems);
       })
       .catch(() => {})
       .finally(() => { prefetchingRef.current = false; });
@@ -538,9 +552,6 @@ export default function SearchPage() {
         </div>
       </div>
 
-      {!loading && !error && listings.length === 0 && (
-        <p className="mt-8 text-gray-400">Search Genuinely's Multi-Source Database.</p>
-      )}
     </div>
   );
 }

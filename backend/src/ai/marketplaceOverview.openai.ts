@@ -470,7 +470,8 @@ async function _runMarketplaceBatch(listings: any[], allDataUrls: string[][], co
   }
 
   try {
-    const parsed = JSON.parse(rawResponse);
+    const cleaned = rawResponse.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+    const parsed = JSON.parse(cleaned);
     if (!Array.isArray(parsed)) throw new Error("Response was not a JSON array");
 
     return listings.map((_, i) => {

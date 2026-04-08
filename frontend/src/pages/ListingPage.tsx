@@ -414,7 +414,7 @@ export default function ListingPage() {
   return (
     <div className="listing-page">
       <div className="listing-card-block" style={{ flexDirection: "column" }}>
-        <div style={{ display: "flex", gap: "2.4rem" }}>
+        <div className="listing-top-row">
 
           {/* Image panel */}
           <div className="page-image">
@@ -486,7 +486,7 @@ export default function ListingPage() {
                 {sellerLine && <p className="page-seller">{sellerLine}</p>}
               </div>
 
-              <div style={{ display: "flex", alignItems: "flex-start", gap: "56px" }}>
+              <div className="ring-price-row">
                 {/* Price bar */}
                 {showRing && ai.priceLow != null && ai.priceHigh != null && (() => {
                   const { lowPct, midPct, highPct, fillPct } = buildPriceBarProps(
@@ -522,7 +522,7 @@ export default function ListingPage() {
 
                 {/* Main ring */}
                 {showRing && (
-                  <div style={{ position: "relative", width: "150px", height: "190px", flexShrink: 0, left: "28px" }}>
+                  <div className="ring-main-container" style={{ position: "relative", width: "150px", height: "190px", flexShrink: 0, left: "28px" }}>
                     <div className="page-rating-ring demo-ring" style={{ position: "absolute", top: 0, left: 0 }}>
                       <AnimatedRing
                         phase={analysisPhase}
@@ -531,11 +531,6 @@ export default function ListingPage() {
                         targetValue={targetScore}
                         size={150}
                       />
-                      {analysisPhase === "done" && ai.aiScore != null && (
-                        <p className="page-rating-label" style={{ position: "absolute", top: "155px", width: "100%", textAlign: "center", margin: 0 }}>
-                          {ai.aiScore}/100
-                        </p>
-                      )}
                     </div>
                   </div>
                 )}

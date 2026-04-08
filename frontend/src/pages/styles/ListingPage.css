@@ -347,11 +347,6 @@
   stroke: var(--demo-fill-color, #22c55e);
 }
 
-.page-rating-label {
-  font-size: 1.25rem;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.9);
-}
 
 @keyframes pageRingSpinLoading {
   to {
@@ -731,6 +726,20 @@
 }
 
 /* =========================
+   Layout helpers (replace inline styles)
+   ========================= */
+.listing-top-row {
+  display: flex;
+  gap: 2.4rem;
+}
+
+.ring-price-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 56px;
+}
+
+/* =========================
    Responsive
    ========================= */
 @media (max-width: 900px) {
@@ -740,10 +749,20 @@
   }
 
   .listing-card-block {
+    gap: 1.5rem;
+    padding: 1.25rem;
+  }
+
+  .listing-top-row {
     flex-direction: column;
     align-items: center;
     gap: 1.5rem;
-    padding: 1.25rem;
+    width: 100%;
+  }
+
+  .page-image {
+    width: 100%;
+    max-width: 22rem;
   }
 
   .image-nav {
@@ -760,6 +779,151 @@
   .info-ring-row {
     flex-direction: column;
     align-items: center;
+  }
+}
+
+/* =========================
+   Mobile (≤ 640px)
+   ========================= */
+@media (max-width: 640px) {
+  .listing-page {
+    margin: 10px auto;
+    padding: 10px 8px;
+    border-radius: 12px;
+  }
+
+  .listing-card-block {
+    padding: 0.85rem;
+    gap: 0.85rem;
+  }
+
+  .listing-top-row {
+    gap: 1rem;
+  }
+
+  .page-image {
+    max-width: 100%;
+  }
+
+  .image-frame {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 1 / 1;
+  }
+
+  .page-title {
+    font-size: 1.25rem;
+  }
+
+  /*
+   * Grid layout:
+   *   col 1 (1fr)  | col 2 (115px)
+   *   info-column  | ring            ← row 1 (ring fills blank space)
+   *   price bar    (spans full width) ← row 2
+   *
+   * display:contents on ring-price-row lets its children
+   * participate directly in the parent grid.
+   */
+  .info-ring-row {
+    display: grid;
+    grid-template-columns: 1fr 115px;
+    grid-template-rows: auto auto;
+    gap: 0.75rem;
+    align-items: start;
+  }
+
+  .info-column {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .ring-price-row {
+    display: contents;
+  }
+
+  .ring-price-row .demo-score-bar-wrap {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    width: auto !important;
+    max-width: none !important;
+    margin-top: 0 !important;
+    box-sizing: border-box;
+  }
+
+  /* Ring sits in the blank space: col 2, row 1, nudged 28px left */
+  .ring-main-container {
+    grid-column: 2;
+    grid-row: 1;
+    left: -28px !important;
+    width: 115px !important;
+    height: 115px !important;
+    align-self: start;
+  }
+
+  /* Scale SVG down; viewBox keeps proportions correct */
+  .ring-main-container svg {
+    width: 110px !important;
+    height: 110px !important;
+  }
+
+  /* Analyze row: reset absolute positioning to normal document flow */
+  .analyze-row {
+    position: static !important;
+    top: auto !important;
+    left: auto !important;
+    right: auto !important;
+    margin-top: 0.5rem;
+    margin-bottom: 0.25rem;
+  }
+
+  /* External link: reset absolute positioning to normal document flow */
+  .demo-external-link {
+    position: static;
+    top: auto;
+    transform: none;
+    margin-top: 0.5rem;
+    width: 100%;
+    justify-content: center;
+    box-sizing: border-box;
+  }
+
+  .demo-external-link:hover {
+    transform: translateY(-2px);
+  }
+
+  .demo-external-link:active {
+    transform: translateY(-1px) scale(0.99);
+  }
+
+  /* Sub-score grid: remove the hardcoded margin that assumed absolute btn height */
+  .ai-score-grid {
+    margin-top: 1rem !important;
+  }
+
+  .similar-listings-section {
+    padding: 1rem;
+  }
+
+  .similar-listings-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.75rem;
+  }
+}
+
+/* =========================
+   Small phones (≤ 400px)
+   ========================= */
+@media (max-width: 400px) {
+  .page-title {
+    font-size: 1.1rem;
+  }
+
+  .page-price {
+    font-size: 1.35rem;
+  }
+
+  .similar-listings-grid {
+    grid-template-columns: 1fr;
   }
 }
 /* =========================

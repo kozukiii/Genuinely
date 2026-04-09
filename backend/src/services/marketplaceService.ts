@@ -54,41 +54,53 @@ function getMarketplacePermalinkHeaders(cookie: string) {
 
 const latLngCache = new Map<string, { lat: number; lng: number; expiresAt: number }>();
 
-async function getLatLng(location: string) {
-  const key = location.toLowerCase().trim();
+function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+async function geocodeCity(city: string, state: string): Promise<{ lat: number; lng: number } | null> {
+  const key = `${city}, ${state}`.toLowerCase();
   const cached = latLngCache.get(key);
   if (cached && cached.expiresAt > Date.now()) return { lat: cached.lat, lng: cached.lng };
 
-  const body = new URLSearchParams({
-    variables: JSON.stringify({
-      params: {
-        caller: "MARKETPLACE",
-        page_category: ["CITY", "SUBCITY", "NEIGHBORHOOD", "POSTAL_CODE"],
-        query: location,
-      },
-    }),
-    doc_id: "5585904654783609",
+  const url = `https://nominatim.openstreetmap.org/search?city=${encodeURIComponent(city)}&state=${encodeURIComponent(state)}&countrycodes=us&format=json&limit=1`;
+  try {
+    const res = await fetchWithTimeout(url, { headers: { "user-agent": "Genuinely/1.0" } });
+    const json = await res.json() as Array<{ lat: string; lon: string }>;
+    const first = json?.[0];
+    if (!first) return null;
+    const result = { lat: parseFloat(first.lat), lng: parseFloat(first.lon) };
+    latLngCache.set(key, { lat: result.lat, lng: result.lng, expiresAt: Date.now() + 24 * 60 * 60 * 1000 });
+    return result;
+  } catch {
+    return null;
+  }
+}
+
+async function getLatLng(zip: string) {
+  const key = zip.trim();
+  const cached = latLngCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return { lat: cached.lat, lng: cached.lng };
+
+  const url = `https://nominatim.openstreetmap.org/search?postalcode=${encodeURIComponent(key)}&countrycodes=us&format=json&limit=1`;
+  const res = await fetchWithTimeout(url, {
+    headers: { "user-agent": "Genuinely/1.0" },
   });
 
-  const res = await fetchWithTimeout(GRAPHQL_URL, {
-    method: "POST",
-    headers: {
-      "user-agent": "Mozilla/5.0",
-      "content-type": "application/x-www-form-urlencoded",
-    },
-    body,
-    ...(proxyUrls.length ? { agent: getProxyAgent() } : {}),
-  });
-
-  const raw = await res.text();
-  const json = JSON.parse(raw);
-
-  const first =
-    json?.data?.city_street_search?.street_results?.edges?.[0]?.node;
-
+  const json = await res.json() as Array<{ lat: string; lon: string; display_name: string }>;
+  const first = json?.[0];
+;
   const result = {
-    lat: first?.location?.latitude,
-    lng: first?.location?.longitude,
+    lat: first ? parseFloat(first.lat) : undefined,
+    lng: first ? parseFloat(first.lon) : undefined,
   };
 
   if (result.lat != null && result.lng != null) {
@@ -217,11 +229,39 @@ async function searchMarketplaceListingsByLatLng({
     };
   });
 
-  if (!enrichImages || listings.length === 0) {
-    return listings;
+  // Pre-geocode unique city/state combos in parallel (results cached 24h)
+  const cityKeys = new Map<string, { lat: number; lng: number } | null>();
+  for (const l of listings) {
+    const city = l.raw?.location?.reverse_geocode?.city;
+    const state = l.raw?.location?.reverse_geocode?.state;
+    if (city && state) cityKeys.set(`${city}|${state}`, null);
+  }
+  await Promise.all(
+    [...cityKeys.keys()].map(async (key) => {
+      const [city, state] = key.split("|");
+      cityKeys.set(key, await geocodeCity(city, state));
+    })
+  );
+
+  const filtered = listings.filter((l: any) => {
+    const listingLat = Number(l.raw?.location?.latitude);
+    const listingLng = Number(l.raw?.location?.longitude);
+    if (Number.isFinite(listingLat) && Number.isFinite(listingLng)) {
+      return haversineKm(lat, lng, listingLat, listingLng) <= radiusKm;
+    }
+    const city = l.raw?.location?.reverse_geocode?.city;
+    const state = l.raw?.location?.reverse_geocode?.state;
+    if (!city || !state) return true;
+    const coords = cityKeys.get(`${city}|${state}`);
+    if (!coords) return true;
+    return haversineKm(lat, lng, coords.lat, coords.lng) <= radiusKm;
+  });
+
+  if (!enrichImages || filtered.length === 0) {
+    return filtered;
   }
 
-  return enrichMarketplaceSearchListings(listings);
+  return enrichMarketplaceSearchListings(filtered);
 }
 
 function extractMarketplaceImages(listing: any): string[] {
@@ -918,6 +958,7 @@ export async function searchMarketplaceListings({
   lat,
   lng,
   limit = 10,
+  radiusKm,
   enrichImages = true,
 }: {
   query: string;
@@ -925,6 +966,7 @@ export async function searchMarketplaceListings({
   lat?: number;
   lng?: number;
   limit?: number;
+  radiusKm?: number;
   enrichImages?: boolean;
 }) {
   const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
@@ -935,6 +977,7 @@ export async function searchMarketplaceListings({
       lat: lat as number,
       lng: lng as number,
       limit,
+      radiusKm,
       enrichImages,
     });
   }
@@ -955,6 +998,7 @@ export async function searchMarketplaceListings({
     lat: resolved.lat,
     lng: resolved.lng,
     limit,
+    radiusKm,
     enrichImages,
   });
 }

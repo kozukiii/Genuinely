@@ -65,6 +65,9 @@ export async function searchAll(req: Request, res: Response) {
   const sortByRaw = String(req.query.sortBy ?? "").trim();
   const sortBy = (sortByRaw === "price_asc" || sortByRaw === "price_desc") ? sortByRaw : undefined;
 
+  const rawRadius = req.query.radiusKm ? Number(req.query.radiusKm) : undefined;
+  const radiusKm = rawRadius != null && Number.isFinite(rawRadius) && rawRadius > 0 ? rawRadius : undefined;
+
   // IP geolocation gives us a real zip code that eBay can use to resolve calculated
   // shipping costs. Fall back to the frontend-supplied country if IP lookup fails.
   const countryFallback = String(req.query.country ?? "").trim().toUpperCase();
@@ -99,6 +102,7 @@ export async function searchAll(req: Request, res: Response) {
           query,
           ...marketplaceSearchLocation,
           limit: marketplaceTarget || 10,
+          radiusKm,
           enrichImages: false,
         }).catch((err) => {
           marketplaceUnavailable = true;

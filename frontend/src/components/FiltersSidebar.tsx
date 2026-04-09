@@ -8,6 +8,8 @@ export interface FilterState {
   freeShippingOnly: boolean;
   sortBy: string;
   limit: string;
+  marketplaceLocation: string;
+  marketplaceRadius: string;
 }
 
 const DEFAULT_FILTERS: FilterState = {
@@ -18,6 +20,8 @@ const DEFAULT_FILTERS: FilterState = {
   freeShippingOnly: false,
   sortBy: "default",
   limit: "",
+  marketplaceLocation: "",
+  marketplaceRadius: "",
 };
 
 interface Props {
@@ -153,6 +157,36 @@ export default function FiltersSidebar({ filters, onChange, onSortChange, mobile
             </label>
           </div>
 
+          {/* Marketplace-specific filters */}
+          {draft.sources.marketplace && (
+            <div className="filter-group filter-group--marketplace">
+              <label className="filter-label filter-label--section">Marketplace</label>
+              <label className="filter-label">Zip code</label>
+              <input
+                className="filter-input"
+                type="text"
+                inputMode="numeric"
+                maxLength={10}
+                placeholder="Auto-detected"
+                value={draft.marketplaceLocation}
+                onChange={(e) => setDraftField("marketplaceLocation", e.target.value.replace(/[^0-9]/g, ""))}
+              />
+              <label className="filter-label" style={{ marginTop: "8px" }}>Radius</label>
+              <select
+                className="filter-select"
+                value={draft.marketplaceRadius}
+                onChange={(e) => setDraftField("marketplaceRadius", e.target.value)}
+              >
+                <option value="">Default (10 mi)</option>
+                <option value="10">10 mi</option>
+                <option value="20">20 mi</option>
+                <option value="40">40 mi</option>
+                <option value="60">60 mi</option>
+                <option value="100">100 mi</option>
+              </select>
+            </div>
+          )}
+
           {/* Result limit */}
           <div className="filter-group">
             <label className="filter-label">Max results</label>
@@ -167,7 +201,7 @@ export default function FiltersSidebar({ filters, onChange, onSortChange, mobile
           </div>
 
           <button className="filter-apply" onClick={handleApply}>
-            Apply Filters
+            Update Results
           </button>
 
           <button className="filter-reset" onClick={handleReset}>

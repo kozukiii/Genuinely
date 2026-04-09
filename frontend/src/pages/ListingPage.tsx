@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import { getHighResImage } from "../utils/imageHelpers";
 import { isSaved, toggleSaved, updateSavedListing } from "../utils/savedListings";
 import { recordView, updateRecentlyViewed } from "../utils/recentlyViewed";
+import { subscribeToAnalysis } from "../utils/analysisStore";
 
 function sourceLabel(source?: Listing["source"]) {
   if (source === "marketplace") return "Marketplace";
@@ -174,7 +175,10 @@ export default function ListingPage() {
 
   // ── Animation state ───────────────────────────────────────────────────────
   const hasInitialScore = listing?.aiScore != null;
-  const [analysisPhase,    setAnalysisPhase]    = useState<AnalysisPhase>(hasInitialScore ? "filling" : "idle");
+  const isPendingFromSearch = !hasInitialScore && listing?.analysisPending === true;
+  const [analysisPhase,    setAnalysisPhase]    = useState<AnalysisPhase>(
+    hasInitialScore ? "filling" : isPendingFromSearch ? "loading" : "idle"
+  );
   const [compressProgress, setCompressProgress] = useState(0);
   const [fillValue,        setFillValue]        = useState(0);
   const targetScoreRef = useRef<number>(listing?.aiScore ?? 0);
@@ -225,6 +229,29 @@ export default function ListingPage() {
       })
       .catch(() => {});
   }, [listing?.id, listing?.source, listing?.title]);
+
+  // ── Subscribe to background analysis score (when card was pending on load) ──
+  useEffect(() => {
+    if (!listing || !listing.analysisPending || listing.aiScore != null) return;
+    const unsub = subscribeToAnalysis(listing, (scored) => {
+      if (!scored) {
+        // Pipeline failed — let the user trigger analysis manually
+        setAnalysisPhase("idle");
+        return;
+      }
+      targetScoreRef.current = scored.aiScore ?? 0;
+      setAnalysisResult({ ...scored, analysisPending: false });
+      updateSavedListing(scored);
+      updateRecentlyViewed(scored);
+      navigate(".", { replace: true, state: { listing: { ...scored, analysisPending: false } } });
+      setCompressProgress(0);
+      setFillValue(0);
+      setAnalysisPhase("compressing");
+    });
+    return unsub;
+  // listing identity is stable for the lifetime of this page instance
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listing?.id, listing?.source]);
 
   // ── Image viewer keyboard nav ─────────────────────────────────────────────
   useEffect(() => {
@@ -487,7 +514,10 @@ export default function ListingPage() {
               </div>
 
               <div className="ring-price-row">
-                {/* Price bar */}
+                {/* Price bar — or invisible spacer so the ring stays in the same position */}
+                {showRing && (ai.priceLow == null || ai.priceHigh == null) && (
+                  <div aria-hidden="true" style={{ width: "220px", marginTop: "30px", flexShrink: 0 }} />
+                )}
                 {showRing && ai.priceLow != null && ai.priceHigh != null && (() => {
                   const { lowPct, midPct, highPct, fillPct } = buildPriceBarProps(
                     ai.priceLow, ai.priceHigh, listing.price

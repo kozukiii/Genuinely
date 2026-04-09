@@ -9,6 +9,11 @@ import type { Listing } from "../types/Listing";
 import "./styles/HomePage.css";
 import { setEbayNotice } from "../utils/ebayNotice";
 import { addToSearchCache } from "../utils/searchCache";
+import {
+  clearAnalysisStore,
+  publishAnalysisResult,
+  publishAnalysisFailure,
+} from "../utils/analysisStore";
 
 const PAGE_SIZE = 12;
 const PRELOAD_SIZE = PAGE_SIZE; // fetch first page, then background-prefetch next
@@ -143,37 +148,68 @@ async function runAnalysisPipeline(
         if (group.priceLow  != null) priceRange.priceLow  = group.priceLow;
         if (group.priceHigh != null) priceRange.priceHigh = group.priceHigh;
 
-        // Merge scored listings back by id+source, then persist to sessionStorage
-        // so back-navigation restores scores without re-running the pipeline.
+        // Persist to sessionStorage directly — this runs even if SearchPage is
+        // unmounted (e.g. user navigated to a listing while analysis was running).
+        try {
+          const raw = sessionStorage.getItem(SEARCH_LISTINGS_KEY);
+          if (raw) {
+            const stored: Listing[] = JSON.parse(raw);
+            if (Array.isArray(stored)) {
+              for (const s of scored) {
+                const idx = stored.findIndex((l) => l.id === s.id && l.source === s.source);
+                if (idx !== -1) stored[idx] = { ...s, ...priceRange, analysisPending: undefined };
+              }
+              sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(stored));
+            }
+          }
+        } catch {}
+
+        // Notify any ListingPage currently viewing one of these listings
+        for (const s of scored) {
+          publishAnalysisResult({ ...s, ...priceRange } as Listing);
+        }
+
+        // Update React state — no-op if SearchPage is unmounted, but that's OK
+        // since sessionStorage is already updated above.
         setListings((prev) => {
           const updated = [...prev];
           for (const s of scored) {
-            const idx = updated.findIndex(
-              (l) => l.id === s.id && l.source === s.source,
-            );
+            const idx = updated.findIndex((l) => l.id === s.id && l.source === s.source);
             if (idx !== -1) updated[idx] = { ...s, ...priceRange, analysisPending: false };
           }
-          try {
-            const toSave = updated.map((l) => ({ ...l, analysisPending: undefined }));
-            sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(toSave));
-          } catch {}
           return updated;
         });
       } catch (err: any) {
         if (err?.name === "AbortError") return;
         console.error(`[analysis] batch-analyze failed for group "${group.canonicalName}":`, err);
 
-        // Clear pending state for this group on failure and persist
+        // Clear pending in sessionStorage directly (same reason as above)
+        try {
+          const raw = sessionStorage.getItem(SEARCH_LISTINGS_KEY);
+          if (raw) {
+            const stored: Listing[] = JSON.parse(raw);
+            if (Array.isArray(stored)) {
+              for (const l of groupListings) {
+                const idx = stored.findIndex((u) => u.id === l.id && u.source === l.source);
+                if (idx !== -1) stored[idx] = { ...stored[idx], analysisPending: undefined };
+              }
+              sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(stored));
+            }
+          }
+        } catch {}
+
+        // Let any subscribed ListingPage know the analysis failed
+        for (const l of groupListings) {
+          publishAnalysisFailure(l);
+        }
+
+        // Update React state
         setListings((prev) => {
           const updated = [...prev];
           for (const l of groupListings) {
             const idx = updated.findIndex((u) => u.id === l.id && u.source === l.source);
             if (idx !== -1) updated[idx] = { ...updated[idx], analysisPending: false };
           }
-          try {
-            const toSave = updated.map((l) => ({ ...l, analysisPending: undefined }));
-            sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(toSave));
-          } catch {}
           return updated;
         });
       }
@@ -244,6 +280,7 @@ export default function SearchPage() {
   function abortAllAnalysis() {
     for (const ctrl of analysisControllersRef.current) ctrl.abort();
     analysisControllersRef.current = [];
+    clearAnalysisStore();
   }
 
   function startAnalysis(query: string, items: Listing[]) {

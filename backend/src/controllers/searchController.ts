@@ -5,6 +5,7 @@ import { searchEbayNormalized } from "../services/ebayService";
 import { searchMarketplaceNormalized } from "../services/marketplaceService";
 import { scoreListings } from "../services/scoring/scoreListing";
 import { fetchMarketContext } from "../ai/priceContext";
+import { getLocationFromIp, extractClientIp } from "../utils/geoIp";
 
 function clampInt(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
@@ -64,8 +65,14 @@ export async function searchAll(req: Request, res: Response) {
   const sortByRaw = String(req.query.sortBy ?? "").trim();
   const sortBy = (sortByRaw === "price_asc" || sortByRaw === "price_desc") ? sortByRaw : undefined;
 
-  const countryRaw = String(req.query.country ?? "").trim().toUpperCase();
-  const buyerLocation = countryRaw ? { country: countryRaw, zip: "" } : null;
+  // IP geolocation gives us a real zip code that eBay can use to resolve calculated
+  // shipping costs. Fall back to the frontend-supplied country if IP lookup fails.
+  const countryFallback = String(req.query.country ?? "").trim().toUpperCase();
+  const ipLoc = useEbay
+    ? await getLocationFromIp(extractClientIp(req as any)).catch(() => null)
+    : null;
+  const buyerLocation = ipLoc ?? (countryFallback ? { country: countryFallback, zip: "" } : null);
+
 
   // Start market context fetch in parallel with API searches (only when analyze=1)
   const contextPromise = analyze ? fetchMarketContext(query) : Promise.resolve(null);

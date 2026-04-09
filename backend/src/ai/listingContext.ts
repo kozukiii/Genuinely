@@ -159,12 +159,13 @@ export async function groupAndContextualize(
           content: `Search query: "${query}"\n\nListing titles:\n${titlesBlock}`,
         },
       ],
-      max_tokens: 600,
+      max_tokens: 1200,
       temperature: 0.1,
     });
 
-    const raw = response.choices[0].message.content?.trim() ?? "[]";
-    const parsed = JSON.parse(raw);
+    const raw = (response.choices[0].message.content?.trim() ?? "[]")
+      .replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+    const parsed = JSON.parse(sanitizeJsonStrings(raw));
     if (!Array.isArray(parsed)) throw new Error("Expected JSON array");
 
     rawGroups = parsed

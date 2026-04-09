@@ -27,6 +27,7 @@ export interface Listing {
 
   location?: string;       // marketplace commonly provides
   shippingPrice?: number;  // ebay commonly provides
+  shippingCalculated?: boolean; // true when eBay uses calculated shipping (no resolved amount)
   description?: string;
   fullDescription?: string;
 

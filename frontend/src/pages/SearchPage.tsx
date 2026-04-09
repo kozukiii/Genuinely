@@ -11,7 +11,6 @@ import { setEbayNotice } from "../utils/ebayNotice";
 import { addToSearchCache } from "../utils/searchCache";
 
 const PAGE_SIZE = 12;
-const BUYER_COUNTRY = Intl.DateTimeFormat().resolvedOptions().locale.split("-")[1]?.toUpperCase() ?? "US";
 const PRELOAD_SIZE = PAGE_SIZE; // fetch first page, then background-prefetch next
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -68,7 +67,6 @@ async function fetchFromApi(
     url += `&sortBy=${filters.sortBy}`;
   }
   if (offset > 0) url += `&offset=${offset}`;
-  url += `&country=${BUYER_COUNTRY}`;
 
   const res = await fetch(url);
   const text = await res.text();
@@ -455,6 +453,7 @@ export default function SearchPage() {
 
   useEffect(() => { hydrate(); }, []);
   useEffect(() => { if (navType === "POP") hydrate(); }, [navType]);
+
 
   // Persist scored listings to the search cache as they arrive
   useEffect(() => {

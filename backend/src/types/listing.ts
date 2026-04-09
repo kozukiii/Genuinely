@@ -34,6 +34,7 @@ export interface Listing {
 
   // ebay-ish
   shippingPrice?: number;
+  shippingCalculated?: boolean; // true when eBay uses calculated shipping (no resolved amount)
   shippingOptions?: unknown;
   buyingOptions?: string[];
 

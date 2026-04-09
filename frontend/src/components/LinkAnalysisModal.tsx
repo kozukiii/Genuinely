@@ -22,14 +22,13 @@ export default function LinkAnalysisModal({ onClose }: Props) {
     setErrorMsg("");
 
     try {
-      // Short delay so the "Fetching listing…" label is visible before analysis starts
       await new Promise((r) => setTimeout(r, 400));
       setPhase("analyzing");
 
       const res = await fetch(`${API_BASE}/api/search/from-url`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: trimmed, country: Intl.DateTimeFormat().resolvedOptions().locale.split("-")[1]?.toUpperCase() ?? "US" }),
+        body: JSON.stringify({ url: trimmed }),
       });
 
       if (!res.ok) {

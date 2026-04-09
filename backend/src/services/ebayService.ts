@@ -174,10 +174,10 @@ function mapEbayInternalToListing(item: any): EbayListingRich {
     // --- common extras ---
     seller: item.seller ?? item.sellerUsername ?? undefined,
     feedback: item.feedback ?? item.sellerFeedback ?? undefined,
-    shippingPrice: (() => {
+    ...(() => {
       // Explicit fields first
       const explicit = item.shippingPrice ?? item.shippingCost ?? item.shipping?.shippingCost;
-      if (explicit != null) return toNumberPrice(explicit);
+      if (explicit != null) return { shippingPrice: toNumberPrice(explicit) };
 
       // eBay Browse API stores shipping as shippingOptions[].shippingCost
       const opts = item.shippingOptions ?? item.shippingOption;
@@ -188,25 +188,25 @@ function mapEbayInternalToListing(item: any): EbayListingRich {
             String(o.shippingCostType ?? o.type ?? "").toUpperCase() === "FREE" ||
             (o.shippingCost != null && toNumberPrice(o.shippingCost) === 0)
         );
-        if (isFree) return 0;
+        if (isFree) return { shippingPrice: 0 };
 
-        // Calculated shipping with no resolved cost — only skip if cost is still absent
-        const isUnresolvedCalculated = opts.some(
+        // Calculated shipping — flag it so the UI can show "Calculated shipping"
+        const isCalculated = opts.some(
           (o: any) =>
             String(o.shippingCostType ?? "").toUpperCase() === "CALCULATED" &&
             o.shippingCost == null
         );
-        if (isUnresolvedCalculated) return undefined;
+        if (isCalculated) return { shippingCalculated: true };
 
         // Otherwise take the lowest shipping cost offered
         const costs = opts
           .map((o: any) => toNumberPrice(o.shippingCost))
           .filter((n: number) => n > 0);
-        if (costs.length > 0) return Math.min(...costs);
+        if (costs.length > 0) return { shippingPrice: Math.min(...costs) };
       }
 
-      // No shipping info at all — leave undefined so UI hides the field
-      return undefined;
+      // No shipping info at all
+      return {};
     })(),
     location: itemLocation, // keep your existing field populated
     score: item.score ?? undefined,

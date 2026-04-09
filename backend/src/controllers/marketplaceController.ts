@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { searchMarketplaceListings, getMarketplaceListing } from "../services/marketplaceService";
+import { extractClientIp, getLocationFromIp, getMarketplaceSearchLocation } from "../utils/geoIp";
 
 export async function getMarketplaceItem(req: Request, res: Response) {
   const { id } = req.params;
@@ -18,15 +19,29 @@ export async function getMarketplaceItem(req: Request, res: Response) {
 
 export async function searchMarketplace(req: Request, res: Response) {
   try {
-    const { q, location } = req.query;
+    const query = String(req.query.q ?? "").trim();
+    const requestedLocation = String(req.query.location ?? "").trim();
 
-    if (!q || !location) {
-      return res.status(400).json({ error: "Missing q or location" });
+    if (!query) {
+      return res.status(400).json({ error: "Missing q" });
+    }
+
+    const geoLocation = requestedLocation
+      ? null
+      : getMarketplaceSearchLocation(
+          await getLocationFromIp(extractClientIp(req as any)).catch(() => null)
+        );
+    const marketplaceSearchLocation = requestedLocation
+      ? { location: requestedLocation }
+      : geoLocation;
+
+    if (!marketplaceSearchLocation) {
+      return res.status(400).json({ error: "Missing location and GeoIP lookup failed" });
     }
 
     const listings = await searchMarketplaceListings({
-      query: String(q),
-      location: String(location),
+      query,
+      ...marketplaceSearchLocation,
     });
 
     res.json(listings);

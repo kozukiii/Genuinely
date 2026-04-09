@@ -5,7 +5,7 @@ import { searchEbayNormalized } from "../services/ebayService";
 import { searchMarketplaceNormalized } from "../services/marketplaceService";
 import { scoreListings } from "../services/scoring/scoreListing";
 import { fetchMarketContext } from "../ai/priceContext";
-import { getLocationFromIp, extractClientIp } from "../utils/geoIp";
+import { getLocationFromIp, extractClientIp, getMarketplaceSearchLocation } from "../utils/geoIp";
 
 function clampInt(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
@@ -55,7 +55,7 @@ export async function searchAll(req: Request, res: Response) {
   const ebayTarget = useEbay ? perSource : 0;
   const marketplaceTarget = useMarketplace ? limit - ebayTarget : 0;
 
-  const location = String(req.query.location ?? "Eau Claire").trim();
+  const requestedLocation = String(req.query.location ?? "").trim();
 
   const rawMin = req.query.minPrice ? Number(req.query.minPrice) : undefined;
   const rawMax = req.query.maxPrice ? Number(req.query.maxPrice) : undefined;
@@ -68,10 +68,14 @@ export async function searchAll(req: Request, res: Response) {
   // IP geolocation gives us a real zip code that eBay can use to resolve calculated
   // shipping costs. Fall back to the frontend-supplied country if IP lookup fails.
   const countryFallback = String(req.query.country ?? "").trim().toUpperCase();
-  const ipLoc = useEbay
+  const needsGeoIp = useEbay || (useMarketplace && !requestedLocation);
+  const ipLoc = needsGeoIp
     ? await getLocationFromIp(extractClientIp(req as any)).catch(() => null)
     : null;
   const buyerLocation = ipLoc ?? (countryFallback ? { country: countryFallback, zip: "" } : null);
+  const marketplaceSearchLocation = requestedLocation
+    ? { location: requestedLocation }
+    : getMarketplaceSearchLocation(ipLoc);
 
 
   // Start market context fetch in parallel with API searches (only when analyze=1)
@@ -89,11 +93,11 @@ export async function searchAll(req: Request, res: Response) {
   };
 
   let marketplaceUnavailable = false;
-  const [marketplace, ebay] = await Promise.all([
-    useMarketplace
+  const marketplacePromise = useMarketplace
+    ? marketplaceSearchLocation
       ? searchMarketplaceNormalized({
           query,
-          location,
+          ...marketplaceSearchLocation,
           limit: marketplaceTarget || 10,
           enrichImages: false,
         }).catch((err) => {
@@ -101,7 +105,15 @@ export async function searchAll(req: Request, res: Response) {
           console.error("searchMarketplaceNormalized failed", err);
           return [] as Listing[];
         })
-      : Promise.resolve([]),
+      : (() => {
+          marketplaceUnavailable = true;
+          console.warn("searchMarketplaceNormalized skipped: no explicit location or GeoIP location was available");
+          return Promise.resolve([] as Listing[]);
+        })()
+    : Promise.resolve([] as Listing[]);
+
+  const [marketplace, ebay] = await Promise.all([
+    marketplacePromise,
     useEbay && ebayTarget > 0 ? runEbaySearch(ebayTarget) : Promise.resolve([]),
   ]);
 

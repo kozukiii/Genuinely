@@ -915,24 +915,45 @@ export async function getMarketplaceListingFull(listingId: string): Promise<List
 export async function searchMarketplaceListings({
   query,
   location,
+  lat,
+  lng,
   limit = 10,
   enrichImages = true,
 }: {
   query: string;
-  location: string;
+  location?: string;
+  lat?: number;
+  lng?: number;
   limit?: number;
   enrichImages?: boolean;
 }) {
-  const { lat, lng } = await getLatLng(location);
+  const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
 
-  if (lat == null || lng == null) {
+  if (hasCoords) {
+    return searchMarketplaceListingsByLatLng({
+      query,
+      lat: lat as number,
+      lng: lng as number,
+      limit,
+      enrichImages,
+    });
+  }
+
+  const locationText = typeof location === "string" ? location.trim() : "";
+  if (!locationText) {
+    throw new Error("Location lookup failed");
+  }
+
+  const resolved = await getLatLng(locationText);
+
+  if (resolved.lat == null || resolved.lng == null) {
     throw new Error("Location lookup failed");
   }
 
   return searchMarketplaceListingsByLatLng({
     query,
-    lat,
-    lng,
+    lat: resolved.lat,
+    lng: resolved.lng,
     limit,
     enrichImages,
   });

@@ -187,8 +187,17 @@ Analyze the Marketplace listing and produce numeric scores for these categories 
 
 - conditionHonesty (0–100)
   Carefully weigh the description against the images and highlight any and all discrepancies.
+  Scrutinize images closely for scratches, dents, scuffs, discoloration, missing parts, or any visible damage.
+  When the listing is described or implied as "new" or "like new" AND any wear is present:
+  - The conditionHonesty score MUST be 50 or below — no exceptions
+  - Wear across multiple areas = 35 or below
+  - Do NOT use phrases like "no major damage", "minor wear", "some wear", "light scratches" — these are signs you are about to score too high
+  - SELF-CHECK: if your overview contains wear, scratch, scuff, dent, damage, mark, or discoloration AND condition is "new" or "like new", your conditionHonesty score MUST be 50 or below
+  - Do NOT reward the description for acknowledging defects — acknowledgement confirms the gap; score the gap, not the admission
+  - EXCEPTION: graded items (PSA, BGS, CGC, SGC, etc.) are exempt from all of the above — the grade IS the certified condition; evaluate instead whether the label is visible and consistent with the images
+  Use PRODUCT CONTEXT condition signals and red flags as a checklist for what to look for in the images.
   Evaluate whether the title and images plausibly match the implied condition.
-  Since structured condition data may be missing, estimate whether the listing feels visually and contextually honest.
+  Call out all defects explicitly in the overview — do not soften or offset them with positives.
 
 - shippingFairness (0–100)
   Marketplace is typically local pickup.
@@ -220,10 +229,14 @@ SCORING ANCHORS:
 
 3) conditionHonesty
 SCORING ANCHORS:
-- Images and title align well = 70–90
+- Images and title align well, no visible defects = 70–90
 - Neutral/unclear but not suspicious = 55–70
 - Clear mismatch between title and images = lower
 - Missing formal condition metadata should be treated as neutral, not negative
+- "Like new" or "new" + ANY wear, scratch, scuff, or damage visible = 50 or below — HARD CAP, no exceptions
+- "Like new" or "new" + wear across multiple areas = 35 or below
+- Description acknowledges defects while claiming high condition = same hard cap applies — acknowledgement does NOT raise the score
+- SELF-CHECK: if your overview text contains any of — wear, scratch, scuff, dent, damage, mark, discoloration — AND condition is "new" or "like new", your score must be 50 or below
 
 4) shippingFairness
 Marketplace is usually local pickup.
@@ -270,7 +283,11 @@ OVERVIEW REQUIREMENTS:
 - Briefly explain reasoning in a polished paragraph
 - Keep the overview specific to the inferred item shown, not the broad category
 - Mention what the images show IF they were successfully analyzed
+- Multiple images showing different angles of the same item (front, back, sides, slab label) are completely normal — do NOT describe this as suspicious or as showing a different item
 - Carefully weigh the description against the images and highlight any and all discrepancies between them
+- If images show scratches, dents, or wear that contradicts a "new" or "like new" claim, call it out explicitly
+- Do NOT use words like "scam", "suspicious", "fraud", or "attempt to scam" based on any single signal (low price, calculated shipping, sparse description) — only raise concerns when multiple explicit red flags combine
+- Calculated shipping is NEVER a scam signal and must never be framed negatively
 - If images were not analyzed, do NOT invent visual details
 - Do NOT include numeric scores in the overview
 - Do NOT hedge excessively
@@ -362,6 +379,9 @@ MARKETPLACE RULES (always apply):
 - Infer specific item identity from title + images; speak as if that identification is correct
 - NEVER use vague phrases like "similar items" or "this category"
 - Carefully weigh the description against the images and highlight any and all discrepancies
+- Scrutinize images for scratches, dents, scuffs, or damage — when claimed "new" or "like new" AND any wear is present: conditionHonesty MUST be 50 or below; multiple areas = 35 or below; do NOT use "minor wear" / "no major damage"; SELF-CHECK: if overview mentions wear/scratch/damage AND condition is new/like-new, cap at 50; EXCEPTION: graded items (PSA, BGS, CGC, etc.) exempt — grade IS the certified condition
+- Multiple images of the same item from different angles are normal — do NOT flag as suspicious or as a different item
+- Do NOT use "scam", "suspicious", or "fraud" language from a single signal — only when multiple explicit red flags combine
 - DO NOT include numeric scores inside the overview text
 - DO NOT add extra JSON fields
 
@@ -394,7 +414,7 @@ IMPORTANT: Marketplace listings often have sparse data. Score them FAIRLY withou
 SCORING RULES (apply to every listing):
 - priceFairness (0–100 or null): use PRODUCT CONTEXT price range and fairness guidance if provided; otherwise estimate confidently from the inferred item. If price is "Accepts Offers" or $0, set to null — do NOT guess a score.
 - sellerTrust (0–100): interpret as LISTING CONFIDENCE; apply PRODUCT CONTEXT red flags to lower score where relevant. Active listing + real image + plausible title = 70–85 baseline.
-- conditionHonesty (0–100): carefully weigh the description against the images and highlight any and all discrepancies; cross-reference PRODUCT CONTEXT condition signals against images and title. Images and title align well = 70–90; neutral/unclear = 55–70.
+- conditionHonesty (0–100): scrutinize images for scratches, dents, scuffs, discoloration, or damage; when claimed "new" or "like new" AND any wear is present: score MUST be 50 or below; multiple areas = 35 or below; do NOT use "minor wear" / "no major damage"; SELF-CHECK: if overview mentions wear/scratch/damage AND condition is new/like-new, cap at 50; EXCEPTION: graded items (PSA, BGS, CGC, etc.) are exempt — grade IS the certified condition; cross-reference PRODUCT CONTEXT. No defects = 70–90; neutral/unclear = 55–70.
 - shippingFairness (0–100): Marketplace is typically local pickup. Standard pickup = 75–90; multiple delivery options = 85–95.
 - descriptionQuality (0–100): evaluate against PRODUCT CONTEXT description guidance if provided. Clear specific title + context = 70–90; vague = 30–50.
 
@@ -417,6 +437,8 @@ IDENTITY RULES:
 
 GENERAL RULES:
 - Missing data = NEUTRAL (not negative)
+- Multiple images of the same item from different angles are completely normal — do NOT flag as suspicious or as a different item
+- Do NOT use "scam", "suspicious", or "fraud" language from a single signal — only when multiple explicit red flags combine
 - DO NOT include numeric scores inside the overview text
 - DO NOT add extra JSON fields
 

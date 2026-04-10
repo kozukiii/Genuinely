@@ -946,8 +946,7 @@
   border: 1px solid rgba(255, 255, 255, 0.14);
   box-shadow: var(--shadow-soft);
 
-  color: rgba(245, 245, 245, 0.92);
-  font-size: 1.2rem;
+  color: rgba(245, 245, 245, 0.72);
   line-height: 1;
 
   cursor: pointer;
@@ -956,12 +955,14 @@
   transition:
     transform 160ms ease,
     box-shadow 160ms ease,
-    border-color 160ms ease;
+    border-color 160ms ease,
+    color 180ms ease;
   z-index: 10;
 }
 
 .page-heart:hover {
   transform: translateY(-2px);
+  color: rgba(245, 245, 245, 0.95);
   border-color: rgba(57, 255, 157, 0.28);
   box-shadow:
     var(--shadow-float),
@@ -969,7 +970,7 @@
 }
 
 .page-heart:active {
-  transform: translateY(-1px) scale(0.98);
+  transform: translateY(-1px) scale(0.96);
 }
 
 .page-heart:focus-visible {
@@ -981,8 +982,19 @@
 }
 
 .page-heart[aria-pressed="true"] {
-  color: rgba(255, 160, 200, 0.95);
-  border-color: rgba(255, 120, 170, 0.45);
+  color: #ff4d8b;
+  border-color: rgba(255, 77, 139, 0.5);
+  box-shadow:
+    var(--shadow-soft),
+    0 0 0 3px rgba(255, 77, 139, 0.1);
+  animation: heartPop 320ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes heartPop {
+  0%   { transform: scale(1); }
+  50%  { transform: scale(1.24); }
+  75%  { transform: scale(0.94); }
+  100% { transform: scale(1); }
 }
 /* Price + Heart inline row */
 .price-heart-row {
@@ -1004,8 +1016,7 @@
   border: 1px solid rgba(255, 255, 255, 0.14);
   box-shadow: var(--shadow-soft);
 
-  color: rgba(245, 245, 245, 0.92);
-  font-size: 1.2rem;
+  color: rgba(245, 245, 245, 0.72);
   line-height: 1;
 
   cursor: pointer;
@@ -1015,11 +1026,13 @@
   transition:
     transform 160ms ease,
     box-shadow 160ms ease,
-    border-color 160ms ease;
+    border-color 160ms ease,
+    color 180ms ease;
 }
 
 .page-heart-inline:hover {
   transform: translateY(0px);
+  color: rgba(245, 245, 245, 0.95);
   border-color: rgba(57, 255, 157, 0.28);
   box-shadow:
     var(--shadow-float),
@@ -1027,7 +1040,7 @@
 }
 
 .page-heart-inline:active {
-  transform: translateY(1px) scale(0.98);
+  transform: translateY(1px) scale(0.96);
 }
 
 .page-heart-inline:focus-visible {
@@ -1039,8 +1052,12 @@
 }
 
 .page-heart-inline[aria-pressed="true"] {
-  color: rgba(255, 160, 200, 0.95);
-  border-color: rgba(255, 120, 170, 0.45);
+  color: #ff4d8b;
+  border-color: rgba(255, 77, 139, 0.5);
+  box-shadow:
+    var(--shadow-soft),
+    0 0 0 3px rgba(255, 77, 139, 0.1);
+  animation: heartPop 320ms cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .image-loading-badge {
@@ -1128,7 +1145,6 @@
 .similar-card .badge-heart {
   width: 28px;
   height: 28px;
-  font-size: 0.9rem;
 }
 
 /* =========================

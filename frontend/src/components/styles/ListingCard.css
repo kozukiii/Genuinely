@@ -373,8 +373,7 @@
   border: 1px solid rgba(255, 255, 255, 0.14);
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.55);
 
-  color: rgba(245, 245, 245, 0.92);
-  font-size: 1.1rem;
+  color: rgba(245, 245, 245, 0.72);
   line-height: 1;
 
   cursor: pointer;
@@ -383,11 +382,13 @@
   transition:
     transform 160ms ease,
     box-shadow 160ms ease,
-    border-color 160ms ease;
+    border-color 160ms ease,
+    color 180ms ease;
 }
 
 .price-rating .badge-heart:hover {
   transform: translateY(-2px);
+  color: rgba(245, 245, 245, 0.95);
   border-color: rgba(57, 255, 157, 0.28);
   box-shadow:
     0 18px 48px rgba(0, 0, 0, 0.7),
@@ -395,12 +396,23 @@
 }
 
 .price-rating .badge-heart:active {
-  transform: translateY(-1px) scale(0.98);
+  transform: translateY(-1px) scale(0.96);
 }
 
 .price-rating .badge-heart[aria-pressed="true"] {
-  color: rgba(255, 160, 200, 0.95);
-  border-color: rgba(255, 120, 170, 0.45);
+  color: #ff4d8b;
+  border-color: rgba(255, 77, 139, 0.5);
+  box-shadow:
+    0 12px 28px rgba(0, 0, 0, 0.55),
+    0 0 0 3px rgba(255, 77, 139, 0.1);
+  animation: heartPop 320ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes heartPop {
+  0%   { transform: scale(1); }
+  50%  { transform: scale(1.28); }
+  75%  { transform: scale(0.93); }
+  100% { transform: scale(1); }
 }
 
 /* Pending ring spinner */
@@ -563,7 +575,6 @@
   .price-rating .badge-heart {
     width: 28px;
     height: 28px;
-    font-size: 0.82rem;
     border-radius: 8px;
   }
 

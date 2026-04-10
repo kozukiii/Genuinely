@@ -164,6 +164,25 @@ If any field is missing/undefined, treat it as NEUTRAL (no deduction, no reward)
 ALWAYS INCLUDE A DESCRIPTION OF THE IMAGES IN THE OVERVIEW SECTION (unless none were provided).
 ALWAYS carefully weigh the description against the images and highlight any and all discrepancies between them.
 
+CONDITION HONESTY RULES:
+- Scrutinize images closely for scratches, dents, scuffs, discoloration, missing parts, or any visible damage
+- When condition is "New", "Like New", or "Open Box" AND wear of any kind is present:
+  - The conditionHonesty score MUST be 50 or below — no exceptions
+  - Wear on multiple areas (e.g. crown AND face) = 35 or below
+  - Do NOT use phrases like "no major damage", "minor wear", "some wear", "light scratches", or any other qualifier that softens the finding — these phrases are red flags that you are about to score too high
+  - SELF-CHECK: if your overview contains any word from this list — wear, scratch, scuff, dent, damage, mark, discoloration — AND condition is "New" or "Like New", your conditionHonesty score MUST be 50 or below
+- EXCEPTION — GRADED ITEMS: if the item is professionally graded (PSA, BGS, CGC, SGC, etc.), the grade IS the certified condition; do NOT apply the like-new wear rules — instead evaluate whether the grade label is visible, legible, and consistent with the images
+- Do NOT reward the description for acknowledging defects — acknowledgement confirms the gap; score the gap, not the admission
+- Use PRODUCT CONTEXT condition signals and red flags as a checklist for what to look for in images
+- Call out all defects explicitly in the overview — do not soften, excuse, or offset them with positives
+- Multiple images showing different angles of the same item (front, back, sides, slab label) are completely normal — do NOT flag this as suspicious or as evidence of a different item
+
+OVERVIEW TONE RULES:
+- Do NOT use the words "scam", "suspicious", "fraud", or "attempt to scam" based on any single signal alone (low price, calculated shipping, sparse description)
+- Calculated shipping is NEVER a scam signal — do not mention it negatively in the overview
+- A low price relative to market is worth noting but must be framed as a pricing observation, not an accusation
+- Only raise fraud concerns when multiple explicit red flags combine (e.g. price far below market AND mismatched images AND no seller history)
+
 🎯 Output Format **MUST ALWAYS BE EXACTLY LIKE THIS**:
 
 {
@@ -245,10 +264,14 @@ Analyze ALL of them and return results as a JSON array.
 
 ALWAYS APPLY:
 - sellerTrust auto 100 if 99%+ feedback and 1000+ ratings
-- shippingFairness auto 100 if free; score 65 (neutral) if CALCULATED or unknown
+- shippingFairness auto 100 if free; score 65 (neutral) if CALCULATED or unknown — calculated shipping is NEVER a scam signal
 - Missing data = NEUTRAL (no deduction unless truly critical)
 - Describe images in the overview if provided
 - Carefully weigh the description against the images and highlight any and all discrepancies
+- Scrutinize images for scratches, dents, scuffs, or damage — when condition is "New", "Like New", or "Open Box" AND any wear is present: conditionHonesty MUST be 50 or below; multiple areas of wear = 35 or below; do NOT use "minor wear", "some wear", "no major damage"; SELF-CHECK: if overview mentions wear/scratch/damage AND condition is new/like-new, cap at 50
+- EXCEPTION: graded items (PSA, BGS, CGC, etc.) are exempt from the above wear rule — the grade IS the certified condition
+- Multiple images showing different angles of the same item (front, back, sides) are completely normal — do NOT treat this as suspicious
+- Do NOT use "scam", "suspicious", or "fraud" language based on any single signal — only raise concerns when multiple explicit red flags combine
 - DO NOT include numeric scores inside the overview text
 - DO NOT add extra JSON fields
 
@@ -272,8 +295,8 @@ Analyze ALL of them and return results as a JSON array.
 SCORING RULES (apply to every listing):
 - priceFairness (0–100): use PRODUCT CONTEXT price range and fairness guidance if provided; otherwise estimate from listing data and your knowledge
 - sellerTrust (0–100): based on feedback score and rating count; auto 100 if 99%+ feedback and 1000+ ratings
-- conditionHonesty (0–100): carefully weigh the description against the images and highlight any and all discrepancies; cross-reference stated condition against PRODUCT CONTEXT condition signals and images
-- shippingFairness (0–100): is shipping reasonable for the item; auto 100 if free; score 65 (neutral) if CALCULATED or unknown — never penalize calculated shipping
+- conditionHonesty (0–100): scrutinize images for scratches, dents, scuffs, discoloration, missing parts, or damage; when condition is "New", "Like New", or "Open Box" AND any wear is present: score MUST be 50 or below; multiple areas of wear = 35 or below; do NOT use "minor wear" / "no major damage"; SELF-CHECK: if overview mentions wear/scratch/damage AND condition is new/like-new, cap at 50; EXCEPTION: graded items (PSA, BGS, CGC, etc.) are exempt — the grade IS the certified condition
+- shippingFairness (0–100): is shipping reasonable for the item; auto 100 if free; score 65 (neutral) if CALCULATED or unknown — calculated shipping is NEVER a scam signal
 - descriptionQuality (0–100): evaluate against PRODUCT CONTEXT description guidance if provided; otherwise judge on detail, accuracy, and completeness
 
 PRODUCT CONTEXT RULES:
@@ -284,7 +307,8 @@ PRODUCT CONTEXT RULES:
 
 GENERAL RULES:
 - Missing data = NEUTRAL (no deduction unless truly critical)
-- Describe images in the overview if provided
+- Describe images in the overview if provided; multiple views of the same item (front, back, sides) are completely normal — do NOT treat as suspicious
+- Do NOT use "scam", "suspicious", or "fraud" language from a single signal — only when multiple explicit red flags combine
 - DO NOT include numeric scores inside the overview text
 - DO NOT add extra JSON fields
 
@@ -424,7 +448,10 @@ async function _runEbayBatch(entries: BatchEntry[], context?: string | null, sys
     const start = rawResponse.indexOf("[");
     const end = rawResponse.lastIndexOf("]");
     if (start === -1 || end === -1 || end < start) throw new Error("No JSON array found in response");
-    const parsed = JSON.parse(rawResponse.slice(start, end + 1));
+    const extracted = rawResponse.slice(start, end + 1);
+    // Repair common LLM JSON issues: trailing commas before ] or }
+    const repaired = extracted.replace(/,(\s*[}\]])/g, "$1");
+    const parsed = JSON.parse(repaired);
     if (!Array.isArray(parsed)) throw new Error("Response was not a JSON array");
 
     return listings.map((_, i) => {

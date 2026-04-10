@@ -221,7 +221,7 @@ THE SYSTEM PROMPT (everything after ---) MUST CONTAIN ALL OF THESE IN ORDER:
 
 6. SCORING GUIDANCE (inline, no sub-headers)
    PRICE FAIRNESS: [anchor to the market range — at or below the low end = minimum 80, scale up further below market; at or above high end = penalise based on condition and extras]
-   CONDITION HONESTY: [what images and title must show for this product — reference the inspection points above; penalise blurry/angled shots that hide known wear areas]
+   CONDITION HONESTY: [reference the inspection points above; CRITICAL HARD CAP: if ANY wear, scratch, scuff, dent, or damage from the inspection list is visible in the images OR acknowledged in the description, AND the condition is claimed "new", "like new", or equivalent, the conditionHonesty score MUST be 50 or below — no exceptions, no qualifiers; wear across multiple areas = 35 or below; do NOT write off defects as "minor" or "no major damage" — any defect under a new/like-new claim IS a mismatch; penalise blurry or angled shots that hide known wear areas for this product]
    DESCRIPTION QUALITY: [what a complete honest listing for this exact product includes — model, variant, condition details, accessory list, disclosed defects]
    SELLER TRUST: [how to apply the red flags above; what raises vs lowers trust for this product]
    SHIPPING FAIRNESS: [judge shipping cost given this product's size, weight, and fragility]
@@ -300,34 +300,41 @@ export async function groupAndContextualize(
   const rawGroups = await groupListings(titles, query);
 
   // Steps 2+3: per group — Serper ×2 then 8b engineers the expert prompt
-  // All groups run in parallel (Serper has no strict TPM, 8b has separate limits)
-  const groups = await Promise.all(
-    rawGroups.map(async (group): Promise<ProductGroup> => {
-      const marketData = await fetchMarketContext(group.serperQuery).catch(() => null);
+  // Run in chunks of 2 to avoid Serper rate limits (each group fires 2 concurrent requests)
+  const SERPER_CONCURRENCY = 2;
+  const groups: ProductGroup[] = [];
 
-      if (!marketData) {
+  for (let i = 0; i < rawGroups.length; i += SERPER_CONCURRENCY) {
+    const chunk = rawGroups.slice(i, i + SERPER_CONCURRENCY);
+    const chunkResults = await Promise.all(
+      chunk.map(async (group): Promise<ProductGroup> => {
+        const marketData = await fetchMarketContext(group.serperQuery).catch(() => null);
+
+        if (!marketData) {
+          return {
+            canonicalName: group.canonicalName,
+            specificity: "specific",
+            indices: group.indices,
+            systemPrompt: null,
+            priceLow: null,
+            priceHigh: null,
+          };
+        }
+
+        const { systemPrompt, priceLow, priceHigh } = await engineerPrompt(group.canonicalName, marketData);
+
         return {
           canonicalName: group.canonicalName,
           specificity: "specific",
           indices: group.indices,
-          systemPrompt: null,
-          priceLow: null,
-          priceHigh: null,
+          systemPrompt,
+          priceLow,
+          priceHigh,
         };
-      }
-
-      const { systemPrompt, priceLow, priceHigh } = await engineerPrompt(group.canonicalName, marketData);
-
-      return {
-        canonicalName: group.canonicalName,
-        specificity: "specific",
-        indices: group.indices,
-        systemPrompt,
-        priceLow,
-        priceHigh,
-      };
-    }),
-  );
+      }),
+    );
+    groups.push(...chunkResults);
+  }
 
   return groups;
 }

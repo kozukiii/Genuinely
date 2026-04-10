@@ -158,21 +158,23 @@ export default function HomePage() {
   return (
     <div className="home-page">
       <section className="home-hero">
-        <div className="home-hero-logo">
-          <svg viewBox="0 0 56 56" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-            <defs>
-              <linearGradient id="heroRingGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stopColor="#3dff8f" />
-                <stop offset="100%" stopColor="#1aad54" />
-              </linearGradient>
-            </defs>
-            <circle cx="28" cy="28" r="23" stroke="url(#heroRingGrad)" strokeWidth="4" />
-            <text x="28" y="37" textAnchor="middle" fill="white" fontFamily="system-ui,-apple-system,sans-serif" fontWeight="700" fontSize="26">G</text>
-          </svg>
-        </div>
+        <div className="home-hero-top">
+          <div className="home-hero-logo">
+            <svg viewBox="0 0 56 56" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <defs>
+                <linearGradient id="heroRingGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stopColor="#3dff8f" />
+                  <stop offset="100%" stopColor="#1aad54" />
+                </linearGradient>
+              </defs>
+              <circle cx="28" cy="28" r="23" stroke="url(#heroRingGrad)" strokeWidth="4" />
+              <text x="28" y="37" textAnchor="middle" fill="white" fontFamily="system-ui,-apple-system,sans-serif" fontWeight="700" fontSize="26">G</text>
+            </svg>
+          </div>
 
-        <h1 className="home-hero-wordmark">GENUINELY</h1>
-        <p className="home-hero-sub">The secondhand market, analyzed.</p>
+          <h1 className="home-hero-wordmark">GENUINELY</h1>
+          <p className="home-hero-sub">The secondhand market, analyzed.</p>
+        </div>
 
         <form className="home-hero-search" onSubmit={submitHeroSearch}>
           <input

@@ -4,6 +4,9 @@ body {
   margin: 0;
   padding: 0;
   min-height: 100%;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: clip; /* clip vs hidden: clip doesn't block vertical scroll on iOS Safari */
   background:
     radial-gradient(
       1400px 800px at 14% 6%,
@@ -27,9 +30,18 @@ body {
     sans-serif;
 }
 
+/* Prevent any child from blowing out the viewport on mobile */
+#root {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: clip;
+}
+
 /* --- HOMEPAGE WRAPPER (scopes all homepage-only styling) --- */
 .home-page {
   max-width: 1280px;
+  width: 100%;
+  box-sizing: border-box;
   margin: 0 auto;
   padding: 1rem;
   min-height: 100vh;
@@ -1058,6 +1070,7 @@ h6 {
    ========================= */
 .results-wrapper {
   position: relative;
+  overflow: hidden; /* contain translateX sweep animation — prevents horizontal blowout */
 }
 
 .results-sweep-out {
@@ -1245,10 +1258,6 @@ h6 {
     margin: 0;
     width: 100%;
     box-sizing: border-box;
-  }
-
-  .home-page .listing-image img {
-    height: 8rem;
   }
 
   .home-page .listing-card {

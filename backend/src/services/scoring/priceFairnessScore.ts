@@ -1,5 +1,5 @@
 /**
- * Deterministic price fairness scoring based on Tavily market context.
+ * Deterministic price fairness scoring based on market context text.
  *
  * Rules:
  *  - Lower end of market range  → higher score (up to 100)

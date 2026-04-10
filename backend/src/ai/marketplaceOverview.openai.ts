@@ -93,6 +93,7 @@ export async function analyzeMarketplaceListingWithImages(listing: any, context?
   const title = clean(listing.title) ?? "Untitled";
   const currency = clean(listing.currency) ?? "USD";
   const link = clean(listing.link ?? listing.url) ?? "";
+  const description = clean(listing.fullDescription ?? listing.description);
 
   const location = formatLocation(listing);
   const deliveryTypes = formatDeliveryTypes(
@@ -185,6 +186,7 @@ Analyze the Marketplace listing and produce numeric scores for these categories 
   whether the listing appears real, active, obtainable, and not suspicious.
 
 - conditionHonesty (0–100)
+  Carefully weigh the description against the images and highlight any and all discrepancies.
   Evaluate whether the title and images plausibly match the implied condition.
   Since structured condition data may be missing, estimate whether the listing feels visually and contextually honest.
 
@@ -268,6 +270,7 @@ OVERVIEW REQUIREMENTS:
 - Briefly explain reasoning in a polished paragraph
 - Keep the overview specific to the inferred item shown, not the broad category
 - Mention what the images show IF they were successfully analyzed
+- Carefully weigh the description against the images and highlight any and all discrepancies between them
 - If images were not analyzed, do NOT invent visual details
 - Do NOT include numeric scores in the overview
 - Do NOT hedge excessively
@@ -313,6 +316,7 @@ Do NOT wrap JSON in backticks.
         { type: "text", text: `Delivery Types: ${deliveryTypes}` },
         { type: "text", text: `Availability: ${availability}` },
         { type: "text", text: `Listing URL: ${link}` },
+        ...(description ? [{ type: "text", text: `Description: ${description}` }] : []),
         { type: "text", text: `Images Provided: ${imageUrls.length}` },
         { type: "text", text: `Images Successfully Attached: ${dataUrls.length}` },
         ...(context ? [{ type: "text", text: `\n--- PRODUCT CONTEXT ---\n${context}\n--- END PRODUCT CONTEXT ---` }] : []),
@@ -357,6 +361,7 @@ MARKETPLACE RULES (always apply):
 - shippingFairness = pickup/delivery convenience: standard local pickup = 75–90; multiple options = 85–95
 - Infer specific item identity from title + images; speak as if that identification is correct
 - NEVER use vague phrases like "similar items" or "this category"
+- Carefully weigh the description against the images and highlight any and all discrepancies
 - DO NOT include numeric scores inside the overview text
 - DO NOT add extra JSON fields
 
@@ -389,7 +394,7 @@ IMPORTANT: Marketplace listings often have sparse data. Score them FAIRLY withou
 SCORING RULES (apply to every listing):
 - priceFairness (0–100 or null): use PRODUCT CONTEXT price range and fairness guidance if provided; otherwise estimate confidently from the inferred item. If price is "Accepts Offers" or $0, set to null — do NOT guess a score.
 - sellerTrust (0–100): interpret as LISTING CONFIDENCE; apply PRODUCT CONTEXT red flags to lower score where relevant. Active listing + real image + plausible title = 70–85 baseline.
-- conditionHonesty (0–100): cross-reference PRODUCT CONTEXT condition signals against images and title. Images and title align well = 70–90; neutral/unclear = 55–70.
+- conditionHonesty (0–100): carefully weigh the description against the images and highlight any and all discrepancies; cross-reference PRODUCT CONTEXT condition signals against images and title. Images and title align well = 70–90; neutral/unclear = 55–70.
 - shippingFairness (0–100): Marketplace is typically local pickup. Standard pickup = 75–90; multiple delivery options = 85–95.
 - descriptionQuality (0–100): evaluate against PRODUCT CONTEXT description guidance if provided. Clear specific title + context = 70–90; vague = 30–50.
 
@@ -437,6 +442,7 @@ async function _runMarketplaceBatch(listings: any[], allDataUrls: string[][], co
     const location = formatLocation(listing);
     const deliveryTypes = formatDeliveryTypes(listing.delivery_types ?? listing.raw?.delivery_types);
     const availability = formatAvailability(listing);
+    const batchDescription = clean(listing.fullDescription ?? listing.description);
     const dataUrls = allDataUrls[i];
     const batchAcceptsOffers = !listing.price || Number(listing.price) === 0 || [123456, 1234567, 999999, 9999999].includes(Math.round(Number(listing.price)));
 
@@ -447,6 +453,7 @@ async function _runMarketplaceBatch(listings: any[], allDataUrls: string[][], co
     contentParts.push({ type: "text", text: `Delivery Types: ${deliveryTypes}` });
     contentParts.push({ type: "text", text: `Availability: ${availability}` });
     contentParts.push({ type: "text", text: `Listing URL: ${link}` });
+    if (batchDescription) contentParts.push({ type: "text", text: `Description: ${batchDescription}` });
     contentParts.push({ type: "text", text: `Images Attached: ${dataUrls.length}` });
 
     if (dataUrls.length) {

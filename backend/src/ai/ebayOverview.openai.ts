@@ -152,7 +152,7 @@ Analyze the listing and produce *numeric scores* for the following categories ON
 
 - priceFairness (0–100) *compare to recent similar listings*
 - sellerTrust (0–100) *based on feedback score and number of ratings*
-- conditionHonesty (0–100) *does the description match images, and do they both match the stated condition*
+- conditionHonesty (0–100) *carefully weigh the description against the images and highlight any and all discrepancies; does the description match the images, and do they both match the stated condition*
 - shippingFairness (0–100) *is the shipping price reasonable for the item and location*
 - descriptionQuality (0–100) *is the description detailed, accurate, and well-written*
 
@@ -162,6 +162,7 @@ If the seller has excellent feedback (99%+) and many ratings (1000+), automatica
 
 If any field is missing/undefined, treat it as NEUTRAL (no deduction, no reward). Missing data should NEVER lower a score unless it's critical (e.g., description or seller ratings).
 ALWAYS INCLUDE A DESCRIPTION OF THE IMAGES IN THE OVERVIEW SECTION (unless none were provided).
+ALWAYS carefully weigh the description against the images and highlight any and all discrepancies between them.
 
 🎯 Output Format **MUST ALWAYS BE EXACTLY LIKE THIS**:
 
@@ -247,6 +248,7 @@ ALWAYS APPLY:
 - shippingFairness auto 100 if free; score 65 (neutral) if CALCULATED or unknown
 - Missing data = NEUTRAL (no deduction unless truly critical)
 - Describe images in the overview if provided
+- Carefully weigh the description against the images and highlight any and all discrepancies
 - DO NOT include numeric scores inside the overview text
 - DO NOT add extra JSON fields
 
@@ -270,7 +272,7 @@ Analyze ALL of them and return results as a JSON array.
 SCORING RULES (apply to every listing):
 - priceFairness (0–100): use PRODUCT CONTEXT price range and fairness guidance if provided; otherwise estimate from listing data and your knowledge
 - sellerTrust (0–100): based on feedback score and rating count; auto 100 if 99%+ feedback and 1000+ ratings
-- conditionHonesty (0–100): cross-reference stated condition against PRODUCT CONTEXT condition signals and images; does the description match what is shown
+- conditionHonesty (0–100): carefully weigh the description against the images and highlight any and all discrepancies; cross-reference stated condition against PRODUCT CONTEXT condition signals and images
 - shippingFairness (0–100): is shipping reasonable for the item; auto 100 if free; score 65 (neutral) if CALCULATED or unknown — never penalize calculated shipping
 - descriptionQuality (0–100): evaluate against PRODUCT CONTEXT description guidance if provided; otherwise judge on detail, accuracy, and completeness
 

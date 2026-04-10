@@ -8,27 +8,44 @@ import { getLocationFromIp, extractClientIp } from "../utils/geoIp";
 
 const router = Router();
 
-async function enrichMarketplaceImages(listing: any): Promise<any> {
+async function enrichMarketplaceListing(listing: any): Promise<any> {
   if (listing.source !== "marketplace" || !listing.id) return listing;
 
   const existingImages: string[] = Array.isArray(listing.images) ? listing.images : [];
-  if (existingImages.length >= 2) return listing; // already has multiple images
+  const hasDescription = typeof listing.description === "string" && listing.description.trim().length > 0;
+
+  console.warn(`[enrich] id=${listing.id} images=${existingImages.length} hasDescription=${hasDescription}`);
+
+  // Nothing to enrich
+  if (existingImages.length >= 2 && hasDescription) {
+    console.warn(`[enrich] skipping — already have images+description`);
+    return listing;
+  }
 
   try {
     const detailed = await getMarketplaceListingByGraphqlForAnalysis(listing.id);
     const detailImages: string[] = Array.isArray(detailed.images) ? detailed.images : [];
-    if (detailImages.length > existingImages.length) {
-      return { ...listing, images: detailImages };
+    const detailDescription = (detailed.fullDescription ?? detailed.description ?? "").trim() || undefined;
+
+    console.warn(`[enrich] detailed: images=${detailImages.length} description=${detailDescription ? JSON.stringify(detailDescription.slice(0, 80)) : "none"}`);
+
+    const patch: any = {};
+    if (detailImages.length > existingImages.length) patch.images = detailImages;
+    if (!hasDescription && detailDescription) {
+      patch.description = detailDescription;
+      patch.fullDescription = detailDescription;
     }
+
+    if (Object.keys(patch).length > 0) return { ...listing, ...patch };
   } catch (err) {
-    console.warn(`[analyze] Image enrichment failed for marketplace listing ${listing.id}:`, err);
+    console.warn(`[enrich] failed for ${listing.id}:`, err);
   }
 
   return listing;
 }
 
 async function scoreSingleListingWithContext(listing: any) {
-  const enriched = await enrichMarketplaceImages(listing);
+  const enriched = await enrichMarketplaceListing(listing);
 
   const title =
     typeof enriched?.title === "string" && enriched.title.trim()
@@ -121,8 +138,8 @@ router.post("/from-url", async (req, res) => {
 });
 
 // POST /api/search/context
-// Takes listings + query, groups by product, fetches Tavily context per group.
-// Returns groups with indices into the listings array and market context strings.
+// Takes listings + query, groups by product, and generates product-specific prompts per group.
+// Returns groups with indices into the listings array plus prompt and pricing metadata.
 router.post("/context", async (req, res) => {
   const { query, listings } = req.body;
   if (!query || typeof query !== "string") {
@@ -152,7 +169,8 @@ router.post("/batch-analyze", async (req, res) => {
   }
 
   try {
-    const scored = await scoreListings(listings, null, systemPrompt ?? null);
+    const enriched = await Promise.all(listings.map((l: any) => enrichMarketplaceListing(l)));
+    const scored = await scoreListings(enriched, null, systemPrompt ?? null);
     return res.json(scored);
   } catch (err: any) {
     console.error("batch-analyze error:", err);

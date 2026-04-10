@@ -26,31 +26,6 @@ const GRAPHQL_URL = "https://www.facebook.com/api/graphql/";
 const FB_DESKTOP_USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36";
 
-function getFbCookie() {
-  const cookieParts = [
-    process.env.FB_C_USER ? `c_user=${process.env.FB_C_USER}` : "",
-    process.env.FB_XS ? `xs=${decodeURIComponent(process.env.FB_XS)}` : "",
-    process.env.FB_DATR ? `datr=${process.env.FB_DATR}` : "",
-    process.env.FB_SB ? `sb=${process.env.FB_SB}` : "",
-  ].filter(Boolean);
-
-  return cookieParts.join("; ");
-}
-
-function getMarketplacePermalinkHeaders(cookie: string) {
-  return {
-    "user-agent": FB_DESKTOP_USER_AGENT,
-    "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-    "accept-language": "en-US,en;q=0.9",
-    "cache-control": "max-age=0",
-    "upgrade-insecure-requests": "1",
-    "sec-fetch-dest": "document",
-    "sec-fetch-mode": "navigate",
-    "sec-fetch-site": "none",
-    "sec-fetch-user": "?1",
-    ...(cookie ? { cookie } : {}),
-  };
-}
 
 const latLngCache = new Map<string, { lat: number; lng: number; expiresAt: number }>();
 
@@ -386,65 +361,68 @@ function extractPriceFromHtml(html: string): number {
 }
 
 function extractDescriptionFromHtml(html: string): string | undefined {
+  // Embedded Relay JSON blobs — same format on www, m, and mbasic
   const m = html.match(/"redacted_description"\s*:\s*\{\s*"text"\s*:\s*"([^"]+)"/);
   if (m) return m[1].replace(/\\n/g, "\n");
   const m2 = html.match(/"description"\s*:\s*\{\s*"text"\s*:\s*"([^"]+)"/);
   if (m2) return m2[1].replace(/\\n/g, "\n");
-  return undefined;
-}
 
-function collectMarketplaceProductDetails(node: any, hits: any[]) {
-  if (!node || typeof node !== "object") return;
+  // Simple string variant present in m.facebook.com JSON blobs
+  const m3 = html.match(/"listing_description"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+  if (m3) return m3[1].replace(/\\n/g, "\n").replace(/\\"/g, '"').replace(/\\u003C/gi, "<").replace(/\\u003E/gi, ">");
 
-  const details = node?.data?.viewer?.marketplace_product_details_page;
-  if (details) hits.push(details);
-
-  if (Array.isArray(node)) {
-    for (const item of node) collectMarketplaceProductDetails(item, hits);
-    return;
-  }
-
-  for (const value of Object.values(node)) {
-    collectMarketplaceProductDetails(value, hits);
-  }
-}
-
-function extractMarketplaceProductDetailPages(html: string): any[] {
-  const hits: any[] = [];
-  const scriptPattern = /<script type="application\/json"[^>]*data-sjs[^>]*>([\s\S]*?)<\/script>/g;
-
-  for (const match of html.matchAll(scriptPattern)) {
-    const scriptText = match[1];
-    if (!scriptText) continue;
-
-    try {
-      collectMarketplaceProductDetails(JSON.parse(scriptText), hits);
-    } catch {
-      // Ignore unrelated bootstrap blobs that are not valid standalone JSON.
+  // og:description / name=description — two-step: find the <meta> tag first,
+  // then pull content= from it, so other attributes in between don't break the match
+  for (const tagPattern of [
+    /<meta[^>]*property="og:description"[^>]*>/i,
+    /<meta[^>]*name="description"[^>]*>/i,
+  ]) {
+    const tagMatch = html.match(tagPattern);
+    if (tagMatch) {
+      const contentMatch = tagMatch[0].match(/content="([^"]+)"/i);
+      if (contentMatch) {
+        return contentMatch[1]
+          .replace(/&amp;/g, "&")
+          .replace(/&#039;/g, "'")
+          .replace(/&quot;/g, '"')
+          .replace(/&lt;/g, "<")
+          .replace(/&gt;/g, ">")
+          .trim();
+      }
     }
   }
 
-  return hits;
+  return undefined;
 }
 
-function getMarketplacePayloadId(payload: any): string | null {
-  const id = payload?.target?.id ?? payload?.marketplace_listing_renderable_target?.id;
-  return typeof id === "string" && id.trim() ? id.trim() : null;
+async function fetchDescriptionFromMobileHtml(listingId: string): Promise<string | undefined> {
+  try {
+    const res = await fetchWithTimeout(`https://m.facebook.com/marketplace/item/${listingId}/`, {
+      method: "GET",
+      headers: {
+        "user-agent": "Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.91 Mobile Safari/537.36",
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "accept-language": "en-US,en;q=0.9",
+      },
+      ...(proxyUrls.length ? { agent: getProxyAgent() } : {}),
+    });
+
+    console.warn(`[marketplace:mobileHtml] ${listingId} → HTTP ${res.status}, url=${res.url}`);
+
+    if (res.status !== 200) return undefined;
+
+    const html = await res.text();
+    console.warn(`[marketplace:mobileHtml] html length=${html.length}, preview=${html.slice(0, 300).replace(/\n/g, " ")}`);
+
+    const desc = extractDescriptionFromHtml(html);
+    console.warn(`[marketplace:mobileHtml] extracted description=${desc ? JSON.stringify(desc.slice(0, 120)) : "null"}`);
+    return desc;
+  } catch (err) {
+    console.warn(`[marketplace:mobileHtml] fetch error for ${listingId}:`, err);
+    return undefined;
+  }
 }
 
-function pickMarketplaceProductDetailPages(listingId: string, payloads: any[]) {
-  const matching = payloads.filter((payload) => getMarketplacePayloadId(payload) === listingId);
-
-  const details =
-    matching.find((payload) => typeof payload?.target?.marketplace_listing_title === "string") ??
-    null;
-
-  const media =
-    matching.find((payload) => Array.isArray(payload?.target?.listing_photos)) ??
-    null;
-
-  return { details, media };
-}
 
 function parseMarketplacePrice(value: any, formattedText?: string): number | null {
   // Explicit 0 means "Accepts Offers" on Facebook Marketplace — preserve it.
@@ -498,91 +476,6 @@ function formatMarketplaceLocation(target: any): string | undefined {
   return parts.length ? parts.join(", ") : undefined;
 }
 
-function collectExternalMarkLinkUrls(node: unknown, urls: string[], depth = 0, visited = new Set<unknown>()): void {
-  if (depth > 12 || !node || typeof node !== "object" || visited.has(node)) return;
-  visited.add(node);
-
-  if (!Array.isArray(node)) {
-    const obj = node as Record<string, unknown>;
-    if (obj.__typename === "ExternalMarkLink" && typeof obj.url === "string") {
-      urls.push(obj.url);
-      return; // no need to recurse further into this node
-    }
-    for (const value of Object.values(obj)) {
-      collectExternalMarkLinkUrls(value, urls, depth + 1, visited);
-    }
-  } else {
-    for (const item of node) {
-      collectExternalMarkLinkUrls(item, urls, depth + 1, visited);
-    }
-  }
-}
-
-function extractExternalMarkLinkUrlsFromHtml(html: string): string[] {
-  const urls: string[] = [];
-  const scriptPattern = /<script type="application\/json"[^>]*data-sjs[^>]*>([\s\S]*?)<\/script>/g;
-
-  for (const match of html.matchAll(scriptPattern)) {
-    try {
-      const parsed = JSON.parse(match[1]);
-      collectExternalMarkLinkUrls(parsed, urls);
-    } catch {}
-  }
-
-  return urls;
-}
-
-async function followFbRedirectForEbayId(redirectUrl: string): Promise<string | null> {
-  try {
-    const res = await fetch(redirectUrl, {
-      method: "GET",
-      redirect: "manual",
-      headers: { "user-agent": FB_DESKTOP_USER_AGENT },
-    });
-
-    const location = res.headers.get("location") ?? "";
-    const m = location.match(/ebay\.com\/itm\/(?:[^/?#]+\/)?(\d{8,})/);
-    return m ? m[1] : null;
-  } catch {
-    return null;
-  }
-}
-
-export async function getEbayCrossListingId(listingId: string): Promise<string | null> {
-  const cookie = getFbCookie();
-  if (!cookie) return null;
-
-  try {
-    const res = await fetchWithTimeout(`https://www.facebook.com/marketplace/item/${listingId}/`, {
-      method: "GET",
-      headers: getMarketplacePermalinkHeaders(cookie),
-      ...(proxyUrls.length ? { agent: getProxyAgent() } : {}),
-    });
-    if (res.status !== 200) return null;
-
-    const html = await res.text();
-
-    // First pass: look for a direct eBay item URL in the page
-    const directMatch = html.match(/ebay\.com(?:\/|\\\/|%2F)itm(?:\/|\\\/|%2F)(?:[^"' \\<\s]+(?:\/|\\\/|%2F))?(\d{8,})/);
-    if (directMatch) return directMatch[1];
-
-    // Second pass: find ExternalMarkLink objects (the "Buy now on eBay" CTA)
-    // and follow any Facebook redirect URLs to retrieve the eBay item ID
-    const externalUrls = extractExternalMarkLinkUrlsFromHtml(html);
-    for (const url of externalUrls) {
-      if (/facebook\.com(?:\/|\\\/|%2F)l(?:\/|\\\/|%2F)/.test(url)) {
-        const cleanUrl = url.replace(/\\\//g, "/");
-        const ebayId = await followFbRedirectForEbayId(cleanUrl);
-        if (ebayId) return ebayId;
-      }
-    }
-
-    return null;
-  } catch (err) {
-    console.warn(`[marketplace:crossListing] Failed to check eBay cross-listing for ${listingId}:`, err);
-    return null;
-  }
-}
 
 function extractMarketplaceCoordinates(source: any): { lat: number; lng: number } | null {
   const candidates = [
@@ -760,43 +653,21 @@ async function fetchMarketplaceListingByContainerQuery(listingId: string): Promi
   }
 }
 
-async function fetchMarketplaceListingByPermalinkHtml(listingId: string): Promise<Listing> {
-  const cookie = getFbCookie();
-  if (!cookie) {
-    throw new Error("Marketplace auth cookies are not configured.");
-  }
-
-  const res = await fetch(`https://www.facebook.com/marketplace/item/${listingId}/`, {
-    method: "GET",
-    headers: getMarketplacePermalinkHeaders(cookie),
-    ...(proxyUrls.length ? { agent: getProxyAgent() } : {}),
-  });
-
-  if (res.status !== 200) {
-    throw new Error(`Marketplace permalink fetch failed: HTTP ${res.status}`);
-  }
-
-  const html = await res.text();
-  const payloads = extractMarketplaceProductDetailPages(html);
-  const { details, media } = pickMarketplaceProductDetailPages(listingId, payloads);
-
-  if (!details?.target?.marketplace_listing_title) {
-    const pageTitle = extractTitleFromHtml(html) ?? "Unknown page";
-    throw new Error(`Marketplace listing unavailable or Facebook returned an unexpected page (${pageTitle}).`);
-  }
-
-  return buildMarketplaceListingFromProductDetails(listingId, details, media);
-}
-
 export async function getMarketplaceListingByGraphqlForAnalysis(listingId: string): Promise<Listing> {
   const result = await fetchMarketplaceListingByContainerQuery(listingId);
 
-  if (result) {
-    return buildMarketplaceListingFromProductDetails(listingId, result.details, result.media);
+  if (!result) {
+    throw new Error("Marketplace listing unavailable or could not be retrieved.");
   }
 
-  // Fall back to authenticated HTML permalink fetch
-  return fetchMarketplaceListingByPermalinkHtml(listingId);
+  const listing = buildMarketplaceListingFromProductDetails(listingId, result.details, result.media);
+
+  if (!listing.description) {
+    const desc = await fetchDescriptionFromMobileHtml(listingId);
+    if (desc) return { ...listing, description: desc, fullDescription: desc };
+  }
+
+  return listing;
 }
 
 export async function getMarketplaceListingBySearchForAnalysis(listingId: string): Promise<Listing> {

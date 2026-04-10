@@ -16,11 +16,14 @@ function buildMarketplaceDebugInfo(listing: any): string {
       ? listing.images.filter((u: any) => typeof u === "string" && u.trim())
       : [];
 
+  const description = (listing.fullDescription ?? listing.description ?? "").trim() || null;
+
   return JSON.stringify({
     title: listing.title ?? null,
     price: acceptsOffers ? "Accepts Offers" : listing.price,
     currency: listing.currency ?? "USD",
     location: listing.location ?? null,
+    description,
     delivery_types: listing.delivery_types ?? listing.raw?.delivery_types ?? null,
     is_live: listing.is_live ?? listing.raw?.is_live ?? null,
     is_pending: listing.is_pending ?? listing.raw?.is_pending ?? null,

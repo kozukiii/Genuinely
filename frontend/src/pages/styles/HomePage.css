@@ -33,7 +33,7 @@ body {
 #root {
   width: 100%;
   max-width: 100%;
-  overflow-x: clip; /* clip x only; doesn't create a scroll container unlike hidden */
+  overflow: clip hidden; /* clip x-axis without becoming a scroll container */
 }
 
 /* --- HOMEPAGE WRAPPER (scopes all homepage-only styling) --- */
@@ -1484,8 +1484,7 @@ h6 {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .idle-ticker-track,
-  .idle-shelf-track {
+  .idle-ticker-track {
     animation: none;
   }
 }

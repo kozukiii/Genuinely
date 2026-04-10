@@ -3,7 +3,7 @@ import path from "path";
 import type { Listing } from "../types/listing";
 import { searchEbayNormalized } from "./ebayService";
 import { scoreListings } from "./scoring/scoreListing";
-import { fetchMarketContext } from "../ai/priceContext";
+import { fetchMarketContext } from "../ai/listingContext";
 
 const CACHE_PATH = path.join(process.env.DATA_DIR ?? path.join(process.cwd(), "data"), "featured.json");
 const TTL_MS = 24 * 60 * 60 * 1000; // 24 hours

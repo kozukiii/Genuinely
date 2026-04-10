@@ -8,6 +8,21 @@ const client = new OpenAI({
   baseURL: "https://api.groq.com/openai/v1",
 });
 
+function sleep(ms: number) { return new Promise<void>((r) => setTimeout(r, ms)); }
+
+async function groqWithRetry<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (err: any) {
+    if (err?.status === 429) {
+      const retryAfterMs = (parseInt(err?.headers?.get?.("retry-after") ?? "2", 10) + 1) * 1000;
+      await sleep(retryAfterMs);
+      return fn(); // one retry
+    }
+    throw err;
+  }
+}
+
 
 function clean(v: any): string | undefined {
   if (v === undefined || v === null) return undefined;
@@ -384,7 +399,7 @@ async function _runEbayBatch(entries: BatchEntry[], context?: string | null, sys
 
   let rawResponse: string;
   try {
-    const response = await client.chat.completions.create({
+    const response = await groqWithRetry(() => client.chat.completions.create({
       model: "meta-llama/llama-4-scout-17b-16e-instruct",
       messages: [
         { role: "system", content: systemContent },
@@ -392,16 +407,22 @@ async function _runEbayBatch(entries: BatchEntry[], context?: string | null, sys
       ],
       max_tokens: Math.min(listings.length * 800, 5000),
       temperature: 0.2,
-    });
+    }));
     rawResponse = response.choices[0].message.content?.trim() ?? "[]";
   } catch (err) {
-    console.error("eBay batch API call failed, falling back to individual calls:", err);
-    return Promise.all(listings.map((l) => analyzeListingWithImages(l, context)));
+    console.error("eBay batch API call failed, falling back to sequential individual calls:", err);
+    const results: string[] = [];
+    for (const l of listings) {
+      results.push(await analyzeListingWithImages(l, context).catch(() => "No analysis.\nDEBUG INFO:\n(individual fallback failed)"));
+    }
+    return results;
   }
 
   try {
-    const cleaned = rawResponse.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
-    const parsed = JSON.parse(cleaned);
+    const start = rawResponse.indexOf("[");
+    const end = rawResponse.lastIndexOf("]");
+    if (start === -1 || end === -1 || end < start) throw new Error("No JSON array found in response");
+    const parsed = JSON.parse(rawResponse.slice(start, end + 1));
     if (!Array.isArray(parsed)) throw new Error("Response was not a JSON array");
 
     return listings.map((_, i) => {
@@ -411,8 +432,12 @@ async function _runEbayBatch(entries: BatchEntry[], context?: string | null, sys
       return `${jsonStr}\nDEBUG INFO:\n(batched with ${listings.length} items)`;
     });
   } catch (err) {
-    console.error("eBay batch response parse failed, falling back to individual calls:", err);
-    return Promise.all(listings.map((l) => analyzeListingWithImages(l, context)));
+    console.error("eBay batch response parse failed, falling back to sequential individual calls:", err);
+    const results: string[] = [];
+    for (const l of listings) {
+      results.push(await analyzeListingWithImages(l, context).catch(() => "No analysis.\nDEBUG INFO:\n(individual fallback failed)"));
+    }
+    return results;
   }
 }
 

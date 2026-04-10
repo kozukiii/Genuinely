@@ -4,7 +4,7 @@ import type { Listing } from "../types/listing";
 import { searchEbayNormalized } from "../services/ebayService";
 import { searchMarketplaceNormalized } from "../services/marketplaceService";
 import { scoreListings } from "../services/scoring/scoreListing";
-import { fetchMarketContext } from "../ai/priceContext";
+import { fetchMarketContext } from "../ai/listingContext";
 import { getLocationFromIp, extractClientIp, getMarketplaceSearchLocation } from "../utils/geoIp";
 
 function clampInt(n: number, min: number, max: number) {

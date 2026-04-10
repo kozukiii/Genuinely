@@ -1,10 +1,12 @@
 import OpenAI from "openai";
+import fetch from "node-fetch";
 import dotenv from "dotenv";
-import { fetchMarketContext } from "./priceContext";
 
 dotenv.config({ quiet: true });
 
-const client = new OpenAI({
+// ─── Groq client (8b-instant — prompt engineering only, separate TPM bucket) ──
+
+const groq = new OpenAI({
   apiKey: process.env.GROQ_API_KEY!,
   baseURL: "https://api.groq.com/openai/v1",
 });
@@ -15,125 +17,275 @@ export interface ProductGroup {
   canonicalName: string;
   specificity: "specific" | "broad" | "outlier";
   indices: number[];
-  systemPrompt: string | null; // fully generated product-expert system prompt
+  systemPrompt: string | null;
   priceLow: number | null;
   priceHigh: number | null;
 }
 
 interface RawGroup {
   canonicalName: string;
-  specificity: "specific" | "broad" | "outlier";
   indices: number[];
-  tavilyQuery: string;
+  serperQuery: string;
 }
 
-// ─── Step 1: grouping prompt ──────────────────────────────────────────────────
+// ─── Serper ───────────────────────────────────────────────────────────────────
 
-const GROUPING_SYSTEM_PROMPT = `
+const SERPER_URL = "https://google.serper.dev/search";
+const SERPER_TIMEOUT_MS = 6000;
+
+async function serperSearch(apiKey: string, query: string, num: number): Promise<any | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SERPER_TIMEOUT_MS);
+  try {
+    const res = await fetch(SERPER_URL, {
+      method: "POST",
+      headers: { "X-API-KEY": apiKey, "Content-Type": "application/json" },
+      body: JSON.stringify({ q: query, num }),
+      signal: controller.signal as any,
+    });
+    if (!res.ok) {
+      console.error(`[listingContext] Serper HTTP ${res.status} for: ${query}`);
+      return null;
+    }
+    return await res.json();
+  } catch (err: any) {
+    if (err?.name === "AbortError") console.warn(`[listingContext] Serper timed out: ${query}`);
+    else console.error("[listingContext] Serper fetch error:", err);
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function extractOrganic(json: any, limit: number): string[] {
+  return (json?.organic ?? [])
+    .slice(0, limit)
+    .map((r: any) => [r?.title ? `[${r.title}]` : "", r?.snippet ?? ""].filter(Boolean).join(" "))
+    .filter(Boolean);
+}
+
+/**
+ * Two parallel Serper searches for a specific product query:
+ * one for resale pricing, one for condition/inspection/buying-guide signals.
+ * Used by fetchMarketContext (legacy callers) and per-group context generation.
+ */
+export async function fetchMarketContext(query: string): Promise<string | null> {
+  const apiKey = process.env.SERPER_API_KEY;
+  if (!apiKey) {
+    console.warn("[listingContext] SERPER_API_KEY not set — skipping market context");
+    return null;
+  }
+
+  const [priceJson, inspectJson] = await Promise.all([
+    serperSearch(apiKey, `${query} used resale price sold 2025 2026`, 8),
+    serperSearch(apiKey, `${query} used buying guide inspect condition accessories what to look for`, 8),
+  ]);
+
+  const parts: string[] = [];
+
+  if (priceJson) {
+    const ab = priceJson?.answerBox;
+    if (ab?.answer) parts.push(`Price summary: ${ab.answer}`);
+    else if (ab?.snippet) parts.push(`Price summary: ${ab.snippet}`);
+    if (priceJson?.knowledgeGraph?.description) parts.push(`Product overview: ${priceJson.knowledgeGraph.description}`);
+    const rows = extractOrganic(priceJson, 8);
+    if (rows.length) parts.push(`Pricing data:\n${rows.map((s, i) => `${i + 1}. ${s}`).join("\n")}`);
+  }
+
+  if (inspectJson) {
+    const ab = inspectJson?.answerBox;
+    if (ab?.answer || ab?.snippet) parts.push(`Buying guide summary: ${ab.answer ?? ab.snippet}`);
+    const rows = extractOrganic(inspectJson, 8);
+    if (rows.length) parts.push(`Condition & inspection data:\n${rows.map((s, i) => `${i + 1}. ${s}`).join("\n")}`);
+  }
+
+  return parts.length > 0 ? parts.join("\n\n") : null;
+}
+
+// ─── Step 1: Group listings by identical product (8b-instant) ─────────────────
+
+const GROUPING_SYSTEM = `
 You are a product classification specialist for a secondhand marketplace search tool.
 
-TASK:
-Given a list of listing titles from a search query, group them by exact product.
-Generate a targeted web search query per group to find current used market pricing.
+Given a list of listing titles from a search query, group them by EXACT product — same brand, same model, same variant/spec. Each group gets a targeted Serper search query for used pricing.
 
 GROUPING RULES:
 - Only group listings you are CERTAIN are the exact same product — same brand, same model, same variant.
-- When in doubt, give each listing its own group. Never merge items speculatively.
+- When in doubt, give each listing its own group. Never merge speculatively.
 - Different storage tiers are different products (128GB ≠ 256GB).
-- Different loft or shaft specs are different products (9° driver ≠ 10.5° driver).
-- Different club types are always different products (driver ≠ 3 wood, even same series).
+- Different specs are different products (9° driver ≠ 10.5° driver, RTX 4080 ≠ RTX 4090).
 - Different generations are different products (iPhone 14 ≠ iPhone 15).
-- A listing missing key specs (e.g. no storage size, no loft) cannot be grouped with one that has them — treat it as its own group.
-- Canonical name must be as specific as the listing allows (e.g. "Ping G440 Max Driver 9°", "iPhone 14 Pro 256GB Space Black").
-- Classify each group:
-  - "specific" — exact brand + model + variant is clear (e.g. "Ping G440 Max Driver 10.5°", "iPhone 14 Pro 256GB")
-  - "broad"    — product type is clear but key specs are missing or ambiguous (e.g. "golf driver", "used iPhone")
-  - "outlier"  — vague, junk, unrelated, or impossible to classify
-- Max 8 groups — any excess listings beyond 8 groups go into "outlier".
+- A listing missing a key spec cannot be grouped with one that has it — treat it as its own group.
+- Max 10 groups. If there are more distinct products than 10, consolidate the least specific ones.
+- Canonical name must be as specific as the listing allows (e.g. "Ping G440 Max Driver 10.5°", "iPhone 14 Pro 256GB Space Black").
 
-TAVILY QUERY RULES:
-- Make each tavilyQuery exact and specific to the product and variant
-- Always include pricing intent (e.g. "used resale price 2025")
-- Do NOT use vague phrases like "secondhand item" or "marketplace listing"
+SERPER QUERY RULES:
+- Each serperQuery must be highly targeted for used resale pricing of that exact product.
+- Include brand, model, and key variant info (storage size, loft, generation, etc.).
+- Do NOT use vague phrases — be as specific as the canonicalName.
+- Example: "Callaway Ai Smoke Max Driver 9 degree used price" not "golf driver used price"
 
-OUTPUT FORMAT — return ONLY a JSON array (no markdown, no backticks):
+Return ONLY a JSON array (no markdown, no backticks, no extra text):
 [
   {
-    "canonicalName": "Ping G440 Max Driver 10.5°",
-    "specificity": "specific",
+    "canonicalName": "exact product name with key specs",
     "indices": [0, 3],
-    "tavilyQuery": "Ping G440 Max Driver 10.5 degree used resale price 2025"
+    "serperQuery": "targeted used resale price search query"
   }
 ]
 `.trim();
 
-// ─── Step 3: prompt generation ────────────────────────────────────────────────
+async function groupListings(titles: string[], query: string): Promise<RawGroup[]> {
+  if (titles.length === 0) return [];
 
-const PROMPT_GENERATION_SYSTEM = `
-You are a product expert writing a scoring brief for an AI analyst evaluating secondhand marketplace listings.
+  try {
+    const titlesBlock = titles.map((t, i) => `${i}. ${t}`).join("\n");
+    const response = await groq.chat.completions.create({
+      model: "llama-3.1-8b-instant",
+      messages: [
+        { role: "system", content: GROUPING_SYSTEM },
+        { role: "user", content: `Search query: "${query}"\n\nListing titles:\n${titlesBlock}` },
+      ],
+      max_tokens: 1200,
+      temperature: 0.1,
+    });
 
-You will be given a product name and live market data from a web search.
-Write a system prompt that turns the analyst into a genuine domain expert on that exact product.
+    const raw = (response.choices[0].message.content ?? "").trim();
+    const start = raw.indexOf("[");
+    const end = raw.lastIndexOf("]");
+    if (start === -1 || end === -1) throw new Error("No JSON array in grouping response");
 
-THE PROMPT MUST:
-1. Open with: "You are an expert on [exact product name and any key variants]."
-2. State the current used market value range — anchor to the market data, or your own knowledge if data is sparse
-3. Name 3–5 specific physical inspection points — real failure modes, known wear locations, damage patterns for this exact product
-4. Name 2–3 accessories or extras that affect resale value (headcovers, original box, cables, cases, etc.) and note impact if missing
-5. Name 2–4 red flags: seller misrepresentations, hidden defects, or scam signals specific to this product
-6. Close with per-score guidance in exactly this structure (no headers, inline):
-   PRICE FAIRNESS: [how to anchor the score to the stated market range — any listing priced at the low end of or below the typical used market range must score at minimum 80, scaling upward the further below market it is; listings at or above market price should be scored strictly on value relative to condition and included extras]
-   CONDITION HONESTY: [what images and title must show to trust the stated condition]
-   DESCRIPTION QUALITY: [what a complete, honest listing for this product includes]
+    const parsed = JSON.parse(raw.slice(start, end + 1));
+    if (!Array.isArray(parsed) || parsed.length === 0) throw new Error("Empty groups array");
 
-RULES:
-- Be specific to this exact product — use real model names, real known defects, real pricing
-- Write in second person ("You are an expert…", "Watch for…", "Check whether…")
-- Do NOT use generic language like "similar items", "this category", or "this type of product"
-- If market data is sparse, draw on your own product knowledge — do not say "data unavailable"
-- Return ONLY valid JSON (no markdown, no backticks) in exactly this shape:
-  { "priceLow": <number>, "priceHigh": <number>, "systemPrompt": "<the full prompt text>" }
-- priceLow and priceHigh must be integers in USD representing the typical used market range
-`.trim();
-
-// ─── JSON sanitizer ───────────────────────────────────────────────────────────
-// LLMs often embed literal newlines/tabs inside JSON string values, which is
-// invalid JSON. This finds every "..." region and escapes bare control chars.
-function sanitizeJsonStrings(raw: string): string {
-  return raw.replace(/"(?:[^"\\]|\\.)*"/gs, (match) =>
-    match
-      .replace(/\t/g, "\\t")
-      .replace(/\n/g, "\\n")
-      .replace(/\r/g, "\\r")
-      .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, (c) =>
-        `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`
-      )
-  );
+    return parsed
+      .filter((g: any) => typeof g.canonicalName === "string" && Array.isArray(g.indices) && typeof g.serperQuery === "string")
+      .map((g: any): RawGroup => ({
+        canonicalName: g.canonicalName,
+        indices: (g.indices as any[]).filter((i) => typeof i === "number"),
+        serperQuery: g.serperQuery,
+      }));
+  } catch (err) {
+    console.error("[listingContext] Grouping failed, falling back to single group:", err);
+    return [{ canonicalName: query, indices: titles.map((_, i) => i), serperQuery: `${query} used resale price` }];
+  }
 }
 
-function parsePromptJson(raw: string): { priceLow: number | null; priceHigh: number | null; systemPrompt: string | null } {
-  // Strip markdown fences if present
-  const stripped = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+// ─── Step 2+3: Serper + 8b prompt engineering per group ──────────────────────
 
-  for (const attempt of [stripped, sanitizeJsonStrings(stripped)]) {
-    try {
-      const parsed = JSON.parse(attempt);
-      return {
-        priceLow:     typeof parsed.priceLow     === "number" ? parsed.priceLow     : null,
-        priceHigh:    typeof parsed.priceHigh    === "number" ? parsed.priceHigh    : null,
-        systemPrompt: typeof parsed.systemPrompt === "string" ? parsed.systemPrompt : null,
-      };
-    } catch {}
+const PROMPT_ENGINEER_SYSTEM = `
+You are a product research specialist. Your job is to read raw Google search results about a secondhand product and write a detailed, expert system prompt that turns an AI scoring model into a genuine domain expert on that exact product.
+
+The AI you are writing for receives secondhand marketplace listings (title, price, condition, images, description) and scores them across five categories: priceFairness, conditionHonesty, descriptionQuality, sellerTrust, and shippingFairness.
+
+OUTPUT FORMAT — use exactly this structure, nothing else:
+
+PRICE_LOW: <integer USD, e.g. 450, or null>
+PRICE_HIGH: <integer USD, e.g. 700, or null>
+---
+<the full expert system prompt starts here>
+
+THE SYSTEM PROMPT (everything after ---) MUST CONTAIN ALL OF THESE IN ORDER:
+
+1. IDENTITY LINE
+   Open with: "You are an expert evaluating secondhand marketplace listings for: [full product name and key specs]."
+   Commit to the most specific product identity the data supports. Do not hedge.
+
+2. MARKET VALUE
+   State the used market price range: "Used [product] typically sells for $X–$Y."
+   Favour the most cited or most reputable sources (eBay sold, Swappa, PriceCharting, StockX, etc.).
+   If data is thin, use your own knowledge — never say "data unavailable".
+
+3. PHYSICAL INSPECTION POINTS (numbered list, 4–6 items)
+   Specific things a buyer must check for THIS exact product:
+   - Pokémon cards: corner whitening, edge whitening, holo scratches, print lines, bends, ink marks
+   - Golf drivers: crown scratches, face paint wear, shaft condition, ferrule, headcover present
+   - iPhones: screen burn-in, back glass cracks, Face ID function, battery health %, True Tone
+   - Sneakers: sole separation, midsole yellowing, toe box crease, lace condition, insole
+   - Electronics: screen condition, port wear, battery cycle count, physical dents/cracks
+   Use this level of specificity for whatever product this is.
+
+4. ACCESSORIES & COMPLETENESS (numbered list, 2–4 items)
+   What should be included and the value impact if missing:
+   - Golf club: headcover (−$20–40 if missing), shaft band/sticker
+   - Trading card: original sleeve if claimed NM/M, graded slab if claimed graded
+   - Electronics: original charger, box, cables, documentation
+
+5. RED FLAGS & SCAM SIGNALS (numbered list, 4–6 items)
+   Warning signs specific to this product:
+   - Photo tricks used to hide damage (angled shots on driver crowns, low-res card photos)
+   - Common seller misrepresentations for this exact item
+   - Price-too-good-to-be-true thresholds for this product
+   - Known fakes/counterfeits if applicable (Pokémon cards, branded sneakers, electronics)
+   - Vague condition language sellers use to avoid accountability ("light use", "good condition")
+
+6. SCORING GUIDANCE (inline, no sub-headers)
+   PRICE FAIRNESS: [anchor to the market range — at or below the low end = minimum 80, scale up further below market; at or above high end = penalise based on condition and extras]
+   CONDITION HONESTY: [what images and title must show for this product — reference the inspection points above; penalise blurry/angled shots that hide known wear areas]
+   DESCRIPTION QUALITY: [what a complete honest listing for this exact product includes — model, variant, condition details, accessory list, disclosed defects]
+   SELLER TRUST: [how to apply the red flags above; what raises vs lowers trust for this product]
+   SHIPPING FAIRNESS: [judge shipping cost given this product's size, weight, and fragility]
+
+RULES:
+- Every section must be specific to this exact product — never say "similar items", "this category", or "this type of product"
+- Write in second person to the scoring AI: "You are an expert...", "Watch for...", "Check whether..."
+- Be direct and confident. Do not hedge excessively.
+- Draw on your own product knowledge where search data is thin
+- Everything after --- is plain prose and lists — no JSON, no markdown headers, no code blocks
+- PRICE_LOW and PRICE_HIGH are plain integers, e.g. 450, or the word null
+`.trim();
+
+function parseEngineeredOutput(raw: string): { systemPrompt: string | null; priceLow: number | null; priceHigh: number | null } {
+  const lines = raw.split("\n");
+  let priceLow: number | null = null;
+  let priceHigh: number | null = null;
+  let dividerIdx = -1;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (line.startsWith("PRICE_LOW:")) {
+      const v = parseInt(line.replace("PRICE_LOW:", "").trim(), 10);
+      priceLow = isNaN(v) ? null : v;
+    } else if (line.startsWith("PRICE_HIGH:")) {
+      const v = parseInt(line.replace("PRICE_HIGH:", "").trim(), 10);
+      priceHigh = isNaN(v) ? null : v;
+    } else if (line === "---") {
+      dividerIdx = i;
+      break;
+    }
   }
 
-  // Last resort: pull numbers out with regex (systemPrompt lost, but prices survive)
-  const low  = stripped.match(/"priceLow"\s*:\s*(\d+)/)?.[1];
-  const high = stripped.match(/"priceHigh"\s*:\s*(\d+)/)?.[1];
-  return {
-    priceLow:     low  ? parseInt(low,  10) : null,
-    priceHigh:    high ? parseInt(high, 10) : null,
-    systemPrompt: null,
-  };
+  const systemPrompt = dividerIdx >= 0
+    ? lines.slice(dividerIdx + 1).join("\n").trim() || null
+    : null;
+
+  if (!systemPrompt) {
+    console.error("[listingContext] No system prompt found after ---. Raw output snippet:\n", raw.slice(0, 400));
+  }
+
+  return { systemPrompt, priceLow, priceHigh };
+}
+
+async function engineerPrompt(
+  canonicalName: string,
+  marketData: string,
+): Promise<{ systemPrompt: string | null; priceLow: number | null; priceHigh: number | null }> {
+  try {
+    const response = await groq.chat.completions.create({
+      model: "llama-3.1-8b-instant",
+      messages: [
+        { role: "system", content: PROMPT_ENGINEER_SYSTEM },
+        { role: "user", content: `Product: "${canonicalName}"\n\n${marketData}` },
+      ],
+      max_tokens: 2000,
+      temperature: 0.15,
+    });
+
+    return parseEngineeredOutput((response.choices[0].message.content ?? "").trim());
+  } catch (err) {
+    console.error(`[listingContext] Prompt engineering failed for "${canonicalName}":`, err);
+    return { systemPrompt: null, priceLow: null, priceHigh: null };
+  }
 }
 
 // ─── Main export ──────────────────────────────────────────────────────────────
@@ -144,97 +296,38 @@ export async function groupAndContextualize(
 ): Promise<ProductGroup[]> {
   if (titles.length === 0) return [];
 
-  // ── Step 1: group titles ──────────────────────────────────────────────────
-  let rawGroups: RawGroup[];
+  // Step 1: group by identical product (8b-instant, one call)
+  const rawGroups = await groupListings(titles, query);
 
-  try {
-    const titlesBlock = titles.map((t, i) => `${i}. ${t}`).join("\n");
-
-    const response = await client.chat.completions.create({
-      model: "meta-llama/llama-4-scout-17b-16e-instruct",
-      messages: [
-        { role: "system", content: GROUPING_SYSTEM_PROMPT },
-        {
-          role: "user",
-          content: `Search query: "${query}"\n\nListing titles:\n${titlesBlock}`,
-        },
-      ],
-      max_tokens: 1200,
-      temperature: 0.1,
-    });
-
-    const raw = (response.choices[0].message.content?.trim() ?? "[]")
-      .replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
-    const parsed = JSON.parse(sanitizeJsonStrings(raw));
-    if (!Array.isArray(parsed)) throw new Error("Expected JSON array");
-
-    rawGroups = parsed
-      .filter(
-        (g: any) =>
-          typeof g.canonicalName === "string" &&
-          Array.isArray(g.indices) &&
-          typeof g.tavilyQuery === "string",
-      )
-      .map((g: any): RawGroup => ({
-        canonicalName: g.canonicalName,
-        specificity: (["specific", "broad", "outlier"].includes(g.specificity)
-          ? g.specificity
-          : "broad") as RawGroup["specificity"],
-        indices: (g.indices as any[]).filter((i) => typeof i === "number"),
-        tavilyQuery: g.tavilyQuery,
-      }));
-
-    if (rawGroups.length === 0) throw new Error("No valid groups returned");
-  } catch (err) {
-    console.error("[listingContext] grouping LLM failed — falling back:", err);
-    rawGroups = [
-      {
-        canonicalName: query,
-        specificity: "broad",
-        indices: titles.map((_, i) => i),
-        tavilyQuery: `${query} used price resale 2025`,
-      },
-    ];
-  }
-
-  // ── Steps 2 + 3: Tavily then prompt generation, per group in parallel ─────
-  const withPrompts: ProductGroup[] = await Promise.all(
+  // Steps 2+3: per group — Serper ×2 then 8b engineers the expert prompt
+  // All groups run in parallel (Serper has no strict TPM, 8b has separate limits)
+  const groups = await Promise.all(
     rawGroups.map(async (group): Promise<ProductGroup> => {
-      if (group.specificity === "outlier") {
-        return { canonicalName: group.canonicalName, specificity: "outlier", indices: group.indices, systemPrompt: null, priceLow: null, priceHigh: null };
+      const marketData = await fetchMarketContext(group.serperQuery).catch(() => null);
+
+      if (!marketData) {
+        return {
+          canonicalName: group.canonicalName,
+          specificity: "specific",
+          indices: group.indices,
+          systemPrompt: null,
+          priceLow: null,
+          priceHigh: null,
+        };
       }
 
-      // Step 2: Tavily market data
-      const marketData = await fetchMarketContext(group.tavilyQuery).catch(() => null);
+      const { systemPrompt, priceLow, priceHigh } = await engineerPrompt(group.canonicalName, marketData);
 
-      // Step 3: context LLM writes the product-expert system prompt
-      try {
-        const userContent = [
-          `Product: ${group.canonicalName}`,
-          "",
-          "Market data from web search:",
-          marketData ?? "No market data returned — draw on your own product knowledge.",
-        ].join("\n");
-
-        const promptResponse = await client.chat.completions.create({
-          model: "meta-llama/llama-4-scout-17b-16e-instruct",
-          messages: [
-            { role: "system", content: PROMPT_GENERATION_SYSTEM },
-            { role: "user", content: userContent },
-          ],
-          max_tokens: 700,
-          temperature: 0.25,
-        });
-
-        const raw = promptResponse.choices[0].message.content?.trim() ?? "{}";
-        const { systemPrompt, priceLow, priceHigh } = parsePromptJson(raw);
-        return { canonicalName: group.canonicalName, specificity: group.specificity, indices: group.indices, systemPrompt, priceLow, priceHigh };
-      } catch (err) {
-        console.error(`[listingContext] prompt generation failed for "${group.canonicalName}":`, err);
-        return { canonicalName: group.canonicalName, specificity: group.specificity, indices: group.indices, systemPrompt: null, priceLow: null, priceHigh: null };
-      }
+      return {
+        canonicalName: group.canonicalName,
+        specificity: "specific",
+        indices: group.indices,
+        systemPrompt,
+        priceLow,
+        priceHigh,
+      };
     }),
   );
 
-  return withPrompts;
+  return groups;
 }

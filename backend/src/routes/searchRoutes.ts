@@ -3,26 +3,47 @@ import { searchAll } from "../controllers/searchController";
 import { scoreListings } from "../services/scoring/scoreListing";
 import { groupAndContextualize } from "../ai/listingContext";
 import { getEbayItemByNumericId } from "../services/ebayService";
-import { getMarketplaceListingBySearchForAnalysis } from "../services/marketplaceService";
+import { getMarketplaceListingByGraphqlForAnalysis, getMarketplaceListingBySearchForAnalysis } from "../services/marketplaceService";
 import { getLocationFromIp, extractClientIp } from "../utils/geoIp";
 
 const router = Router();
 
+async function enrichMarketplaceImages(listing: any): Promise<any> {
+  if (listing.source !== "marketplace" || !listing.id) return listing;
+
+  const existingImages: string[] = Array.isArray(listing.images) ? listing.images : [];
+  if (existingImages.length >= 2) return listing; // already has multiple images
+
+  try {
+    const detailed = await getMarketplaceListingByGraphqlForAnalysis(listing.id);
+    const detailImages: string[] = Array.isArray(detailed.images) ? detailed.images : [];
+    if (detailImages.length > existingImages.length) {
+      return { ...listing, images: detailImages };
+    }
+  } catch (err) {
+    console.warn(`[analyze] Image enrichment failed for marketplace listing ${listing.id}:`, err);
+  }
+
+  return listing;
+}
+
 async function scoreSingleListingWithContext(listing: any) {
+  const enriched = await enrichMarketplaceImages(listing);
+
   const title =
-    typeof listing?.title === "string" && listing.title.trim()
-      ? listing.title.trim()
+    typeof enriched?.title === "string" && enriched.title.trim()
+      ? enriched.title.trim()
       : null;
 
   if (!title) {
-    const [result] = await scoreListings([listing], null);
+    const [result] = await scoreListings([enriched], null);
     return result;
   }
 
   const groups = await groupAndContextualize([title], title);
   const group = groups[0] ?? null;
 
-  const [result] = await scoreListings([listing], null, group?.systemPrompt ?? null);
+  const [result] = await scoreListings([enriched], null, group?.systemPrompt ?? null);
 
   return {
     ...result,

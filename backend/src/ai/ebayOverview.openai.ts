@@ -10,17 +10,39 @@ const client = new OpenAI({
 
 function sleep(ms: number) { return new Promise<void>((r) => setTimeout(r, ms)); }
 
+const RATE_LIMIT_COOLDOWN_MS = 3000;
+const MAX_RETRIES = 10;
+
+// Shared cooldown: all concurrent callers join the same wait instead of each spinning independently
+let rateLimitResetPromise: Promise<void> | null = null;
+
 async function groqWithRetry<T>(fn: () => Promise<T>): Promise<T> {
-  try {
-    return await fn();
-  } catch (err: any) {
-    if (err?.status === 429) {
-      const retryAfterMs = (parseInt(err?.headers?.get?.("retry-after") ?? "2", 10) + 1) * 1000;
-      await sleep(retryAfterMs);
-      return fn(); // one retry
+  let lastErr: any;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    // If another call is already cooling down, join that wait before trying
+    if (rateLimitResetPromise) await rateLimitResetPromise;
+
+    try {
+      return await fn();
+    } catch (err: any) {
+      lastErr = err;
+      if (err?.status === 429) {
+        if (!rateLimitResetPromise) {
+          // First failure — own the cooldown
+          const retryAfterMs = parseInt(err?.headers?.get?.("retry-after") ?? "0", 10) * 1000;
+          const waitMs = Math.max(retryAfterMs, RATE_LIMIT_COOLDOWN_MS);
+          console.warn(`[groq] 429 rate limit (attempt ${attempt + 1}/${MAX_RETRIES}), cooling down ${waitMs}ms`);
+          rateLimitResetPromise = sleep(waitMs).finally(() => { rateLimitResetPromise = null; });
+        } else {
+          console.warn(`[groq] 429 rate limit (attempt ${attempt + 1}/${MAX_RETRIES}), joining existing cooldown`);
+        }
+        await rateLimitResetPromise;
+        continue;
+      }
+      throw err;
     }
-    throw err;
   }
+  throw lastErr;
 }
 
 
@@ -165,16 +187,18 @@ ALWAYS INCLUDE A DESCRIPTION OF THE IMAGES IN THE OVERVIEW SECTION (unless none 
 ALWAYS carefully weigh the description against the images and highlight any and all discrepancies between them.
 
 CONDITION HONESTY RULES:
-- Scrutinize images closely for scratches, dents, scuffs, discoloration, missing parts, or any visible damage
-- When condition is "New", "Like New", or "Open Box" AND wear of any kind is present:
+- Scrutinize images closely for scratches, dents, scuffs, discoloration, missing parts, or any visible damage to the ITEM ITSELF
+- When condition is "New", "Like New", or "Open Box" AND wear to the actual item is present:
   - The conditionHonesty score MUST be 50 or below — no exceptions
-  - Wear on multiple areas (e.g. crown AND face) = 35 or below
+  - Wear on multiple areas = 35 or below
   - Do NOT use phrases like "no major damage", "minor wear", "some wear", "light scratches", or any other qualifier that softens the finding — these phrases are red flags that you are about to score too high
-  - SELF-CHECK: if your overview contains any word from this list — wear, scratch, scuff, dent, damage, mark, discoloration — AND condition is "New" or "Like New", your conditionHonesty score MUST be 50 or below
+  - SELF-CHECK: if your overview mentions wear/scratch/scuff/dent/damage/mark/discoloration ON THE ITEM ITSELF AND condition is "New" or "Like New", your conditionHonesty score MUST be 50 or below
+- EXCEPTION — PACKAGING DAMAGE: box or packaging damage on an otherwise sealed/new item is NOT item wear. When a seller proactively discloses minor box or packaging damage on a new item, treat this as honest disclosure — do NOT penalize conditionHonesty for it. The condition refers to the product, not the box.
+- EXCEPTION — STOCK/MANUFACTURER IMAGES: for brand-new factory-sealed items, using official product or manufacturer images is completely normal and expected. Do NOT treat this as a discrepancy or flag it as suspicious. Only penalize if images show the actual item with visible damage that contradicts the stated condition.
 - EXCEPTION — GRADED ITEMS: if the item is professionally graded (PSA, BGS, CGC, SGC, etc.), the grade IS the certified condition; do NOT apply the like-new wear rules — instead evaluate whether the grade label is visible, legible, and consistent with the images
-- Do NOT reward the description for acknowledging defects — acknowledgement confirms the gap; score the gap, not the admission
+- Do NOT penalize honest sellers who proactively note minor cosmetic issues — note it in the overview but do not let it drive the score down as if it were undisclosed damage
 - Use PRODUCT CONTEXT condition signals and red flags as a checklist for what to look for in images
-- Call out all defects explicitly in the overview — do not soften, excuse, or offset them with positives
+- Call out all defects to the item explicitly in the overview — do not soften, excuse, or offset them with positives
 - Multiple images showing different angles of the same item (front, back, sides, slab label) are completely normal — do NOT flag this as suspicious or as evidence of a different item
 
 OVERVIEW TONE RULES:
@@ -268,7 +292,9 @@ ALWAYS APPLY:
 - Missing data = NEUTRAL (no deduction unless truly critical)
 - Describe images in the overview if provided
 - Carefully weigh the description against the images and highlight any and all discrepancies
-- Scrutinize images for scratches, dents, scuffs, or damage — when condition is "New", "Like New", or "Open Box" AND any wear is present: conditionHonesty MUST be 50 or below; multiple areas of wear = 35 or below; do NOT use "minor wear", "some wear", "no major damage"; SELF-CHECK: if overview mentions wear/scratch/damage AND condition is new/like-new, cap at 50
+- Scrutinize images for scratches, dents, scuffs, or damage to the ITEM ITSELF — when condition is "New", "Like New", or "Open Box" AND actual item wear is present: conditionHonesty MUST be 50 or below; multiple areas of wear = 35 or below; do NOT use "minor wear", "some wear", "no major damage"; SELF-CHECK: if overview mentions wear/scratch/damage ON THE ITEM and condition is new/like-new, cap at 50
+- EXCEPTION: box or packaging damage disclosed by the seller does NOT lower conditionHonesty — condition refers to the product, not the box; proactive seller disclosure is honest
+- EXCEPTION: official/manufacturer images for new factory-sealed items are normal — do not treat as a discrepancy
 - EXCEPTION: graded items (PSA, BGS, CGC, etc.) are exempt from the above wear rule — the grade IS the certified condition
 - Multiple images showing different angles of the same item (front, back, sides) are completely normal — do NOT treat this as suspicious
 - Do NOT use "scam", "suspicious", or "fraud" language based on any single signal — only raise concerns when multiple explicit red flags combine
@@ -295,7 +321,7 @@ Analyze ALL of them and return results as a JSON array.
 SCORING RULES (apply to every listing):
 - priceFairness (0–100): use PRODUCT CONTEXT price range and fairness guidance if provided; otherwise estimate from listing data and your knowledge
 - sellerTrust (0–100): based on feedback score and rating count; auto 100 if 99%+ feedback and 1000+ ratings
-- conditionHonesty (0–100): scrutinize images for scratches, dents, scuffs, discoloration, missing parts, or damage; when condition is "New", "Like New", or "Open Box" AND any wear is present: score MUST be 50 or below; multiple areas of wear = 35 or below; do NOT use "minor wear" / "no major damage"; SELF-CHECK: if overview mentions wear/scratch/damage AND condition is new/like-new, cap at 50; EXCEPTION: graded items (PSA, BGS, CGC, etc.) are exempt — the grade IS the certified condition
+- conditionHonesty (0–100): scrutinize images for scratches, dents, scuffs, discoloration, missing parts, or damage to the ITEM ITSELF; when condition is "New", "Like New", or "Open Box" AND actual item wear is present: score MUST be 50 or below; multiple areas of wear = 35 or below; do NOT use "minor wear" / "no major damage"; SELF-CHECK: if overview mentions wear/scratch/damage ON THE ITEM and condition is new/like-new, cap at 50; EXCEPTION: box or packaging damage disclosed by the seller does NOT penalize conditionHonesty — the condition is about the product not the box, and proactive disclosure is honest; EXCEPTION: official/manufacturer images are normal for new factory-sealed items — do not flag as a discrepancy; EXCEPTION: graded items (PSA, BGS, CGC, etc.) are exempt — the grade IS the certified condition
 - shippingFairness (0–100): is shipping reasonable for the item; auto 100 if free; score 65 (neutral) if CALCULATED or unknown — calculated shipping is NEVER a scam signal
 - descriptionQuality (0–100): evaluate against PRODUCT CONTEXT description guidance if provided; otherwise judge on detail, accuracy, and completeness
 

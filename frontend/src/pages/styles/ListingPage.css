@@ -414,6 +414,13 @@
   margin: 0;
 }
 
+.analyze-hint {
+  font-size: 0.72rem;
+  color: rgba(209, 213, 219, 0.38);
+  margin: 2px 0 0;
+  font-style: italic;
+}
+
 .analyze-error {
   font-size: 0.8rem;
   color: rgba(255, 120, 120, 0.85);

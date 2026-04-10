@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import "./styles/NavBar.css";
-import { getEbayNotice, onEbayNoticeChange } from "../utils/ebayNotice";
+import { getSavedListings } from "../utils/savedListings";
 
 function GenuinelyLogo() {
   return (
@@ -36,11 +36,12 @@ function GenuinelyLogo() {
 
 export default function NavBar() {
   const { pathname } = useLocation();
-  const [showEbayNotice, setShowEbayNotice] = useState(false);
+  const [savedCount, setSavedCount] = useState(() => getSavedListings().length);
 
   useEffect(() => {
-    setShowEbayNotice(getEbayNotice());
-    return onEbayNoticeChange(setShowEbayNotice);
+    const update = () => setSavedCount(getSavedListings().length);
+    window.addEventListener("saved:listings:changed", update);
+    return () => window.removeEventListener("saved:listings:changed", update);
   }, []);
 
   return (
@@ -62,16 +63,11 @@ export default function NavBar() {
             Search
           </Link>
           <Link to="/cart" className={pathname === "/cart" ? "nav-item active" : "nav-item"}>
-            Saved
+            Saved{savedCount > 0 && <span className="nav-saved-count">{savedCount}</span>}
           </Link>
         </div>
       </nav>
 
-      {showEbayNotice && (
-        <div className="nav-notice" role="status" aria-live="polite">
-          There is an issue with eBay searching right now. Marketplace fallback is active where possible. Message Zach @ admin.genuinely@gmail.com.
-        </div>
-      )}
     </header>
   );
 }

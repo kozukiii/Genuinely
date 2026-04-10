@@ -110,20 +110,6 @@ export default function FiltersSidebar({ filters, onChange, onSortChange, mobile
             </div>
           </div>
 
-          {/* Condition */}
-          <div className="filter-group">
-            <label className="filter-label">Condition</label>
-            <select
-              className="filter-select"
-              value={draft.condition}
-              onChange={(e) => setDraftField("condition", e.target.value)}
-            >
-              <option value="any">Any</option>
-              <option value="new">New</option>
-              <option value="used">Used</option>
-            </select>
-          </div>
-
           {/* Sources */}
           <div className="filter-group">
             <label className="filter-label">Sources</label>

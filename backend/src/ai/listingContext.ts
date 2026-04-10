@@ -32,29 +32,60 @@ interface RawGroup {
 
 const SERPER_URL = "https://google.serper.dev/search";
 const SERPER_TIMEOUT_MS = 6000;
+const SERPER_COOLDOWN_MS = 3000;
+const SERPER_MAX_RETRIES = 10;
+
+function sleep(ms: number) { return new Promise<void>((r) => setTimeout(r, ms)); }
+
+let serperRateLimitResetPromise: Promise<void> | null = null;
 
 async function serperSearch(apiKey: string, query: string, num: number): Promise<any | null> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), SERPER_TIMEOUT_MS);
-  try {
-    const res = await fetch(SERPER_URL, {
-      method: "POST",
-      headers: { "X-API-KEY": apiKey, "Content-Type": "application/json" },
-      body: JSON.stringify({ q: query, num }),
-      signal: controller.signal as any,
-    });
-    if (!res.ok) {
-      console.error(`[listingContext] Serper HTTP ${res.status} for: ${query}`);
+  for (let attempt = 0; attempt <= SERPER_MAX_RETRIES; attempt++) {
+    if (serperRateLimitResetPromise) await serperRateLimitResetPromise;
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), SERPER_TIMEOUT_MS);
+
+    try {
+      const res = await fetch(SERPER_URL, {
+        method: "POST",
+        headers: { "X-API-KEY": apiKey, "Content-Type": "application/json" },
+        body: JSON.stringify({ q: query, num }),
+        signal: controller.signal as any,
+      });
+
+      if (res.status === 429) {
+        if (!serperRateLimitResetPromise) {
+          const retryAfterMs = parseInt(res.headers.get("retry-after") ?? "0", 10) * 1000;
+          const waitMs = Math.max(retryAfterMs, SERPER_COOLDOWN_MS);
+          console.warn(`[serper] 429 rate limit (attempt ${attempt + 1}/${SERPER_MAX_RETRIES}), cooling down ${waitMs}ms`);
+          serperRateLimitResetPromise = sleep(waitMs).finally(() => { serperRateLimitResetPromise = null; });
+        } else {
+          console.warn(`[serper] 429 rate limit (attempt ${attempt + 1}/${SERPER_MAX_RETRIES}), joining existing cooldown`);
+        }
+        await serperRateLimitResetPromise;
+        continue;
+      }
+
+      if (!res.ok) {
+        console.error(`[listingContext] Serper HTTP ${res.status} for: ${query}`);
+        return null;
+      }
+
+      return await res.json();
+    } catch (err: any) {
+      if (err?.name === "AbortError") {
+        console.warn(`[listingContext] Serper timed out: ${query}`);
+        return null;
+      }
+      console.error("[listingContext] Serper fetch error:", err);
       return null;
+    } finally {
+      clearTimeout(timer);
     }
-    return await res.json();
-  } catch (err: any) {
-    if (err?.name === "AbortError") console.warn(`[listingContext] Serper timed out: ${query}`);
-    else console.error("[listingContext] Serper fetch error:", err);
-    return null;
-  } finally {
-    clearTimeout(timer);
   }
+
+  return null;
 }
 
 function extractOrganic(json: any, limit: number): string[] {

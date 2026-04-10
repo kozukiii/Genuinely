@@ -5,7 +5,6 @@ import ListingCard from "../components/ListingCard";
 import type { Listing } from "../types/Listing";
 import { getSavedListings } from "../utils/savedListings";
 import { getRecentlyViewed } from "../utils/recentlyViewed";
-import { setEbayNotice } from "../utils/ebayNotice";
 import { getSearchCache } from "../utils/searchCache";
 
 
@@ -97,13 +96,6 @@ export default function HomePage() {
   }, []);
 
   // eBay notice: if featured is empty after loading, assume eBay may be down
-  useEffect(() => {
-    if (!loadingFeatured && featuredListings.length === 0) {
-      setEbayNotice(true);
-    } else {
-      setEbayNotice(false);
-    }
-  }, [loadingFeatured, featuredListings.length]);
 
   // "You May Like" — scored search cache listings that keyword-match saved items
   const youMayLikeItems = useMemo(() => {

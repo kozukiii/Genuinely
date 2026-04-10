@@ -592,6 +592,9 @@ export default function ListingPage() {
               {!analysisResult?.analyzedAt && ai.aiScore != null && (
                 <p className="analyze-subtext">Previously analyzed</p>
               )}
+              {(analysisResult?.analyzedAt || ai.aiScore != null) && !analyzing && (
+                <p className="analyze-hint">Something look off? Rerun analysis with the latest market data!</p>
+              )}
               {analyzeError && <p className="analyze-error">{analyzeError}</p>}
             </div>
 

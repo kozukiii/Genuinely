@@ -126,6 +126,24 @@
   box-shadow: 0 0 0 3px rgba(77, 166, 255, 0.25);
 }
 
+.nav-saved-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 5px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: rgba(57, 255, 157, 0.18);
+  border: 1px solid rgba(57, 255, 157, 0.35);
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: rgba(57, 255, 157, 0.9);
+  line-height: 1;
+  vertical-align: middle;
+}
+
 /* =========================
    eBay notice banner
    ========================= */

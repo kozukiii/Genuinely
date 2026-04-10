@@ -7,22 +7,35 @@ import SkeletonCard from "../components/SkeletonCard";
 import FiltersSidebar, { type FilterState } from "../components/FiltersSidebar";
 import type { Listing } from "../types/Listing";
 import "./styles/HomePage.css";
-import { setEbayNotice } from "../utils/ebayNotice";
 import { addToSearchCache } from "../utils/searchCache";
 import {
   clearAnalysisStore,
   publishAnalysisResult,
   publishAnalysisFailure,
 } from "../utils/analysisStore";
+import { getSavedListings } from "../utils/savedListings";
+import { getRecentlyViewed } from "../utils/recentlyViewed";
+import { getSearchCache } from "../utils/searchCache";
+
+const TRENDING = [
+  "PS5 console", "Air Jordan 1", "iPhone 15 Pro", "RTX 4090",
+  "Pokemon cards", "MacBook Air M3", "AirPods Pro", "Nintendo Switch OLED",
+  "Rolex watch", "Lego Technic", "Sony camera", "Xbox Series X",
+];
+
+function truncateTitle(s: string, n = 36) {
+  return s.length > n ? s.slice(0, n) + "…" : s;
+}
 
 const PAGE_SIZE = 12;
-const PRELOAD_SIZE = PAGE_SIZE; // fetch first page, then background-prefetch next
+const PRELOAD_SIZE = PAGE_SIZE * 2; // fetch 2 pages upfront; analyze on demand per page
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
 const SEARCH_QUERY_KEY = "search:query";
 const SEARCH_LISTINGS_KEY = "search:listings";
 const SEARCH_TIMESTAMP_KEY = "search:ts";
 const SEARCH_PAGE_KEY = "search:page";
+const SEARCH_FILTERS_KEY = "search:filters";
 
 const DEFAULT_FILTERS: FilterState = {
   minPrice: "",
@@ -56,7 +69,7 @@ async function fetchFromApi(
   targetTotal: number,
   filters: FilterState,
   offset = 0
-): Promise<{ items: Listing[]; ebayUnavailable: boolean }> {
+): Promise<Listing[]> {
   const activeSources =
     (["ebay", "marketplace"] as const).filter((s) => filters.sources[s]).join(",") ||
     "ebay,marketplace";
@@ -90,10 +103,7 @@ async function fetchFromApi(
 
   const data = JSON.parse(text);
   if (!Array.isArray(data)) throw new Error("Response was not an array");
-  return {
-    items: data as Listing[],
-    ebayUnavailable: res.headers.get("X-Ebay-Search-Status") === "unavailable",
-  };
+  return data as Listing[];
 }
 
 // ── Analysis pipeline ────────────────────────────────────────────────────────
@@ -250,12 +260,6 @@ function applyFilters(listings: Listing[], filters: FilterState): Listing[] {
     result = result.filter((l) => l.shippingPrice === 0 || l.shippingPrice == null);
   }
 
-  if (filters.sortBy === "price_asc") result.sort((a, b) => (a.price ?? 0) - (b.price ?? 0));
-  else if (filters.sortBy === "price_desc") result.sort((a, b) => (b.price ?? 0) - (a.price ?? 0));
-  else if (filters.sortBy === "ai_score") {
-    result.sort((a, b) => (b.aiScore ?? -1) - (a.aiScore ?? -1));
-  }
-
   return result;
 }
 
@@ -275,13 +279,44 @@ export default function SearchPage() {
   const [fetchingNew, setFetchingNew] = useState(false);
   const [resultKey, setResultKey] = useState(0);
   const [linkModalOpen, setLinkModalOpen] = useState(false);
+  const [savedVersion, setSavedVersion] = useState(0);
+
+  useEffect(() => {
+    const update = () => setSavedVersion((v) => v + 1);
+    window.addEventListener("saved:listings:changed", update);
+    return () => window.removeEventListener("saved:listings:changed", update);
+  }, []);
+
+  // Merge search cache + recently viewed + saved, dedupe, shuffle
+  const shelfItems = useMemo(() => {
+    const cache = getSearchCache();
+    const recent = getRecentlyViewed();
+    const saved = getSavedListings();
+
+    const seen = new Set<string>();
+    const pool: Listing[] = [];
+    for (const item of [...recent, ...saved, ...cache]) {
+      const key = `${item.source}:${item.id}`;
+      if (!seen.has(key) && item.images?.[0]) {
+        seen.add(key);
+        pool.push(item);
+      }
+    }
+
+    // Fisher-Yates shuffle
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    return pool.slice(0, 24);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [savedVersion]);
 
   // Keep stable refs so callbacks/effects always see the latest values
   const queryRef = useRef(currentQuery);
   queryRef.current = currentQuery;
   const filtersRef = useRef(filters);
   filtersRef.current = filters;
-  const prefetchingRef = useRef(false);
   const listingsRef = useRef(listings);
   listingsRef.current = listings;
 
@@ -295,9 +330,42 @@ export default function SearchPage() {
   }
 
   function startAnalysis(query: string, items: Listing[]) {
+    // Check saved listings cache — if a result was already analyzed and saved, reuse that data
+    const savedMap = new Map(
+      getSavedListings()
+        .filter((l) => l.aiScore != null)
+        .map((l) => [`${l.source}:${l.id}`, l])
+    );
+
+    const cached = items.filter((l) => savedMap.has(`${l.source}:${l.id}`));
+    if (cached.length > 0) {
+      setListings((prev) =>
+        prev.map((l) => {
+          const saved = savedMap.get(`${l.source}:${l.id}`);
+          if (!saved) return l;
+          return {
+            ...l,
+            aiScore: saved.aiScore,
+            aiScores: saved.aiScores,
+            overview: saved.overview,
+            priceLow: saved.priceLow,
+            priceHigh: saved.priceHigh,
+            debugInfo: saved.debugInfo,
+            rawAnalysis: saved.rawAnalysis,
+            marketContext: saved.marketContext,
+            systemPrompt: saved.systemPrompt,
+            analysisPending: false,
+          };
+        })
+      );
+    }
+
+    const toAnalyze = items.filter((l) => !savedMap.has(`${l.source}:${l.id}`));
+    if (toAnalyze.length === 0) return;
+
     const ctrl = new AbortController();
     analysisControllersRef.current.push(ctrl);
-    runAnalysisPipeline(query, items, setListings, ctrl.signal).finally(() => {
+    runAnalysisPipeline(query, toAnalyze, setListings, ctrl.signal).finally(() => {
       analysisControllersRef.current = analysisControllersRef.current.filter((c) => c !== ctrl);
     });
   }
@@ -311,10 +379,14 @@ export default function SearchPage() {
   const canGoPrev = page > 1;
   const canGoNext = page < totalPages || hasMore;
 
-  const pageItems = useMemo(
-    () => filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
-    [filtered, page]
-  );
+  const pageItems = useMemo(() => {
+    const slice = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).slice();
+    const sortBy = filters.sortBy;
+    if (sortBy === "price_asc") slice.sort((a, b) => (a.price ?? 0) - (b.price ?? 0));
+    else if (sortBy === "price_desc") slice.sort((a, b) => (b.price ?? 0) - (a.price ?? 0));
+    else if (sortBy === "ai_score") slice.sort((a, b) => (b.aiScore ?? -1) - (a.aiScore ?? -1));
+    return slice;
+  }, [filtered, page, filters.sortBy]);
 
   // ── Initial search (new query) ──────────────────────────────────────────
   const handleSearch = useCallback(
@@ -339,12 +411,14 @@ export default function SearchPage() {
       const parsedLimit = filtersRef.current.limit !== "" ? Math.max(1, parseInt(filtersRef.current.limit, 10)) : undefined;
       const fetchSize = parsedLimit ?? PRELOAD_SIZE;
       try {
-        const { items, ebayUnavailable } = await fetchFromApi(q, fetchSize, filters);
-        setEbayNotice(filters.sources.ebay && ebayUnavailable);
+        const items = await fetchFromApi(q, fetchSize, filters);
 
-        // Mark all listings as pending immediately so rings show spinners
-        const pending = items.map((l) => ({ ...l, analysisPending: true }));
-        setListings(pending);
+        // With no custom limit: only mark/analyze page 1; page 2 stays raw until navigated to
+        const analyzeCount = parsedLimit ? items.length : PAGE_SIZE;
+        const withPending = items.map((l: Listing, i: number) =>
+          i < analyzeCount ? { ...l, analysisPending: true } : l
+        );
+        setListings(withPending);
         setFetchingNew(false);
         setResultKey((k) => k + 1);
         setHasMore(items.length >= fetchSize);
@@ -354,11 +428,9 @@ export default function SearchPage() {
         sessionStorage.setItem(SEARCH_TIMESTAMP_KEY, Date.now().toString());
         sessionStorage.setItem(SEARCH_PAGE_KEY, "1");
 
-        // Kick off the background analysis pipeline
-        startAnalysis(q, items);
+        startAnalysis(q, items.slice(0, analyzeCount));
       } catch (err) {
         setFetchingNew(false);
-        setEbayNotice(filters.sources.ebay);
         setError(`Failed to load listings: ${err instanceof Error ? err.message : String(err)}`);
       } finally {
         setLoading(false);
@@ -379,18 +451,19 @@ export default function SearchPage() {
       try {
         // Fetch only the next batch of NEW items starting at the current end
         const offset = listingsRef.current.length;
-        const { items: newItems, ebayUnavailable } = await fetchFromApi(
+        const newItems = await fetchFromApi(
           queryRef.current,
           PRELOAD_SIZE,
           filtersRef.current,
           offset
         );
-        setEbayNotice(filtersRef.current.sources.ebay && ebayUnavailable);
 
-        const pendingNew = newItems.map((l) => ({ ...l, analysisPending: true }));
+        const pendingNew = newItems.map((l: Listing, i: number) =>
+          i < PAGE_SIZE ? { ...l, analysisPending: true } : l
+        );
         const combined = dedupeListings([...listingsRef.current, ...pendingNew]);
         setListings(combined);
-        setHasMore(newItems.length >= PAGE_SIZE);
+        setHasMore(newItems.length >= PRELOAD_SIZE);
 
         // Clamp to last valid page so we never land on an empty page
         const newFiltered = applyFilters(combined, filtersRef.current);
@@ -400,9 +473,8 @@ export default function SearchPage() {
         sessionStorage.setItem(SEARCH_PAGE_KEY, String(targetPage));
         sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(combined));
 
-        startAnalysis(queryRef.current, newItems);
+        startAnalysis(queryRef.current, newItems.slice(0, PAGE_SIZE));
       } catch (err) {
-        setEbayNotice(filtersRef.current.sources.ebay);
         setError(`Failed to load more listings: ${err instanceof Error ? err.message : String(err)}`);
         return;
       } finally {
@@ -411,6 +483,21 @@ export default function SearchPage() {
     } else {
       setPage(nextPage);
       sessionStorage.setItem(SEARCH_PAGE_KEY, String(nextPage));
+
+      // Trigger analysis for any items on this page not yet analyzed
+      const nextPageItems = applyFilters(listingsRef.current, filtersRef.current)
+        .slice((nextPage - 1) * PAGE_SIZE, nextPage * PAGE_SIZE);
+      const unanalyzed = nextPageItems.filter((l) => !l.analysisPending && l.aiScore == null);
+      if (unanalyzed.length > 0) {
+        setListings((prev) =>
+          prev.map((l) =>
+            unanalyzed.some((u) => u.id === l.id && u.source === l.source)
+              ? { ...l, analysisPending: true }
+              : l
+          )
+        );
+        startAnalysis(queryRef.current, unanalyzed);
+      }
     }
 
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -428,6 +515,7 @@ export default function SearchPage() {
   // ── Re-fetch when filters are applied ───────────────────────────────────
   const handleFilterApply = useCallback(async (next: FilterState) => {
     setFilters(next);
+    sessionStorage.setItem(SEARCH_FILTERS_KEY, JSON.stringify(next));
     const q = queryRef.current;
     if (!q) return;
 
@@ -440,48 +528,28 @@ export default function SearchPage() {
     try {
       const parsedLimit = next.limit !== "" ? Math.max(1, parseInt(next.limit, 10)) : undefined;
       const fetchSize = parsedLimit ?? PRELOAD_SIZE;
-      const { items, ebayUnavailable } = await fetchFromApi(q, fetchSize, next);
-      setEbayNotice(next.sources.ebay && ebayUnavailable);
+      const items = await fetchFromApi(q, fetchSize, next);
 
-      const pending = items.map((l) => ({ ...l, analysisPending: true }));
-      setListings(pending);
+      const analyzeCount = parsedLimit ? items.length : PAGE_SIZE;
+      const withPending = items.map((l: Listing, i: number) =>
+        i < analyzeCount ? { ...l, analysisPending: true } : l
+      );
+      setListings(withPending);
       setFetchingNew(false);
       setResultKey((k) => k + 1);
       setHasMore(items.length >= fetchSize);
       sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(items));
       sessionStorage.setItem(SEARCH_PAGE_KEY, "1");
 
-      startAnalysis(q, items);
+      startAnalysis(q, items.slice(0, analyzeCount));
     } catch (err) {
       setFetchingNew(false);
-      setEbayNotice(next.sources.ebay);
       setError(`Failed to load listings: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setLoading(false);
     }
   }, []);
 
-// ── Background prefetch: silently load next page while user reads current ──
-  useEffect(() => {
-    const nextNeeded = (page + 1) * PAGE_SIZE;
-    if (!currentQuery || !hasMore || listings.length >= nextNeeded || loading || prefetchingRef.current) return;
-
-    prefetchingRef.current = true;
-    const prefetchOffset = listings.length;
-    fetchFromApi(currentQuery, PAGE_SIZE, filtersRef.current, prefetchOffset)
-      .then(({ items: newItems, ebayUnavailable }) => {
-        setEbayNotice(filtersRef.current.sources.ebay && ebayUnavailable);
-        const pendingNew = newItems.map((l) => ({ ...l, analysisPending: true }));
-        const combined = dedupeListings([...listingsRef.current, ...pendingNew]);
-        setListings(combined);
-        setHasMore(newItems.length >= PAGE_SIZE);
-        sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(combined));
-        startAnalysis(currentQuery, newItems);
-      })
-      .catch(() => {})
-      .finally(() => { prefetchingRef.current = false; });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, hasMore, listings.length, loading]);
 
   // ── Hydrate from sessionStorage ─────────────────────────────────────────
   function hydrate() {
@@ -495,6 +563,11 @@ export default function SearchPage() {
       if (savedRaw) {
         const parsed = JSON.parse(savedRaw) as Listing[];
         if (Array.isArray(parsed)) setListings(parsed);
+      }
+      const savedFilters = sessionStorage.getItem(SEARCH_FILTERS_KEY);
+      if (savedFilters) {
+        const parsed = JSON.parse(savedFilters) as FilterState;
+        if (parsed && typeof parsed === "object") setFilters(parsed);
       }
     } catch {}
   }
@@ -544,6 +617,45 @@ export default function SearchPage() {
         />
 
         <div className="search-main">
+          {!currentQuery && listings.length === 0 && !loading && !fetchingNew && (
+            <div className="idle-section">
+              <div className="section-head"><h2>Trending</h2></div>
+              <div className="idle-ticker-viewport">
+                <div className="idle-ticker-track">
+                  {[...TRENDING, ...TRENDING].map((term, i) => (
+                    <button key={i} className="idle-ticker-chip" onClick={() => handleSearch(term)}>
+                      <span className="idle-ticker-arrow">↑</span>{term}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {shelfItems.length > 0 && (
+                <>
+                  <div className="section-head"><h2>Past Finds</h2></div>
+                  <div className="idle-shelf-scroll">
+                    <div className="idle-shelf-track">
+                      {[...shelfItems, ...shelfItems].map((item, i) => (
+                        <button
+                          key={`${item.source}:${item.id}:${i}`}
+                          className="idle-shelf-card"
+                          onClick={() => handleSearch(item.title)}
+                          tabIndex={i < shelfItems.length ? 0 : -1}
+                        >
+                          <img className="idle-shelf-img" src={item.images![0]} alt="" loading="lazy" />
+                          <span className="idle-shelf-name">{truncateTitle(item.title)}</span>
+                          {item.price != null && (
+                            <span className="idle-shelf-price">${item.price.toFixed(2)}</span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
           <div className="results-wrapper">
             {/* Skeleton cards — shown while fetch is in flight, after any sweep */}
             {fetchingNew && !sweeping && (

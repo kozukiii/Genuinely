@@ -6,7 +6,6 @@ body {
   min-height: 100%;
   width: 100%;
   max-width: 100%;
-  overflow-x: clip; /* clip vs hidden: clip doesn't block vertical scroll on iOS Safari */
   background:
     radial-gradient(
       1400px 800px at 14% 6%,
@@ -34,7 +33,7 @@ body {
 #root {
   width: 100%;
   max-width: 100%;
-  overflow-x: clip;
+  overflow: clip hidden; /* clip x-axis without becoming a scroll container */
 }
 
 /* --- HOMEPAGE WRAPPER (scopes all homepage-only styling) --- */
@@ -655,27 +654,9 @@ h6 {
   .banner-track{ animation: none; }
 }
 
-/* Mobile: replace auto-scroll animation with touch swipe */
+/* Mobile: keep marquee animation; tighten padding */
 @media (max-width: 768px) {
-  .banner-viewport {
-    overflow-x: auto;
-    overflow-y: hidden;
-    scrollbar-width: none;
-  }
-
-  .banner-viewport::-webkit-scrollbar {
-    display: none;
-  }
-
-  /* Remove the pseudo-element edge fades — they clip touch area */
-  .banner-viewport::before,
-  .banner-viewport::after {
-    display: none;
-  }
-
   .banner-track {
-    animation: none;
-    width: max-content;
     padding: 14px 8px;
   }
 }
@@ -1508,27 +1489,13 @@ h6 {
   }
 }
 
+/* Idle marquee: keep animations running on mobile */
 @media (max-width: 768px) {
-  .idle-ticker-viewport,
-  .idle-shelf-scroll {
-    overflow-x: auto;
-    scrollbar-width: none;
+  .idle-ticker-track {
+    animation-duration: 22s; /* slightly faster on narrower screen */
   }
 
-  .idle-ticker-viewport::-webkit-scrollbar,
-  .idle-shelf-scroll::-webkit-scrollbar {
-    display: none;
-  }
-
-  .idle-ticker-viewport::before,
-  .idle-ticker-viewport::after,
-  .idle-shelf-scroll::before,
-  .idle-shelf-scroll::after {
-    display: none;
-  }
-
-  .idle-ticker-track,
   .idle-shelf-track {
-    animation: none;
+    animation-duration: 36s;
   }
 }

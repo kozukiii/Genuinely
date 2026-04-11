@@ -30,9 +30,58 @@ function readOptionalNumber(value: unknown): number | undefined {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
+function isPrivateOrLoopbackIp(ip: string): boolean {
+  if (!ip) return true;
+  if (ip === "127.0.0.1" || ip === "::1") return true;
+  if (ip.startsWith("10.") || ip.startsWith("192.168.")) return true;
+
+  // 172.16.0.0/12
+  const m = ip.match(/^172\.(\d{1,3})\./);
+  if (m) {
+    const second = Number(m[1]);
+    if (Number.isFinite(second) && second >= 16 && second <= 31) return true;
+  }
+
+  return false;
+}
+
+async function lookupIpApi(ip: string): Promise<BuyerLocation | null> {
+  const res = await fetch(`http://ip-api.com/json/${ip}?fields=status,countryCode,zip,city,region,lat,lon`, {
+    signal: AbortSignal.timeout(3000),
+  });
+  const data: any = await res.json();
+  if (data.status !== "success" || !data.countryCode) return null;
+
+  return {
+    country: data.countryCode,
+    zip: data.zip ?? "",
+    city: readOptionalString(data.city),
+    region: readOptionalString(data.region),
+    lat: readOptionalNumber(data.lat),
+    lng: readOptionalNumber(data.lon),
+  };
+}
+
+async function lookupIpWhois(ip: string): Promise<BuyerLocation | null> {
+  const res = await fetch(`https://ipwho.is/${encodeURIComponent(ip)}`, {
+    signal: AbortSignal.timeout(3000),
+  });
+  const data: any = await res.json();
+  if (data.success === false || !data.country_code) return null;
+
+  return {
+    country: String(data.country_code).toUpperCase(),
+    zip: readOptionalString(data.postal) ?? "",
+    city: readOptionalString(data.city),
+    region: readOptionalString(data.region),
+    lat: readOptionalNumber(data.latitude),
+    lng: readOptionalNumber(data.longitude),
+  };
+}
+
 export async function getLocationFromIp(ip: string): Promise<BuyerLocation | null> {
   // Skip private/loopback addresses
-  if (!ip || ip === "127.0.0.1" || ip === "::1" || ip.startsWith("192.168.") || ip.startsWith("10.")) {
+  if (isPrivateOrLoopbackIp(ip)) {
     return null;
   }
 
@@ -40,20 +89,29 @@ export async function getLocationFromIp(ip: string): Promise<BuyerLocation | nul
   if (cached && cached.expiresAt > Date.now()) return cached.loc;
 
   try {
-    const res = await fetch(`http://ip-api.com/json/${ip}?fields=status,countryCode,zip,city,region,lat,lon`, {
-      signal: AbortSignal.timeout(3000),
-    });
-    const data: any = await res.json();
-    if (data.status !== "success" || !data.countryCode) return null;
+    // Prefer ip-api, but if it does not provide postal data, augment with ipwho.is.
+    const primary = await lookupIpApi(ip);
+    if (!primary) return null;
 
-    const loc: BuyerLocation = {
-      country: data.countryCode,
-      zip: data.zip ?? "",
-      city: readOptionalString(data.city),
-      region: readOptionalString(data.region),
-      lat: readOptionalNumber(data.lat),
-      lng: readOptionalNumber(data.lon),
-    };
+    let loc = primary;
+    if (!loc.zip) {
+      try {
+        const fallback = await lookupIpWhois(ip);
+        if (fallback?.country === loc.country) {
+          loc = {
+            ...loc,
+            zip: fallback.zip || loc.zip,
+            city: loc.city ?? fallback.city,
+            region: loc.region ?? fallback.region,
+            lat: loc.lat ?? fallback.lat,
+            lng: loc.lng ?? fallback.lng,
+          };
+        }
+      } catch {
+        // Non-fatal: keep primary provider result.
+      }
+    }
+
     cache.set(ip, { loc, expiresAt: Date.now() + TTL_MS });
     return loc;
   } catch (err) {

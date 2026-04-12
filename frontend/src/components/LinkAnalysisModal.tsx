@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { Listing } from "../types/Listing";
 import "./styles/LinkAnalysisModal.css";
+import { getBrowserCountry } from "../utils/browserLocale";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -28,7 +29,7 @@ export default function LinkAnalysisModal({ onClose }: Props) {
       const res = await fetch(`${API_BASE}/api/search/from-url`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: trimmed }),
+        body: JSON.stringify({ url: trimmed, country: getBrowserCountry() }),
       });
 
       if (!res.ok) {

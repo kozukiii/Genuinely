@@ -8,7 +8,7 @@ export interface FilterState {
   freeShippingOnly: boolean;
   sortBy: string;
   limit: string;
-  marketplaceLocation: string;
+  zip: string;
   marketplaceRadius: string;
 }
 
@@ -20,7 +20,7 @@ const DEFAULT_FILTERS: FilterState = {
   freeShippingOnly: false,
   sortBy: "default",
   limit: "",
-  marketplaceLocation: "",
+  zip: "",
   marketplaceRadius: "",
 };
 
@@ -143,21 +143,24 @@ export default function FiltersSidebar({ filters, onChange, onSortChange, mobile
             </label>
           </div>
 
-          {/* Marketplace-specific filters */}
+          {/* Zip — overrides GeoIP for both eBay and Marketplace */}
+          <div className="filter-group">
+            <label className="filter-label">Zip code</label>
+            <input
+              className="filter-input"
+              type="text"
+              inputMode="numeric"
+              maxLength={10}
+              placeholder="Auto-detected"
+              value={draft.zip}
+              onChange={(e) => setDraftField("zip", e.target.value.replace(/[^0-9]/g, ""))}
+            />
+          </div>
+
+          {/* Marketplace radius */}
           {draft.sources.marketplace && (
             <div className="filter-group filter-group--marketplace">
-              <label className="filter-label filter-label--section">Marketplace</label>
-              <label className="filter-label">Zip code</label>
-              <input
-                className="filter-input"
-                type="text"
-                inputMode="numeric"
-                maxLength={10}
-                placeholder="Auto-detected"
-                value={draft.marketplaceLocation}
-                onChange={(e) => setDraftField("marketplaceLocation", e.target.value.replace(/[^0-9]/g, ""))}
-              />
-              <label className="filter-label" style={{ marginTop: "8px" }}>Radius</label>
+              <label className="filter-label">Marketplace radius</label>
               <select
                 className="filter-select"
                 value={draft.marketplaceRadius}

@@ -4,7 +4,6 @@ dotenv.config({ quiet: true });
 import express from "express";
 import cors from "cors";
 import searchRoutes from "./routes/searchRoutes";
-import ebayRoutes from "./routes/ebayRoutes";
 import imageProxyRoutes from "./routes/imageProxyRoutes";
 import marketplaceRoutes from "./routes/marketplaceRoutes";
 import featuredRoutes from "./routes/featuredRoutes";
@@ -29,7 +28,6 @@ api.get("/health", (req, res) => {
 
 // Feature route groups
 api.use("/search", searchRoutes);
-api.use("/ebay", ebayRoutes);
 api.use("/marketplace", marketplaceRoutes);
 api.use("/proxy-image", imageProxyRoutes);
 api.use("/featured", featuredRoutes);

@@ -45,7 +45,7 @@ const DEFAULT_FILTERS: FilterState = {
   freeShippingOnly: false,
   sortBy: "default",
   limit: "",
-  marketplaceLocation: "",
+  zip: "",
   marketplaceRadius: "",
 };
 
@@ -86,14 +86,12 @@ async function fetchFromApi(
   if (filters.sortBy && filters.sortBy !== "default" && filters.sortBy !== "ai_score") {
     url += `&sortBy=${filters.sortBy}`;
   }
-  if (filters.sources.marketplace) {
-    if (filters.marketplaceLocation.trim()) {
-      url += `&location=${encodeURIComponent(filters.marketplaceLocation.trim())}`;
-    }
-    if (filters.marketplaceRadius) {
-      const radiusKm = Math.round(Number(filters.marketplaceRadius) * 1.60934);
-      url += `&radiusKm=${radiusKm}`;
-    }
+  if (filters.zip?.trim()) {
+    url += `&location=${encodeURIComponent(filters.zip.trim())}`;
+  }
+  if (filters.sources.marketplace && filters.marketplaceRadius) {
+    const radiusKm = Math.round(Number(filters.marketplaceRadius) * 1.60934);
+    url += `&radiusKm=${radiusKm}`;
   }
   if (offset > 0) url += `&offset=${offset}`;
 

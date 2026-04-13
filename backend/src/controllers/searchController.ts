@@ -75,7 +75,11 @@ export async function searchAll(req: Request, res: Response) {
   const ipLoc = needsGeoIp
     ? await getLocationFromIp(extractClientIp(req as any)).catch(() => null)
     : null;
-  const buyerLocation = ipLoc ?? (countryFallback ? { country: countryFallback, zip: "" } : null);
+  // If the user specified a zip, it overrides GeoIP for both eBay (shipping cost
+  // resolution) and Marketplace (search center). Otherwise fall back to GeoIP.
+  const buyerLocation = requestedLocation
+    ? { country: ipLoc?.country ?? countryFallback ?? "US", zip: requestedLocation }
+    : (ipLoc ?? (countryFallback ? { country: countryFallback, zip: "" } : null));
   const marketplaceSearchLocation = requestedLocation
     ? { location: requestedLocation }
     : getMarketplaceSearchLocation(ipLoc);

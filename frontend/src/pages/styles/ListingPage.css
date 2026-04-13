@@ -417,7 +417,7 @@
 .analyze-hint {
   font-size: 0.72rem;
   color: rgba(209, 213, 219, 0.38);
-  margin: 2px 0 0;
+  margin: 0;
   font-style: italic;
 }
 
@@ -432,6 +432,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  margin-top: 1.5rem;
 
   padding: 12px 16px;
   border-radius: 14px;
@@ -872,17 +873,13 @@
     height: 110px !important;
   }
 
-  /* Analyze row: reset absolute positioning to normal document flow */
+  /* Analyze row */
   .analyze-row {
-    position: static !important;
-    top: auto !important;
-    left: auto !important;
-    right: auto !important;
     margin-top: 0.5rem;
     margin-bottom: 0.25rem;
   }
 
-  /* External link: reset absolute positioning to normal document flow */
+  /* External link */
   .demo-external-link {
     position: static;
     top: auto;
@@ -899,11 +896,6 @@
 
   .demo-external-link:active {
     transform: translateY(-1px) scale(0.99);
-  }
-
-  /* Sub-score grid: remove the hardcoded margin that assumed absolute btn height */
-  .ai-score-grid {
-    margin-top: 1rem !important;
   }
 
   .similar-listings-section {

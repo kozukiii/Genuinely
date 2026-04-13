@@ -303,9 +303,6 @@ export async function getEbayItemsWithDetails(
 
       const fullJson: any = await fullRes.json().catch(() => ({}));
 
-      // Temporary: log item location to confirm eBay sends it
-      console.log(`[ebay:location] item=${summary.id} itemLocation=`, JSON.stringify(fullJson.itemLocation ?? null));
-
       // Pull ONLY the fields you care about (not the whole blob)
       const description = fullJson.description || summary.description || "";
 

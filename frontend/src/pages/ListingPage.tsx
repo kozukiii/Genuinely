@@ -572,7 +572,7 @@ export default function ListingPage() {
             </div>
 
             {/* Analyze button */}
-            <div className="analyze-row" style={{ position: "absolute", left: 0, right: 0, top: "calc(22rem - 92px)" }}>
+            <div className="analyze-row">
               <button
                 className="analyze-btn"
                 onClick={runAnalysis}
@@ -586,17 +586,19 @@ export default function ListingPage() {
                   ? "Re-analyze"
                   : "Analyze listing"}
               </button>
-              {analysisResult?.analyzedAt && (
-                <p className="analyze-subtext">
-                  Last analyzed {new Date(analysisResult.analyzedAt).toLocaleString()}
-                </p>
-              )}
-              {!analysisResult?.analyzedAt && ai.aiScore != null && (
-                <p className="analyze-subtext">Previously analyzed</p>
-              )}
-              {(analysisResult?.analyzedAt || ai.aiScore != null) && !analyzing && (
-                <p className="analyze-hint">Something look off? Rerun analysis with the latest market data!</p>
-              )}
+              <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                {analysisResult?.analyzedAt && (
+                  <p className="analyze-subtext">
+                    Last analyzed {new Date(analysisResult.analyzedAt).toLocaleString()}
+                  </p>
+                )}
+                {!analysisResult?.analyzedAt && ai.aiScore != null && (
+                  <p className="analyze-subtext">Previously analyzed</p>
+                )}
+                {(analysisResult?.analyzedAt || ai.aiScore != null) && !analyzing && (
+                  <p className="analyze-hint">Something look off? Rerun analysis with the latest market data!</p>
+                )}
+              </div>
               {analyzeError && <p className="analyze-error">{analyzeError}</p>}
             </div>
 
@@ -612,7 +614,7 @@ export default function ListingPage() {
 
             {/* Sub-rings */}
             {showRing && (
-              <div className="ai-score-grid" style={{ marginTop: "calc(1rem + 84px)" }}>
+              <div className="ai-score-grid">
                 {Object.entries(scores).map(([key, value]) => (
                   <div key={key} className="ai-score-item">
                     <AnimatedRing

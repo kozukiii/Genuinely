@@ -88,27 +88,36 @@ export async function getLocationFromIp(ip: string): Promise<BuyerLocation | nul
   const cached = cache.get(ip);
   if (cached && cached.expiresAt > Date.now()) return cached.loc;
 
-  // Run both providers in parallel — bounds latency to max(3s, 3s) instead of 3s+3s.
-  const [primaryResult, secondaryResult] = await Promise.allSettled([
-    lookupIpApi(ip),
-    lookupIpWhois(ip),
-  ]);
+  try {
+    // Prefer ip-api, but if it does not provide postal data, augment with ipwho.is.
+    const primary = await lookupIpApi(ip);
+    if (!primary) return null;
 
-  const primary = primaryResult.status === "fulfilled" ? primaryResult.value : null;
-  const secondary = secondaryResult.status === "fulfilled" ? secondaryResult.value : null;
+    let loc = primary;
+    if (!loc.zip) {
+      try {
+        const fallback = await lookupIpWhois(ip);
+        if (fallback?.country === loc.country) {
+          loc = {
+            ...loc,
+            zip: fallback.zip || loc.zip,
+            city: loc.city ?? fallback.city,
+            region: loc.region ?? fallback.region,
+            lat: loc.lat ?? fallback.lat,
+            lng: loc.lng ?? fallback.lng,
+          };
+        }
+      } catch {
+        // Non-fatal: keep primary provider result.
+      }
+    }
 
-  // Prefer ip-api; fall back to ipwho.is if ip-api failed or returned nothing.
-  let loc = primary ?? secondary;
-  if (!loc) return null;
-
-  // Augment zip from the other provider when ours is missing.
-  const other = loc === primary ? secondary : primary;
-  if (!loc.zip && other?.country === loc.country && other.zip) {
-    loc = { ...loc, zip: other.zip };
+    cache.set(ip, { loc, expiresAt: Date.now() + TTL_MS });
+    return loc;
+  } catch (err) {
+    console.warn("[geoIp] lookup failed for", ip, err);
+    return null;
   }
-
-  cache.set(ip, { loc, expiresAt: Date.now() + TTL_MS });
-  return loc;
 }
 
 export function extractClientIp(req: { ip?: string; headers: Record<string, string | string[] | undefined> }): string {

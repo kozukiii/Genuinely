@@ -16,7 +16,6 @@ import {
 import { getSavedListings } from "../utils/savedListings";
 import { getRecentlyViewed } from "../utils/recentlyViewed";
 import { getSearchCache } from "../utils/searchCache";
-import { getBrowserCountry } from "../utils/browserLocale";
 
 const TRENDING = [
   "PS5 console", "Air Jordan 1", "iPhone 15 Pro", "RTX 4090",
@@ -78,11 +77,9 @@ async function fetchFromApi(
   const minP = parsePriceInput(filters.minPrice);
   const maxP = parsePriceInput(filters.maxPrice);
 
-  const country = getBrowserCountry();
   let url =
     `${API_BASE}/api/search?query=${encodeURIComponent(query)}` +
-    `&limit=${targetTotal}&sources=${activeSources}&analyze=0` +
-    (country ? `&country=${country}` : "");
+    `&limit=${targetTotal}&sources=${activeSources}&analyze=0`;
 
   if (minP !== null) url += `&minPrice=${minP}`;
   if (maxP !== null) url += `&maxPrice=${maxP}`;

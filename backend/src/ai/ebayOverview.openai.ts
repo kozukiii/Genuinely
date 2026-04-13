@@ -79,6 +79,15 @@ function formatBuyingOptions(v: any): string {
   return "N/A";
 }
 
+function formatShippingLine(listing: any): string {
+  if (listing.shippingPrice === 0) return "Free";
+  if (listing.shippingEstimated && listing.shippingPrice != null) {
+    return `$${listing.shippingPrice} (estimated from weight lookup — shippingEstimated: true)`;
+  }
+  if (listing.shippingPrice != null) return `$${listing.shippingPrice}`;
+  return formatShippingOptions(listing.shippingOptions);
+}
+
 function formatShippingOptions(v: any): string {
   if (v === undefined || v === null) return "N/A";
 
@@ -151,7 +160,7 @@ export async function analyzeListingWithImages(listing: any, context?: string | 
 
   const itemLocation = formatLocation(listing);
   const buyingOptions = formatBuyingOptions(listing.buyingOptions);
-  const shippingOptions = formatShippingOptions(listing.shippingOptions);
+  const shippingLine = formatShippingLine(listing);
 
   const shortDesc = clean(listing.shortDescription) ?? "";
   const rawDesc = listing.description || listing.fullDescription || "";
@@ -179,7 +188,8 @@ Analyze the listing and produce *numeric scores* for the following categories ON
 - descriptionQuality (0–100) *is the description detailed, accurate, and well-written*
 
 If shipping is free, automatically give full points (100) for shippingFairness.
-If shippingCostType is "CALCULATED" or shipping cost is otherwise unknown, treat shippingFairness as neutral (score 65) — never penalize for calculated shipping.
+If a shipping cost is present but marked as estimated (shippingEstimated: true), score it normally — judge whether the estimate is reasonable for the item's size and weight.
+If shipping cost is truly unknown (no price and no estimate), treat shippingFairness as neutral (score 65) — never penalize for unresolved calculated shipping.
 If the seller has excellent feedback (99%+) and many ratings (1000+), automatically give full points (100) for sellerTrust.
 
 If any field is missing/undefined, treat it as NEUTRAL (no deduction, no reward). Missing data should NEVER lower a score unless it's critical (e.g., description or seller ratings).
@@ -244,7 +254,7 @@ DEBUG INFO:
 
         { type: "text", text: `Item Location: ${itemLocation}` },
         { type: "text", text: `Buying Options: ${buyingOptions}` },
-        { type: "text", text: `Shipping Options: ${shippingOptions}` },
+        { type: "text", text: `Shipping: ${shippingLine}` },
 
         { type: "text", text: `Original Price: ${formatOriginalPrice(listing.marketingPrice)}` },
         { type: "text", text: `Discount: ${formatDiscount(listing.marketingPrice)}` },
@@ -288,7 +298,7 @@ Analyze ALL of them and return results as a JSON array.
 
 ALWAYS APPLY:
 - sellerTrust auto 100 if 99%+ feedback and 1000+ ratings
-- shippingFairness auto 100 if free; score 65 (neutral) if CALCULATED or unknown — calculated shipping is NEVER a scam signal
+- shippingFairness auto 100 if free; if shippingEstimated is true, score normally against the estimate; score 65 (neutral) only if cost is truly unknown
 - Missing data = NEUTRAL (no deduction unless truly critical)
 - Describe images in the overview if provided
 - Carefully weigh the description against the images and highlight any and all discrepancies
@@ -322,7 +332,7 @@ SCORING RULES (apply to every listing):
 - priceFairness (0–100): use PRODUCT CONTEXT price range and fairness guidance if provided; otherwise estimate from listing data and your knowledge
 - sellerTrust (0–100): based on feedback score and rating count; auto 100 if 99%+ feedback and 1000+ ratings
 - conditionHonesty (0–100): scrutinize images for scratches, dents, scuffs, discoloration, missing parts, or damage to the ITEM ITSELF; when condition is "New", "Like New", or "Open Box" AND actual item wear is present: score MUST be 50 or below; multiple areas of wear = 35 or below; do NOT use "minor wear" / "no major damage"; SELF-CHECK: if overview mentions wear/scratch/damage ON THE ITEM and condition is new/like-new, cap at 50; EXCEPTION: box or packaging damage disclosed by the seller does NOT penalize conditionHonesty — the condition is about the product not the box, and proactive disclosure is honest; EXCEPTION: official/manufacturer images are normal for new factory-sealed items — do not flag as a discrepancy; EXCEPTION: graded items (PSA, BGS, CGC, etc.) are exempt — the grade IS the certified condition
-- shippingFairness (0–100): is shipping reasonable for the item; auto 100 if free; score 65 (neutral) if CALCULATED or unknown — calculated shipping is NEVER a scam signal
+- shippingFairness (0–100): is shipping reasonable for the item; auto 100 if free; if shippingEstimated is true score it normally against the estimate; score 65 (neutral) only if cost is truly unknown
 - descriptionQuality (0–100): evaluate against PRODUCT CONTEXT description guidance if provided; otherwise judge on detail, accuracy, and completeness
 
 PRODUCT CONTEXT RULES:
@@ -408,7 +418,7 @@ async function _runEbayBatch(entries: BatchEntry[], context?: string | null, sys
     const conditionDescriptor = clean(listing.conditionDescriptor) ?? "N/A";
     const itemLocation = formatLocation(listing);
     const buyingOptions = formatBuyingOptions(listing.buyingOptions);
-    const shippingOptions = formatShippingOptions(listing.shippingOptions);
+    const shippingLine = formatShippingLine(listing);
     const shortDesc = clean(listing.shortDescription) ?? "";
     const rawDesc = listing.description || listing.fullDescription || "";
     const description = clean(stripHtml(rawDesc)) ?? "";
@@ -423,7 +433,7 @@ async function _runEbayBatch(entries: BatchEntry[], context?: string | null, sys
     contentParts.push({ type: "text", text: `Condition Descriptor: ${conditionDescriptor}` });
     contentParts.push({ type: "text", text: `Item Location: ${itemLocation}` });
     contentParts.push({ type: "text", text: `Buying Options: ${buyingOptions}` });
-    contentParts.push({ type: "text", text: `Shipping Options: ${shippingOptions}` });
+    contentParts.push({ type: "text", text: `Shipping: ${shippingLine}` });
     contentParts.push({ type: "text", text: `Original Price: ${formatOriginalPrice(listing.marketingPrice)}` });
     contentParts.push({ type: "text", text: `Discount: ${formatDiscount(listing.marketingPrice)}` });
     contentParts.push({ type: "text", text: `Short Description: ${shortDesc}` });

@@ -122,6 +122,7 @@ async function runAnalysisPipeline(
     systemPrompt?: string;
     priceLow?: number | null;
     priceHigh?: number | null;
+    estimatedShippingPrice?: number | null;
   }>;
 
   try {
@@ -151,10 +152,19 @@ async function runAnalysisPipeline(
       if (groupListings.length === 0) return;
 
       try {
+        // Patch estimated shipping onto calculated-shipping listings before scoring
+        const patchedListings = group.estimatedShippingPrice != null
+          ? groupListings.map((l: Listing) =>
+              l.shippingCalculated
+                ? { ...l, shippingPrice: group.estimatedShippingPrice, shippingEstimated: true, shippingCalculated: undefined }
+                : l
+            )
+          : groupListings;
+
         const res = await fetch(`${API_BASE}/api/search/batch-analyze`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ listings: groupListings, systemPrompt: group.systemPrompt }),
+          body: JSON.stringify({ listings: patchedListings, systemPrompt: group.systemPrompt }),
           signal,
         });
         if (!res.ok) throw new Error(`batch-analyze HTTP ${res.status}`);

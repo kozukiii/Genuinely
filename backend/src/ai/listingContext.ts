@@ -20,6 +20,7 @@ export interface ProductGroup {
   systemPrompt: string | null;
   priceLow: number | null;
   priceHigh: number | null;
+  estimatedShippingPrice: number | null;
 }
 
 interface RawGroup {
@@ -319,19 +320,60 @@ async function engineerPrompt(
   }
 }
 
+// ─── Shipping weight estimation ──────────────────────────────────────────────
+
+function parseWeightLbs(text: string): number | null {
+  // Ordered by specificity — prefer "shipping weight" matches first
+  const patterns: [RegExp, (v: number) => number][] = [
+    [/shipping\s+weight[:\s]+(\d+(?:\.\d+)?)\s*(?:lbs?|pounds?)/i, v => v],
+    [/(?:package|item|product)\s+weight[:\s]+(\d+(?:\.\d+)?)\s*(?:lbs?|pounds?)/i, v => v],
+    [/(\d+(?:\.\d+)?)\s*(?:lbs?|pounds?)/i, v => v],
+    [/shipping\s+weight[:\s]+(\d+(?:\.\d+)?)\s*(?:oz|ounces?)/i, v => v / 16],
+    [/(\d+(?:\.\d+)?)\s*(?:oz|ounces?)/i, v => v / 16],
+    [/(\d+(?:\.\d+)?)\s*(?:kg|kilograms?)/i, v => v * 2.205],
+    [/(\d+(?:\.\d+)?)\s*g\b/i, v => v / 453.6],
+  ];
+
+  for (const [pattern, convert] of patterns) {
+    const match = text.match(pattern);
+    if (match) {
+      const val = parseFloat(match[1]);
+      if (Number.isFinite(val) && val > 0) return convert(val);
+    }
+  }
+  return null;
+}
+
+// US domestic average (UPS Ground zones 4–6 blend). Rounded to nearest $10.
+function estimateShippingFromWeight(lbs: number): number {
+  let raw: number;
+  if (lbs <= 0.5) raw = 8;
+  else if (lbs <= 1)  raw = 9;
+  else if (lbs <= 2)  raw = 11;
+  else if (lbs <= 3)  raw = 13;
+  else if (lbs <= 5)  raw = 16;
+  else if (lbs <= 10) raw = 22;
+  else if (lbs <= 20) raw = 32;
+  else raw = 45;
+  return Math.round(raw / 10) * 10;
+}
+
 // ─── Main export ──────────────────────────────────────────────────────────────
 
 export async function groupAndContextualize(
   titles: string[],
   query: string,
+  hasCalculatedShipping?: boolean[],
 ): Promise<ProductGroup[]> {
   if (titles.length === 0) return [];
+
+  const serperApiKey = process.env.SERPER_API_KEY;
 
   // Step 1: group by identical product (8b-instant, one call)
   const rawGroups = await groupListings(titles, query);
 
-  // Steps 2+3: per group — Serper ×2 then 8b engineers the expert prompt
-  // Run in chunks of 2 to avoid Serper rate limits (each group fires 2 concurrent requests)
+  // Steps 2+3: per group — Serper ×2 (+ optional weight search) then 8b engineers the expert prompt
+  // Run in chunks of 2 to avoid Serper rate limits (each group fires 2–3 concurrent requests)
   const SERPER_CONCURRENCY = 2;
   const groups: ProductGroup[] = [];
 
@@ -339,7 +381,31 @@ export async function groupAndContextualize(
     const chunk = rawGroups.slice(i, i + SERPER_CONCURRENCY);
     const chunkResults = await Promise.all(
       chunk.map(async (group): Promise<ProductGroup> => {
-        const marketData = await fetchMarketContext(group.serperQuery).catch(() => null);
+        const needsWeightLookup =
+          serperApiKey &&
+          hasCalculatedShipping &&
+          group.indices.some(idx => hasCalculatedShipping[idx]);
+
+        const [marketData, weightJson] = await Promise.all([
+          fetchMarketContext(group.serperQuery).catch(() => null),
+          needsWeightLookup
+            ? serperSearch(serperApiKey!, `${group.canonicalName} shipping weight`, 5).catch(() => null)
+            : Promise.resolve(null),
+        ]);
+
+        // Resolve estimated shipping price from weight search
+        let estimatedShippingPrice: number | null = null;
+        if (weightJson) {
+          const answerText = [weightJson?.answerBox?.answer, weightJson?.answerBox?.snippet]
+            .filter(Boolean).join(" ");
+          const snippetText = extractOrganic(weightJson, 5).join(" ");
+          const weightLbs = parseWeightLbs(`${answerText} ${snippetText}`);
+          if (weightLbs !== null) {
+            // Clamp: product weight < 0.5 lbs likely excludes packaging — add 0.5 lb buffer
+            const shippingLbs = Math.max(weightLbs, 0.5) + (weightLbs < 0.5 ? 0.5 : 0);
+            estimatedShippingPrice = estimateShippingFromWeight(shippingLbs);
+          }
+        }
 
         if (!marketData) {
           return {
@@ -349,6 +415,7 @@ export async function groupAndContextualize(
             systemPrompt: null,
             priceLow: null,
             priceHigh: null,
+            estimatedShippingPrice,
           };
         }
 
@@ -361,6 +428,7 @@ export async function groupAndContextualize(
           systemPrompt,
           priceLow,
           priceHigh,
+          estimatedShippingPrice,
         };
       }),
     );

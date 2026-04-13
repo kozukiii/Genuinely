@@ -35,6 +35,7 @@ export interface Listing {
   // ebay-ish
   shippingPrice?: number;
   shippingCalculated?: boolean; // true when eBay uses calculated shipping (no resolved amount)
+  shippingEstimated?: boolean;  // true when shippingPrice was estimated via weight lookup
   shippingOptions?: unknown;
   buyingOptions?: string[];
 

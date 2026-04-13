@@ -89,7 +89,7 @@ export default function ListingCard({ data }: { data: Listing }) {
                 <span className={`listing-shipping${data.shippingPrice === 0 ? " listing-shipping--free" : ""}`}>
                   {data.shippingPrice === 0
                     ? "Free shipping"
-                    : `+ ${new Intl.NumberFormat(undefined, { style: "currency", currency: data.currency ?? "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(data.shippingPrice)} shipping`}
+                    : `${data.shippingEstimated ? "~" : "+ "}${new Intl.NumberFormat(undefined, { style: "currency", currency: data.currency ?? "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(data.shippingPrice)} shipping${data.shippingEstimated ? " (est.)" : ""}`}
                 </span>
               ) : data.shippingCalculated ? (
                 <span className="listing-shipping">Calculated shipping</span>

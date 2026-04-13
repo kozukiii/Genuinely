@@ -35,7 +35,11 @@ function buildEbayDebugInfo(listing: any): string {
     conditionDescriptor: listing.conditionDescriptor ?? null,
     itemLocation: locationStr,
     buyingOptions: listing.buyingOptions ?? null,
-    shippingOptions: listing.shippingOptions ?? null,
+    shippingPrice: listing.shippingPrice ?? null,
+    shippingEstimated: listing.shippingEstimated ?? false,
+    // Suppress raw shippingOptions when we have an estimate — the CALCULATED type
+    // would contradict the resolved price and confuse the scoring model.
+    shippingOptions: listing.shippingEstimated ? undefined : (listing.shippingOptions ?? null),
     originalPrice: listing.marketingPrice?.originalPrice ?? null,
     discount: listing.marketingPrice?.discountPercentage ?? listing.marketingPrice?.discountPercent ?? null,
     shortDescription: listing.shortDescription ?? null,

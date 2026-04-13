@@ -150,12 +150,15 @@ GROUPING RULES:
 - A listing missing a key spec cannot be grouped with one that has it — treat it as its own group.
 - Max 10 groups. If there are more distinct products than 10, consolidate the least specific ones.
 - Canonical name must be as specific as the listing allows (e.g. "Ping G440 Max Driver 10.5°", "iPhone 14 Pro 256GB Space Black").
+- PRODUCT TYPE IS PART OF PRODUCT IDENTITY: items that share a brand and model name but are different equipment types are NEVER the same product. Examples: a driver and an iron set are different products even if both say "Callaway Ai Smoke MAX"; a tennis racket and tennis strings are different; a GPU and a CPU are different.
+- GOLF EQUIPMENT: always identify the club type from the title and include it in the canonicalName. Loft notation (e.g. 9°, 10.5°, "10.5 degree") unambiguously identifies a DRIVER — use "Driver" in the canonicalName. Iron-set notation (e.g. "7 Iron", "5-PW", "iron set") identifies IRONS. Club types to distinguish: Driver, Fairway Wood, Hybrid, Iron Set, Wedge, Putter. NEVER group a driver with an iron (or any other club type).
 
 SERPER QUERY RULES:
 - Each serperQuery must be highly targeted for used resale pricing of that exact product.
 - Include brand, model, and key variant info (storage size, loft, generation, etc.).
 - Do NOT use vague phrases — be as specific as the canonicalName.
-- Example: "Callaway Ai Smoke Max Driver 9 degree used price" not "golf driver used price"
+- The serperQuery MUST include the product type word so it cannot match a different item in the same brand/model family. For golf clubs include "driver", "iron set", "wedge", etc. explicitly.
+- Example: "Callaway Ai Smoke Max Driver 9 degree used price" not "Callaway Ai Smoke Max used price" (which could return iron results)
 
 Return ONLY a JSON array (no markdown, no backticks, no extra text):
 [
@@ -222,6 +225,7 @@ THE SYSTEM PROMPT (everything after ---) MUST CONTAIN ALL OF THESE IN ORDER:
 1. IDENTITY LINE
    Open with: "You are an expert evaluating secondhand marketplace listings for: [full product name and key specs]."
    Commit to the most specific product identity the data supports. Do not hedge.
+   CRITICAL: Your identity line MUST match the canonicalName exactly. If the canonicalName says "Driver", you are evaluating a driver — never say "iron", "iron set", or any other club type. The canonical product name is authoritative; if the search data appears to describe a different product, discard that data and rely on your own knowledge of the canonical product instead.
 
 2. MARKET VALUE
    State the used market price range: "Used [product] typically sells for $X–$Y."

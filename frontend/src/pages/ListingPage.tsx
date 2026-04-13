@@ -71,6 +71,7 @@ const FILL_HOLD_MS                = 120;
 const LOADING_ARC_FRACTION        = 0.32;
 const LOADING_SCORE               = LOADING_ARC_FRACTION * 100;
 const HUE_SHIFT_DELAY_MS          = 400;
+const LOADING_PERIOD_MS           = 1200; // must match CSS animation duration
 
 const easeInOutQuad = (t: number) => t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
 const easeOutCubic  = (t: number) => 1 - (1 - t) ** 3;
@@ -84,11 +85,12 @@ function scoreColor(score: number) {
 type AnalysisPhase = "idle" | "loading" | "compressing" | "filling" | "done";
 
 function AnimatedRing({
-  phase, fillProgress, compressProgress, targetValue, size,
+  phase, fillProgress, compressProgress, compressStartFrac, targetValue, size,
 }: {
   phase: AnalysisPhase;
   fillProgress: number;
   compressProgress: number;
+  compressStartFrac: number;
   targetValue: number;
   size: number;
 }) {
@@ -126,7 +128,7 @@ function AnimatedRing({
           transformOrigin: "center",
           flexShrink: 0,
           "--demo-fill-color": fillColor,
-          transform: phase === "compressing" ? `rotate(${360 * compressProgress}deg)` : undefined,
+          transform: phase === "compressing" ? `rotate(${(compressStartFrac + compressProgress * (1 - compressStartFrac)) * 360}deg)` : undefined,
         } as CSSProperties}
         width={size} height={size}
         viewBox={`0 0 ${size} ${size}`}
@@ -179,9 +181,16 @@ export default function ListingPage() {
   const [analysisPhase,    setAnalysisPhase]    = useState<AnalysisPhase>(
     hasInitialScore ? "filling" : isPendingFromSearch ? "loading" : "idle"
   );
-  const [compressProgress, setCompressProgress] = useState(0);
-  const [fillValue,        setFillValue]        = useState(0);
-  const targetScoreRef = useRef<number>(listing?.aiScore ?? 0);
+  const [compressProgress,  setCompressProgress]  = useState(0);
+  const [compressStartFrac, setCompressStartFrac] = useState(0);
+  const [fillValue,         setFillValue]         = useState(0);
+  const targetScoreRef  = useRef<number>(listing?.aiScore ?? 0);
+  const loadingStartRef = useRef<number>(0);
+
+  // ── Track loading phase start time for smooth compressing handoff ────────
+  useEffect(() => {
+    if (analysisPhase === "loading") loadingStartRef.current = performance.now();
+  }, [analysisPhase]);
 
   // ── Save / view tracking ──────────────────────────────────────────────────
   useEffect(() => {
@@ -244,6 +253,7 @@ export default function ListingPage() {
       updateSavedListing(scored);
       updateRecentlyViewed(scored);
       navigate(".", { replace: true, state: { listing: { ...scored, analysisPending: false } } });
+      setCompressStartFrac((performance.now() - loadingStartRef.current) % LOADING_PERIOD_MS / LOADING_PERIOD_MS);
       setCompressProgress(0);
       setFillValue(0);
       setAnalysisPhase("compressing");
@@ -338,6 +348,7 @@ export default function ListingPage() {
       updateSavedListing(enriched);
       updateRecentlyViewed(enriched);
       navigate(".", { replace: true, state: { listing: enriched } });
+      setCompressStartFrac((performance.now() - loadingStartRef.current) % LOADING_PERIOD_MS / LOADING_PERIOD_MS);
       setAnalysisPhase("compressing");
     } catch (err) {
       setAnalyzeError(err instanceof Error ? err.message : "Analysis failed");
@@ -562,6 +573,7 @@ export default function ListingPage() {
                         phase={analysisPhase}
                         fillProgress={fillProgress}
                         compressProgress={compressProgress}
+                        compressStartFrac={compressStartFrac}
                         targetValue={targetScore}
                         size={150}
                       />
@@ -621,6 +633,7 @@ export default function ListingPage() {
                       phase={analysisPhase}
                       fillProgress={fillProgress}
                       compressProgress={compressProgress}
+                      compressStartFrac={compressStartFrac}
                       targetValue={value ?? 0}
                       size={50}
                     />

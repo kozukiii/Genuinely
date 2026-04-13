@@ -321,12 +321,12 @@
 .page-pending-ring__arc {
   stroke: #39ff9d;
   fill: none;
-  shape-rendering: geometricPrecision;
   vector-effect: non-scaling-stroke;
 }
 
 .page-pending-ring--loading {
-  animation: pageRingSpinLoading 3s linear forwards;
+  animation: pageRingSpinLoading 1.2s linear infinite;
+  will-change: transform;
 }
 
 .page-pending-ring--compressing {
@@ -349,7 +349,7 @@
 
 @keyframes pageRingSpinLoading {
   to {
-    transform: rotate(1080deg);
+    transform: rotate(360deg);
   }
 }
 
@@ -560,21 +560,16 @@
 
 
 .demo-external-link {
-  position: absolute;
-  top: 22rem;
-  transform: translateY(-100%);
-  left: 0;
-  right: 0;
   display: flex;
   box-sizing: border-box;
 }
 
 .demo-external-link:hover {
-  transform: translateY(calc(-100% - 2px));
+  transform: translateY(-2px);
 }
 
 .demo-external-link:active {
-  transform: translateY(calc(-100% - 1px)) scale(0.99);
+  transform: translateY(-1px) scale(0.99);
 }
 
 .demo-score-bar-wrap--pending {
@@ -881,21 +876,9 @@
 
   /* External link */
   .demo-external-link {
-    position: static;
-    top: auto;
-    transform: none;
     margin-top: 0.5rem;
     width: 100%;
     justify-content: center;
-    box-sizing: border-box;
-  }
-
-  .demo-external-link:hover {
-    transform: translateY(-2px);
-  }
-
-  .demo-external-link:active {
-    transform: translateY(-1px) scale(0.99);
   }
 
   .similar-listings-section {

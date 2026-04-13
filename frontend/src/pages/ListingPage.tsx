@@ -503,13 +503,15 @@ export default function ListingPage() {
                   ) : (
                     <p className="page-price">{money}</p>
                   )}
-                  {listing.shippingPrice != null && (
+                  {listing.shippingPrice != null ? (
                     <span className="page-shipping">
                       {listing.shippingPrice === 0
                         ? "Free shipping"
                         : `+ ${new Intl.NumberFormat(undefined, { style: "currency", currency: listing.currency ?? "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(listing.shippingPrice)} shipping`}
                     </span>
-                  )}
+                  ) : listing.shippingCalculated ? (
+                    <span className="page-shipping">Calculated shipping</span>
+                  ) : null}
                 </div>
                 {listing.condition && <span className="page-condition">{listing.condition}</span>}
                 {sellerLine && <p className="page-seller">{sellerLine}</p>}

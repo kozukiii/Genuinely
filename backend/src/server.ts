@@ -12,8 +12,13 @@ import featuredRoutes from "./routes/featuredRoutes";
 const app = express();
 app.disable("x-powered-by");
 
-const allowedOrigin = process.env.ALLOWED_ORIGIN ?? "http://localhost:5173";
-app.use(cors({ origin: allowedOrigin }));
+const allowedOrigins = (process.env.ALLOWED_ORIGIN ?? "http://localhost:5173").split(",").map(s => s.trim());
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) callback(null, true);
+    else callback(new Error("Not allowed by CORS"));
+  },
+}));
 
 const limiter = rateLimit({
   windowMs: 5 * 60 * 1000, // 5 minutes

@@ -7,7 +7,7 @@ type TokenCache = {
   expires_at: number; // unix seconds
 };
 
-const CACHE_PATH = path.join(process.cwd(), ".cache", "ebay_token.json");
+const CACHE_PATH = path.join(process.env.DATA_DIR ?? path.join(process.cwd(), "data"), "ebay_token.json");
 const REFRESH_EARLY_SECONDS = 120; // refresh 2 min before expiry
 
 let inMemory: TokenCache | null = null;

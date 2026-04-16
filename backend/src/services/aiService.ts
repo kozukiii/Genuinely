@@ -1,6 +1,7 @@
-import { analyzeListingWithImages, batchAnalyzeListingsWithImages, EBAY_BATCH_SYSTEM_PROMPT } from "../ai/ebayOverview.openai";
+import { analyzeListingWithImages, batchAnalyzeListingsWithImages, EBAY_BATCH_SYSTEM_PROMPT } from "../ai/ebayOverview";
 import { extractStructuredAnalysis } from "../utils/extractStructuredAnalysis";
 import { calculatePriceFairness } from "./scoring/priceFairnessScore";
+import { getCachedAnalysis, setCachedAnalysis, setCachedAnalysisBatch } from "./analysisCache";
 
 // Helper for safe average
 function average(nums: Array<number | null | undefined>) {
@@ -92,31 +93,102 @@ function parseAIAnalysis(listing: any, analysis: string, context?: string | null
 }
 
 export async function analyzeItemWithAI(merged: any, context?: string | null) {
+  const cached = merged.id && merged.source
+    ? getCachedAnalysis(merged.source, merged.id)
+    : null;
+
+  if (cached) {
+    return {
+      aiScore: cached.aiScore,
+      aiScores: cached.aiScores,
+      overview: cached.overview,
+      debugInfo: buildEbayDebugInfo(merged),
+      rawAnalysis: "",
+      marketContext: context ?? undefined,
+      systemPrompt: EBAY_BATCH_SYSTEM_PROMPT,
+    };
+  }
+
   const analysis = await analyzeListingWithImages(merged, context);
-  return {
+  const result = {
     ...parseAIAnalysis(merged, analysis, context),
     marketContext: context ?? undefined,
     systemPrompt: EBAY_BATCH_SYSTEM_PROMPT,
   };
+
+  if (merged.id && merged.source) {
+    setCachedAnalysis(merged.source, merged.id, {
+      aiScore: result.aiScore,
+      aiScores: result.aiScores,
+      overview: result.overview,
+    });
+  }
+
+  return result;
 }
 
 export async function analyzeItemsWithAI(items: any[], context?: string | null, systemPrompt?: string | null) {
   if (items.length === 0) return [];
 
-  const BATCH_SIZE = 8;
-  const results: any[] = [];
+  // Partition into cache hits and misses
+  const resultMap = new Map<number, any>();
+  const uncachedIndices: number[] = [];
 
-  for (let start = 0; start < items.length; start += BATCH_SIZE) {
-    const chunk = items.slice(start, start + BATCH_SIZE);
-    const rawStrings = await batchAnalyzeListingsWithImages(chunk, context, systemPrompt);
-    for (let i = 0; i < chunk.length; i++) {
-      results.push({
-        ...chunk[i],
-        ...parseAIAnalysis(chunk[i], rawStrings[i], context),
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const cached = item.id && item.source
+      ? getCachedAnalysis(item.source, item.id)
+      : null;
+
+    if (cached) {
+      console.log(`[analysisCache] HIT  ${item.source}-${item.id}`);
+      resultMap.set(i, {
+        ...item,
+        aiScore: cached.aiScore,
+        aiScores: cached.aiScores,
+        overview: cached.overview,
+        debugInfo: buildEbayDebugInfo(item),
+        rawAnalysis: "",
         systemPrompt: systemPrompt ?? EBAY_BATCH_SYSTEM_PROMPT,
       });
+    } else {
+      uncachedIndices.push(i);
     }
   }
 
-  return results;
+  console.log(`[analysisCache] ${items.length - uncachedIndices.length}/${items.length} hits, ${uncachedIndices.length} going to Groq`);
+
+  // Score uncached items in batches of 8, one read+write per chunk
+  const BATCH_SIZE = 8;
+  for (let start = 0; start < uncachedIndices.length; start += BATCH_SIZE) {
+    const batchIndices = uncachedIndices.slice(start, start + BATCH_SIZE);
+    const chunk = batchIndices.map((i) => items[i]);
+    const rawStrings = await batchAnalyzeListingsWithImages(chunk, context, systemPrompt);
+
+    const toCache: Parameters<typeof setCachedAnalysisBatch>[0] = [];
+
+    for (let j = 0; j < chunk.length; j++) {
+      const item = chunk[j];
+      const origIdx = batchIndices[j];
+      const parsed = parseAIAnalysis(item, rawStrings[j], context);
+
+      resultMap.set(origIdx, {
+        ...item,
+        ...parsed,
+        systemPrompt: systemPrompt ?? EBAY_BATCH_SYSTEM_PROMPT,
+      });
+
+      if (item.id && item.source) {
+        toCache.push({
+          source: item.source,
+          id: item.id,
+          result: { aiScore: parsed.aiScore, aiScores: parsed.aiScores, overview: parsed.overview },
+        });
+      }
+    }
+
+    setCachedAnalysisBatch(toCache);
+  }
+
+  return items.map((_, i) => resultMap.get(i)!);
 }

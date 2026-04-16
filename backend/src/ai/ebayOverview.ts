@@ -3,7 +3,7 @@ import dotenv from "dotenv";
 
 dotenv.config({ quiet: true });
 
-const client = new OpenAI({
+const groq = new OpenAI({
   apiKey: process.env.GROQ_API_KEY!,
   baseURL: "https://api.groq.com/openai/v1",
 });
@@ -276,7 +276,7 @@ DEBUG INFO:
     });
   }
 
-  const response = await client.chat.completions.create({
+  const response = await groq.chat.completions.create({
     model: "meta-llama/llama-4-scout-17b-16e-instruct",
     messages,
     max_tokens: 1000,
@@ -311,7 +311,12 @@ ALWAYS APPLY:
 - DO NOT include numeric scores inside the overview text
 - DO NOT add extra JSON fields
 
-OUTPUT FORMAT — return ONLY a JSON array (no markdown, no backticks):
+JSON FORMATTING RULES — your output must pass JSON.parse() without any modification:
+- Write every "overview" value as a single unbroken line — no literal newline characters inside any string value
+- Always put a comma between every object in the array; never omit commas between objects
+- Output nothing before the opening [ or after the closing ] — no preamble, no explanation
+
+OUTPUT FORMAT — return ONLY a JSON array:
 [
   {
     "listingIndex": 0,
@@ -348,7 +353,12 @@ GENERAL RULES:
 - DO NOT include numeric scores inside the overview text
 - DO NOT add extra JSON fields
 
-OUTPUT FORMAT — return ONLY a JSON array (no markdown, no backticks):
+JSON FORMATTING RULES — your output must pass JSON.parse() without any modification:
+- Write every "overview" value as a single unbroken line — no literal newline characters inside any string value
+- Always put a comma between every object in the array; never omit commas between objects
+- Output nothing before the opening [ or after the closing ] — no preamble, no explanation
+
+OUTPUT FORMAT — return ONLY a JSON array:
 [
   {
     "listingIndex": 0,
@@ -401,6 +411,64 @@ function buildImageAwareBatches(listings: any[]): BatchEntry[][] {
 
   if (current.length > 0) batches.push(current);
   return batches;
+}
+
+// Escape literal newlines/carriage-returns inside JSON string values.
+// Used as a fallback repair on individual objects that fail to parse.
+function repairLiteralNewlines(s: string): string {
+  let out = "";
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (escaped) { out += ch; escaped = false; continue; }
+    if (ch === "\\") { escaped = true; out += ch; continue; }
+    if (ch === '"') { inString = !inString; out += ch; continue; }
+    if (inString && ch === "\r") continue;
+    if (inString && ch === "\n") { out += "\\n"; continue; }
+    out += ch;
+  }
+  return out;
+}
+
+// Extract each top-level {...} object from the model's raw response by tracking brace depth.
+// Resilient to missing commas between objects, stray text before/after the array, and any
+// other inter-object formatting issues. Each object is parsed individually so one bad entry
+// cannot fail the whole batch.
+function extractObjects(raw: string): any[] {
+  const results: any[] = [];
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i];
+    if (escaped) { escaped = false; continue; }
+    if (ch === "\\" && inString) { escaped = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+
+    if (ch === "{") {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (ch === "}") {
+      depth--;
+      if (depth === 0 && start !== -1) {
+        const slice = raw.slice(start, i + 1);
+        try {
+          results.push(JSON.parse(slice));
+        } catch {
+          try {
+            results.push(JSON.parse(repairLiteralNewlines(slice).replace(/,(\s*[}\]])/g, "$1")));
+          } catch { /* skip truly unparseable object */ }
+        }
+        start = -1;
+      }
+    }
+  }
+
+  return results;
 }
 
 async function _runEbayBatch(entries: BatchEntry[], context?: string | null, systemPrompt?: string | null): Promise<string[]> {
@@ -461,7 +529,7 @@ async function _runEbayBatch(entries: BatchEntry[], context?: string | null, sys
 
   let rawResponse: string;
   try {
-    const response = await groqWithRetry(() => client.chat.completions.create({
+    const response = await groqWithRetry(() => groq.chat.completions.create({
       model: "meta-llama/llama-4-scout-17b-16e-instruct",
       messages: [
         { role: "system", content: systemContent },
@@ -484,11 +552,8 @@ async function _runEbayBatch(entries: BatchEntry[], context?: string | null, sys
     const start = rawResponse.indexOf("[");
     const end = rawResponse.lastIndexOf("]");
     if (start === -1 || end === -1 || end < start) throw new Error("No JSON array found in response");
-    const extracted = rawResponse.slice(start, end + 1);
-    // Repair common LLM JSON issues: trailing commas before ] or }
-    const repaired = extracted.replace(/,(\s*[}\]])/g, "$1");
-    const parsed = JSON.parse(repaired);
-    if (!Array.isArray(parsed)) throw new Error("Response was not a JSON array");
+    const parsed = extractObjects(rawResponse);
+    if (parsed.length === 0) throw new Error("No objects extracted from response");
 
     return listings.map((_, i) => {
       const item = parsed.find((x: any) => x.listingIndex === i) ?? parsed[i];

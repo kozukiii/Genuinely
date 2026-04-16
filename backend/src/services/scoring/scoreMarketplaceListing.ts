@@ -1,4 +1,4 @@
-import { analyzeMarketplaceListingWithImages, batchAnalyzeMarketplaceListingsWithImages, MARKETPLACE_BATCH_SYSTEM_PROMPT } from "../../ai/marketplaceOverview.openai";
+import { analyzeMarketplaceListingWithImages, batchAnalyzeMarketplaceListingsWithImages, MARKETPLACE_BATCH_SYSTEM_PROMPT } from "../../ai/marketplaceOverview";
 import { extractStructuredAnalysis } from "../../utils/extractStructuredAnalysis";
 import { calculatePriceFairness, isAcceptsOffersPrice } from "./priceFairnessScore";
 

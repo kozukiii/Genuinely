@@ -12,6 +12,7 @@ import {
   clearAnalysisStore,
   publishAnalysisResult,
   publishAnalysisFailure,
+  subscribeToAnalysis,
 } from "../utils/analysisStore";
 import { getSavedListings } from "../utils/savedListings";
 import { getRecentlyViewed } from "../utils/recentlyViewed";
@@ -330,6 +331,8 @@ export default function SearchPage() {
 
   // All active analysis controllers — all cancelled on new search/filter
   const analysisControllersRef = useRef<AbortController[]>([]);
+  // Subscriptions to the module-level analysis store set up during hydration
+  const hydrateSubsRef = useRef<(() => void)[]>([]);
 
   function abortAllAnalysis() {
     for (const ctrl of analysisControllersRef.current) ctrl.abort();
@@ -561,6 +564,10 @@ export default function SearchPage() {
 
   // ── Hydrate from sessionStorage ─────────────────────────────────────────
   function hydrate() {
+    // Clear any subscriptions from a previous hydration call
+    hydrateSubsRef.current.forEach((u) => u());
+    hydrateSubsRef.current = [];
+
     try {
       const savedQuery = sessionStorage.getItem(SEARCH_QUERY_KEY) ?? "";
       const savedRaw = sessionStorage.getItem(SEARCH_LISTINGS_KEY);
@@ -570,7 +577,27 @@ export default function SearchPage() {
       if (savedPage) setPage(Number(savedPage) || 1);
       if (savedRaw) {
         const parsed = JSON.parse(savedRaw) as Listing[];
-        if (Array.isArray(parsed)) setListings(parsed);
+        if (Array.isArray(parsed)) {
+          setListings(parsed);
+          // Re-subscribe to analysis results for items that had no score when we
+          // navigated away. The module-level analysisStore survives route changes,
+          // so any group that finished while SearchPage was unmounted will fire the
+          // callback synchronously; groups still in-flight fire it when they land.
+          hydrateSubsRef.current = parsed
+            .filter((l) => l.aiScore == null)
+            .map((l) =>
+              subscribeToAnalysis(l, (result) => {
+                if (!result) return;
+                setListings((prev) =>
+                  prev.map((p) =>
+                    p.id === result.id && p.source === result.source
+                      ? { ...result, analysisPending: false }
+                      : p
+                  )
+                );
+              })
+            );
+        }
       }
       const savedFilters = sessionStorage.getItem(SEARCH_FILTERS_KEY);
       if (savedFilters) {

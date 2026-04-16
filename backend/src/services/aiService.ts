@@ -1,7 +1,7 @@
 import { analyzeListingWithImages, batchAnalyzeListingsWithImages, EBAY_BATCH_SYSTEM_PROMPT } from "../ai/ebayOverview";
 import { extractStructuredAnalysis } from "../utils/extractStructuredAnalysis";
 import { calculatePriceFairness } from "./scoring/priceFairnessScore";
-import { getCachedAnalysis, setCachedAnalysis, setCachedAnalysisBatch } from "./analysisCache";
+import { getCachedAnalysis, setCachedAnalysis, setCachedAnalysisBatch, readCacheStore, getCachedAnalysisFromStore } from "./analysisCache";
 
 // Helper for safe average
 function average(nums: Array<number | null | undefined>) {
@@ -130,14 +130,15 @@ export async function analyzeItemWithAI(merged: any, context?: string | null) {
 export async function analyzeItemsWithAI(items: any[], context?: string | null, systemPrompt?: string | null) {
   if (items.length === 0) return [];
 
-  // Partition into cache hits and misses
+  // Read store once — avoids N synchronous disk reads for N items
+  const store = readCacheStore();
   const resultMap = new Map<number, any>();
   const uncachedIndices: number[] = [];
 
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
     const cached = item.id && item.source
-      ? getCachedAnalysis(item.source, item.id)
+      ? getCachedAnalysisFromStore(store, item.source, item.id)
       : null;
 
     if (cached) {

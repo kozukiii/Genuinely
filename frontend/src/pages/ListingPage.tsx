@@ -331,10 +331,11 @@ export default function ListingPage() {
     setCompressProgress(0);
     setFillValue(0);
     try {
+      const isReanalyze = !!(analysisResult ?? (ai.aiScore != null ? ai : null));
       const res = await fetch(`${API_BASE}/api/search/analyze`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(listing),
+        body: JSON.stringify(isReanalyze ? { ...listing, _reanalyze: true } : listing),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
@@ -561,6 +562,20 @@ export default function ListingPage() {
                           <span className="demo-score-label-end" style={{ left: `${highPct}%` }}>High · ${ai.priceHigh}</span>
                         </div>
                       </div>
+                      {analysisPhase === "done" && ai.priceSource && (
+                        <div style={{ marginTop: 6, textAlign: "right" }}>
+                          <a
+                            href={ai.priceSource.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{ fontSize: 11, color: "#888", textDecoration: "none" }}
+                            onMouseEnter={e => (e.currentTarget.style.color = "#aaa")}
+                            onMouseLeave={e => (e.currentTarget.style.color = "#888")}
+                          >
+                            {ai.priceSource.name}
+                          </a>
+                        </div>
+                      )}
                     </div>
                   );
                 })()}

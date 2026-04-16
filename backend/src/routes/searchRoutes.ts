@@ -5,6 +5,7 @@ import { groupAndContextualize } from "../ai/listingContext";
 import { getEbayItemByNumericId } from "../services/ebayService";
 import { getMarketplaceListingByGraphqlForAnalysis, getMarketplaceListingBySearchForAnalysis } from "../services/marketplaceService";
 import { getLocationFromIp, extractClientIp } from "../utils/geoIp";
+import { deleteCachedAnalysis } from "../services/analysisCache";
 
 const router = Router();
 
@@ -69,8 +70,9 @@ async function scoreSingleListingWithContext(listing: any) {
 
   return {
     ...result,
-    ...(group?.priceLow  != null ? { priceLow:  group.priceLow  } : {}),
-    ...(group?.priceHigh != null ? { priceHigh: group.priceHigh } : {}),
+    ...(group?.priceLow   != null ? { priceLow:   group.priceLow   } : {}),
+    ...(group?.priceHigh  != null ? { priceHigh:  group.priceHigh  } : {}),
+    ...(group?.priceSource != null ? { priceSource: group.priceSource } : {}),
   };
 }
 
@@ -79,9 +81,12 @@ router.get("/", searchAll);
 
 // POST /api/analyze — analyze a single listing on demand
 router.post("/analyze", async (req, res) => {
-  const listing = req.body;
+  const { _reanalyze, ...listing } = req.body;
   if (!listing || !listing.id || !listing.source) {
     return res.status(400).json({ error: "Missing listing id or source" });
+  }
+  if (_reanalyze) {
+    deleteCachedAnalysis(listing.source, listing.id);
   }
   try {
     const result = await scoreSingleListingWithContext(listing);

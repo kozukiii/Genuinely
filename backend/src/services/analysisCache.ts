@@ -59,6 +59,23 @@ export function getCachedAnalysis(source: string, id: string): AnalysisCacheEntr
   return entry;
 }
 
+// Read store once, then look up many entries without re-reading disk.
+export function readCacheStore(): AnalysisCacheStore {
+  return readStore();
+}
+
+export function getCachedAnalysisFromStore(store: AnalysisCacheStore, source: string, id: string): AnalysisCacheEntry | null {
+  const entry = store[`${source}-${id}`];
+  if (!entry || isExpired(entry)) return null;
+  return entry;
+}
+
+export function deleteCachedAnalysis(source: string, id: string) {
+  const store = readStore();
+  delete store[`${source}-${id}`];
+  writeStore(store);
+}
+
 export function setCachedAnalysis(source: string, id: string, result: Omit<AnalysisCacheEntry, "scoredAt">) {
   const store = readStore();
   store[`${source}-${id}`] = { scoredAt: new Date().toISOString(), ...result };

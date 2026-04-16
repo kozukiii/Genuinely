@@ -179,7 +179,7 @@ export default function SearchBar({ onSearch, initialQuery = "", onLinkAnalysis 
 
       {onLinkAnalysis && (
         <button className="search-bar-link-btn" onClick={onLinkAnalysis}>
-          🔗 Analyze a listing URL
+          Have a listing link that needs analysis?
         </button>
       )}
     </div>

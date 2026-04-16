@@ -31,6 +31,7 @@ export interface Listing {
 
   // you already use this; keep it
   location?: string;
+  delivery_types?: string[]; // marketplace: e.g. ["SHIPPING", "LOCAL_PICKUP"]
 
   // ebay-ish
   shippingPrice?: number;

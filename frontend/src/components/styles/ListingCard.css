@@ -237,6 +237,23 @@
   color: var(--muted);
 }
 
+.listing-delivery-types {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.35rem;
+}
+
+.listing-delivery-badge {
+  font-size: 0.72rem;
+  color: rgba(77, 166, 255, 0.9);
+  background: rgba(77, 166, 255, 0.08);
+  border: 1px solid rgba(77, 166, 255, 0.22);
+  border-radius: 999px;
+  padding: 0.18rem 0.55rem;
+  white-space: nowrap;
+}
+
 .listing-price-row {
   display: flex;
   align-items: baseline;
@@ -552,6 +569,11 @@
 
   .listing-condition {
     font-size: 0.68rem;
+    padding: 0.12rem 0.4rem;
+  }
+
+  .listing-delivery-badge {
+    font-size: 0.65rem;
     padding: 0.12rem 0.4rem;
   }
 

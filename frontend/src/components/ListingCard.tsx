@@ -6,6 +6,10 @@ import type { Listing } from "../types/Listing";
 import { getHighResImage } from "../utils/imageHelpers";
 import { isSaved, toggleSaved } from "../utils/savedListings";
 
+function formatDeliveryType(type: string): string {
+  return type.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 function sourceLabel(source: Listing["source"]) {
   if (source === "marketplace") return "Marketplace";
   return "eBay";
@@ -101,9 +105,20 @@ export default function ListingCard({ data }: { data: Listing }) {
             )}
 
             {data.source === "marketplace" ? (
-              data.location && (
-                <p className="listing-location">📍 {data.location}</p>
-              )
+              <>
+                {data.location && (
+                  <p className="listing-location">📍 {data.location}</p>
+                )}
+                {Array.isArray(data.delivery_types) && data.delivery_types.length > 0 && (
+                  <div className="listing-delivery-types">
+                    {data.delivery_types.map((type) => (
+                      <span key={type} className="listing-delivery-badge">
+                        {formatDeliveryType(type)}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </>
             ) : (
               (data.feedback || data.seller) && (
                 <p className="listing-seller-line">

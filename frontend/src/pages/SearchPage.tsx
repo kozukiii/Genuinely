@@ -37,6 +37,7 @@ const SEARCH_LISTINGS_KEY = "search:listings";
 const SEARCH_TIMESTAMP_KEY = "search:ts";
 const SEARCH_PAGE_KEY = "search:page";
 const SEARCH_FILTERS_KEY = "search:filters";
+const SEARCH_PENDING_KEY = "search:pending";
 
 const DEFAULT_FILTERS: FilterState = {
   minPrice: "",
@@ -144,6 +145,13 @@ async function runAnalysisPipeline(
   }
 
   // 2. Analyze each group in parallel — update state as each one resolves
+  const coveredIndices = new Set(groups.flatMap((g) => g.indices));
+  const orphanIndices = items.map((_, i) => i).filter((i) => !coveredIndices.has(i));
+  if (orphanIndices.length > 0) {
+    // LLM omitted these indices from all groups — append a catch-all group with no context
+    groups = [...groups, { canonicalName: "", specificity: "broad", indices: orphanIndices, context: null }];
+  }
+
   await Promise.all(
     groups.map(async (group) => {
       const groupListings = group.indices
@@ -289,6 +297,7 @@ export default function SearchPage() {
   const [resultKey, setResultKey] = useState(0);
   const [linkModalOpen, setLinkModalOpen] = useState(false);
   const [savedVersion, setSavedVersion] = useState(0);
+  const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
     const update = () => setSavedVersion((v) => v + 1);
@@ -401,12 +410,13 @@ export default function SearchPage() {
 
   // ── Initial search (new query) ──────────────────────────────────────────
   const handleSearch = useCallback(
-    async (query: string) => {
+    async (query: string, activeFilters: FilterState = filtersRef.current) => {
       const q = query.trim();
       if (!q) return;
 
       // Cancel any in-flight analysis from a previous search
       abortAllAnalysis();
+      sessionStorage.removeItem(SEARCH_PENDING_KEY);
 
       if (listingsRef.current.length > 0) {
         setSweeping(true);
@@ -419,10 +429,10 @@ export default function SearchPage() {
       setCurrentQuery(q);
       setPage(1);
 
-      const parsedLimit = filtersRef.current.limit !== "" ? Math.max(1, parseInt(filtersRef.current.limit, 10)) : undefined;
+      const parsedLimit = activeFilters.limit !== "" ? Math.max(1, parseInt(activeFilters.limit, 10)) : undefined;
       const fetchSize = parsedLimit ?? PRELOAD_SIZE;
       try {
-        const items = await fetchFromApi(q, fetchSize, filters);
+        const items = await fetchFromApi(q, fetchSize, activeFilters);
 
         // With no custom limit: only mark/analyze page 1; page 2 stays raw until navigated to
         const analyzeCount = parsedLimit ? items.length : PAGE_SIZE;
@@ -447,7 +457,7 @@ export default function SearchPage() {
         setLoading(false);
       }
     },
-    [filters.sources]
+    []
   );
 
   // ── Next page ───────────────────────────────────────────────────────────
@@ -529,37 +539,8 @@ export default function SearchPage() {
     sessionStorage.setItem(SEARCH_FILTERS_KEY, JSON.stringify(next));
     const q = queryRef.current;
     if (!q) return;
-
-    abortAllAnalysis();
-    setFetchingNew(true);
-    setLoading(true);
-    setError(null);
-    setPage(1);
-
-    try {
-      const parsedLimit = next.limit !== "" ? Math.max(1, parseInt(next.limit, 10)) : undefined;
-      const fetchSize = parsedLimit ?? PRELOAD_SIZE;
-      const items = await fetchFromApi(q, fetchSize, next);
-
-      const analyzeCount = parsedLimit ? items.length : PAGE_SIZE;
-      const withPending = items.map((l: Listing, i: number) =>
-        i < analyzeCount ? { ...l, analysisPending: true } : l
-      );
-      setListings(withPending);
-      setFetchingNew(false);
-      setResultKey((k) => k + 1);
-      setHasMore(items.length >= fetchSize);
-      sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(items));
-      sessionStorage.setItem(SEARCH_PAGE_KEY, "1");
-
-      startAnalysis(q, items.slice(0, analyzeCount));
-    } catch (err) {
-      setFetchingNew(false);
-      setError(`Failed to load listings: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+    await handleSearch(q, next);
+  }, [handleSearch]);
 
 
   // ── Hydrate from sessionStorage ─────────────────────────────────────────
@@ -607,8 +588,27 @@ export default function SearchPage() {
     } catch {}
   }
 
-  useEffect(() => { hydrate(); }, []);
-  useEffect(() => { if (navType === "POP") hydrate(); }, [navType]);
+  useEffect(() => {
+    hydrate();
+    setHydrated(true);
+  }, []);
+  useEffect(() => {
+    if (navType === "POP") {
+      hydrate();
+      setHydrated(true);
+    }
+  }, [navType]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+
+    const pending = sessionStorage.getItem(SEARCH_PENDING_KEY);
+    const savedQuery = sessionStorage.getItem(SEARCH_QUERY_KEY)?.trim();
+    if (pending !== "1" || !savedQuery) return;
+
+    sessionStorage.removeItem(SEARCH_PENDING_KEY);
+    void handleSearch(savedQuery, filtersRef.current);
+  }, [hydrated, handleSearch]);
 
 
   // Persist scored listings to the search cache as they arrive

@@ -9,6 +9,11 @@ import { getSearchCache } from "../utils/searchCache";
 
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
+const SEARCH_QUERY_KEY = "search:query";
+const SEARCH_LISTINGS_KEY = "search:listings";
+const SEARCH_TIMESTAMP_KEY = "search:ts";
+const SEARCH_PAGE_KEY = "search:page";
+const SEARCH_PENDING_KEY = "search:pending";
 
 const CATEGORIES = [
   { label: "Trading Cards", query: "trading cards" },
@@ -128,7 +133,14 @@ export default function HomePage() {
   }, [savedItems]);
 
   function goToSearch(query: string) {
-    sessionStorage.setItem("search:query", query);
+    const trimmed = query.trim();
+    if (!trimmed) return;
+
+    sessionStorage.setItem(SEARCH_QUERY_KEY, trimmed);
+    sessionStorage.removeItem(SEARCH_LISTINGS_KEY);
+    sessionStorage.removeItem(SEARCH_TIMESTAMP_KEY);
+    sessionStorage.removeItem(SEARCH_PAGE_KEY);
+    sessionStorage.setItem(SEARCH_PENDING_KEY, "1");
     navigate("/search");
   }
 

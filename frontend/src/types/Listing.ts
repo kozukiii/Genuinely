@@ -26,6 +26,7 @@ export interface Listing {
   score?: number;
 
   location?: string;       // marketplace commonly provides
+  delivery_types?: string[]; // marketplace: e.g. ["SHIPPING", "LOCAL_PICKUP"]
   shippingPrice?: number;  // ebay commonly provides
   shippingCalculated?: boolean; // true when eBay uses calculated shipping (no resolved amount)
   shippingEstimated?: boolean;  // true when shippingPrice was estimated via weight lookup

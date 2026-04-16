@@ -11,6 +11,7 @@ import featuredRoutes from "./routes/featuredRoutes";
 
 const app = express();
 app.disable("x-powered-by");
+app.set("trust proxy", 1); // Render sits behind a load balancer that sets X-Forwarded-For
 
 const allowedOrigins = (process.env.ALLOWED_ORIGIN ?? "http://localhost:5173").split(",").map(s => s.trim());
 app.use(cors({

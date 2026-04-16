@@ -2,7 +2,20 @@ import OpenAI from "openai";
 import dotenv from "dotenv";
 import fetch from "node-fetch";
 
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { HttpsProxyAgent } = require("https-proxy-agent");
+
 dotenv.config({ quiet: true });
+
+const _proxyUrls = process.env.PROXY_URL
+  ? process.env.PROXY_URL.split(",").map((s) => s.trim()).filter(Boolean)
+  : [];
+
+function _getProxyAgent() {
+  if (_proxyUrls.length === 0) return undefined;
+  const url = _proxyUrls[Math.floor(Math.random() * _proxyUrls.length)];
+  return new HttpsProxyAgent(url);
+}
 
 const groq = new OpenAI({
   apiKey: process.env.GROQ_API_KEY!,
@@ -67,10 +80,12 @@ function formatAvailability(listing: any): string {
 
 async function fetchImageAsDataUrl(url: string): Promise<string | null> {
   try {
+    const agent = _getProxyAgent();
     const res = await fetch(url, {
       headers: {
         "user-agent": "Mozilla/5.0",
       },
+      ...(agent ? { agent } : {}),
     });
 
     if (!res.ok) {

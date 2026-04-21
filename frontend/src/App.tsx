@@ -1,6 +1,7 @@
 // src/App.tsx
 import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import NavBar from "./components/NavBar";
+import { AuthProvider } from "./context/AuthContext";
 
 // Pages
 import SearchPage from "./pages/SearchPage";
@@ -32,8 +33,10 @@ function AppRoutes() {
 export default function App() {
   return (
     <BrowserRouter>
-      <NavBar />
-      <AppRoutes />
+      <AuthProvider>
+        <NavBar />
+        <AppRoutes />
+      </AuthProvider>
     </BrowserRouter>
   );
 }

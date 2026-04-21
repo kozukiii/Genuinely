@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import "./styles/NavBar.css";
 import { getSavedListings } from "../utils/savedListings";
+import { useAuth } from "../context/AuthContext";
 
 function GenuinelyLogo() {
   return (
@@ -36,6 +37,7 @@ function GenuinelyLogo() {
 
 export default function NavBar() {
   const { pathname } = useLocation();
+  const { user, loading, login, logout } = useAuth();
   const [savedCount, setSavedCount] = useState(() => getSavedListings().length);
 
   useEffect(() => {
@@ -55,7 +57,7 @@ export default function NavBar() {
           </span>
         </Link>
 
-        <div className="nav-right">
+        <div className="nav-links-pill">
           <Link to="/" className={pathname === "/" ? "nav-item active" : "nav-item"}>
             Home
           </Link>
@@ -65,6 +67,33 @@ export default function NavBar() {
           <Link to="/cart" className={pathname === "/cart" ? "nav-item active" : "nav-item"}>
             Saved{savedCount > 0 && <span className="nav-saved-count">{savedCount}</span>}
           </Link>
+        </div>
+
+        <div className="nav-auth">
+          {!loading && (
+            user
+              ? (
+                <button
+                  type="button"
+                  className="nav-auth-avatar"
+                  onClick={() => logout()}
+                  title={`Signed in as ${user.email}`}
+                  aria-label="Sign out"
+                >
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">
+                    <path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/>
+                  </svg>
+                  <span className="nav-auth-label">Sign out</span>
+                </button>
+              )
+              : (
+                <div className="nav-auth-pill">
+                  <button type="button" className="nav-item nav-signin" onClick={login}>
+                    Sign in
+                  </button>
+                </div>
+              )
+          )}
         </div>
       </nav>
 

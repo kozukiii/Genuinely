@@ -87,12 +87,26 @@
 /* =========================
    Nav links
    ========================= */
-.nav-right {
+.nav-links-pill {
   display: flex;
   align-items: center;
   gap: 0.3rem;
-  justify-self: end;
+  justify-self: center;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  padding: 0.3rem 0.45rem;
+}
 
+.nav-auth {
+  display: flex;
+  align-items: center;
+  justify-self: end;
+}
+
+.nav-auth-pill {
+  display: flex;
+  align-items: center;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 999px;
@@ -145,6 +159,61 @@
 }
 
 /* =========================
+   Auth button
+   ========================= */
+.nav-auth-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.nav-signin {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: rgba(209, 213, 219, 0.75);
+  padding: 0.4rem 0.95rem;
+  border-radius: 999px;
+  transition: color 160ms ease, background 160ms ease;
+}
+
+.nav-signin:hover {
+  color: rgba(255, 255, 255, 0.95);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.nav-auth-avatar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 0.3rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(209, 213, 219, 0.75);
+  cursor: pointer;
+  transition: color 160ms ease, background 160ms ease, border-color 160ms ease;
+  flex-shrink: 0;
+}
+
+.nav-auth-avatar:hover {
+  color: rgba(255, 255, 255, 0.95);
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.nav-auth-label {
+  font-size: 0.65rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  line-height: 1;
+}
+
+/* =========================
    eBay notice banner
    ========================= */
 .nav-notice {
@@ -161,23 +230,16 @@
    ========================= */
 @media (max-width: 600px) {
   .navbar {
+    display: flex;
+    justify-content: space-between;
     padding: 0.65rem 1rem;
   }
 
-  .nav-logo-tagline {
+  .nav-logo {
     display: none;
   }
 
-  .nav-logo-mark {
-    width: 32px;
-    height: 32px;
-  }
-
-  .nav-logo-name {
-    font-size: 0.95rem;
-  }
-
-  .nav-right {
+  .nav-links-pill {
     gap: 0;
     padding: 0.25rem 0.3rem;
   }

@@ -125,3 +125,35 @@
   color: rgba(209, 213, 219, 0.8);
   line-height: 1.4;
 }
+
+.cart-sync-nudge {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  border-radius: 12px;
+  background: rgba(57, 255, 157, 0.05);
+  border: 1px solid rgba(57, 255, 157, 0.18);
+  color: rgba(209, 213, 219, 0.85);
+  font-size: 0.9rem;
+}
+
+.cart-sync-btn {
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(57, 255, 157, 0.45);
+  background: rgba(57, 255, 157, 0.1);
+  color: rgba(57, 255, 157, 0.95);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 160ms ease;
+}
+
+.cart-sync-btn:hover {
+  background: rgba(57, 255, 157, 0.18);
+}

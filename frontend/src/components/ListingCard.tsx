@@ -159,8 +159,7 @@ export default function ListingCard({ data }: { data: Listing }) {
               onClick={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                const next = toggleSaved(data);
-                setSaved(next);
+                setSaved(toggleSaved(data));
               }}
             >
               <svg viewBox="0 0 24 24" width="18" height="18" fill={saved ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

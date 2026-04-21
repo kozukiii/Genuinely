@@ -1,23 +1,32 @@
 import type { Listing } from "../types/Listing";
 
-const KEY = "saved:listings:v1";
+const API_BASE  = import.meta.env.VITE_API_BASE_URL ?? "";
+const LOCAL_KEY = "saved:listings:v1";
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function safeParse<T>(value: string | null, fallback: T): T {
-  try {
-    return value ? (JSON.parse(value) as T) : fallback;
-  } catch {
-    return fallback;
-  }
+  try { return value ? (JSON.parse(value) as T) : fallback; }
+  catch { return fallback; }
 }
 
+export function isLoggedIn(): boolean {
+  return document.cookie.includes("auth=1");
+}
+
+function notify() {
+  window.dispatchEvent(new Event("saved:listings:changed"));
+}
+
+// ── Public API — all sync (localStorage is the local cache) ──────────────────
+
 export function getSavedListings(): Listing[] {
-  return safeParse<Listing[]>(localStorage.getItem(KEY), []);
+  return safeParse<Listing[]>(localStorage.getItem(LOCAL_KEY), []);
 }
 
 export function setSavedListings(next: Listing[]) {
-  localStorage.setItem(KEY, JSON.stringify(next));
-  // notify the app so other components/pages can react
-  window.dispatchEvent(new Event("saved:listings:changed"));
+  localStorage.setItem(LOCAL_KEY, JSON.stringify(next));
+  notify();
 }
 
 export function isSaved(id: string): boolean {
@@ -28,16 +37,65 @@ export function updateSavedListing(listing: Listing) {
   const saved = getSavedListings();
   if (!saved.some((x) => x.id === listing.id)) return;
   setSavedListings(saved.map((x) => (x.id === listing.id ? listing : x)));
+
+  if (isLoggedIn()) {
+    fetch(`${API_BASE}/api/saved`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ listing }),
+    }).catch(() => {});
+  }
 }
 
 export function toggleSaved(listing: Listing): boolean {
-  const saved = getSavedListings();
+  const saved  = getSavedListings();
   const exists = saved.some((x) => x.id === listing.id);
-
-  const next = exists
+  const next   = exists
     ? saved.filter((x) => x.id !== listing.id)
     : [listing, ...saved];
-
   setSavedListings(next);
-  return !exists; // returns new state (true = saved)
+
+  if (isLoggedIn()) {
+    if (exists) {
+      fetch(`${API_BASE}/api/saved/${listing.source}/${listing.id}`, {
+        method: "DELETE", credentials: "include",
+      }).catch(() => {});
+    } else {
+      fetch(`${API_BASE}/api/saved`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ listing }),
+      }).catch(() => {});
+    }
+  }
+
+  return !exists;
+}
+
+// ── Called by AuthContext after login to merge local guest saves with server ──
+
+export async function syncFromServer(): Promise<void> {
+  try {
+    const local = localGet();
+
+    // Push any local guest saves up to the server first
+    for (const listing of local) {
+      await fetch(`${API_BASE}/api/saved`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ listing }),
+      }).catch(() => {});
+    }
+
+    // Then pull the full server list (now includes the merged items)
+    const res = await fetch(`${API_BASE}/api/saved`, { credentials: "include" });
+    if (!res.ok) return;
+    const data = await res.json();
+    const listings: Listing[] = data.listings ?? [];
+    localStorage.setItem(LOCAL_KEY, JSON.stringify(listings));
+    notify();
+  } catch { /* silent */ }
 }

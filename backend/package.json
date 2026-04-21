@@ -12,6 +12,8 @@
   },
   "dependencies": {
     "axios": "^1.13.1",
+    "better-sqlite3": "^12.9.0",
+    "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
@@ -19,16 +21,24 @@
     "form-data": "^4.0.4",
     "helmet": "^8.1.0",
     "https-proxy-agent": "^5.0.1",
+    "jsonwebtoken": "^9.0.3",
     "node-fetch": "^2.7.0",
     "nodemon": "^3.1.10",
     "openai": "^6.7.0",
+    "passport": "^0.7.0",
+    "passport-google-oauth20": "^2.0.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/cookie-parser": "^1.4.10",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.5",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^24.10.0",
-    "@types/node-fetch": "^2.6.13"
+    "@types/node-fetch": "^2.6.13",
+    "@types/passport": "^1.0.17",
+    "@types/passport-google-oauth20": "^2.0.17"
   }
 }

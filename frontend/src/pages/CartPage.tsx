@@ -3,12 +3,14 @@ import { Helmet } from "react-helmet-async";
 import ListingCard from "../components/ListingCard";
 import type { Listing } from "../types/Listing";
 import { getSavedListings, setSavedListings } from "../utils/savedListings";
+import { useAuth } from "../context/AuthContext";
 import "./styles/HomePage.css";
 import "./styles/CartPage.css";
 
 
 
 export default function CartPage() {
+  const { user, login } = useAuth();
   const [saved, setSaved] = useState<Listing[]>([]);
   const [query, setQuery] = useState("");
 
@@ -50,6 +52,12 @@ export default function CartPage() {
         <title>Saved Items | Genuinely</title>
         <meta name="description" content="Your saved eBay and Facebook Marketplace listings, all in one place." />
       </Helmet>
+      {!user && saved.length > 0 && (
+        <div className="cart-sync-nudge">
+          <span>Sign in to sync your saved listings across devices.</span>
+          <button type="button" className="cart-sync-btn" onClick={login}>Sign in with Google</button>
+        </div>
+      )}
       <div className="cart-header">
         <div className="cart-title-row">
           <h1 className="cart-title">Saved</h1>

@@ -41,7 +41,14 @@ router.get("/google",
 );
 
 router.get("/google/callback",
-  passport.authenticate("google", { session: false, failureRedirect: `${process.env.FRONTEND_URL}/` }),
+  (req, res, next) => {
+    passport.authenticate("google", { session: false }, (err: any, user: any, info: any) => {
+      console.error("[auth/callback] err:", err?.message, "| user:", !!user, "| info:", info);
+      if (err || !user) { res.redirect(`${process.env.FRONTEND_URL}/`); return; }
+      req.user = user;
+      next();
+    })(req, res, next);
+  },
   (req, res) => {
     const user = req.user as { id: number; email: string; displayName: string };
     const token = jwt.sign(

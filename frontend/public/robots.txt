@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /cart
+Disallow: /listingcard-demo
+
+Sitemap: https://genuinelyshop.com/sitemap.xml

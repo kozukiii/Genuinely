@@ -41,6 +41,7 @@ router.get("/google",
 );
 
 router.get("/google/callback", (req, res, next) => {
+  console.log("[auth/callback] hit", req.url);
   passport.authenticate("google", { session: false }, (err: any, user: any) => {
     if (err || !user) { res.redirect(`${process.env.FRONTEND_URL}/`); return; }
 

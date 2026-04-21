@@ -1,4 +1,5 @@
 import { Router } from "express";
+import type { CookieOptions, Request } from "express";
 import passport from "passport";
 import { Strategy as GoogleStrategy } from "passport-google-oauth20";
 import jwt from "jsonwebtoken";
@@ -36,6 +37,28 @@ passport.use(new GoogleStrategy(
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 
+
+function getCookieOptions(req: Request): CookieOptions {
+  const frontendUrl = process.env.FRONTEND_URL ?? "";
+  const frontendIsHttps = frontendUrl.startsWith("https://");
+  const forwardedProto = req.headers["x-forwarded-proto"];
+  const requestIsHttps = req.secure
+    || (typeof forwardedProto === "string" && forwardedProto.split(",")[0]?.trim() === "https");
+
+  // SameSite=None is required when frontend and API live on different sites.
+  // Browsers only accept SameSite=None when cookies are Secure.
+  const secure = frontendIsHttps || requestIsHttps;
+
+  return {
+    httpOnly: true,
+    secure,
+    sameSite: secure ? "none" : "lax",
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+    path: "/",
+  };
+}
+
+
 router.get("/google",
   passport.authenticate("google", { scope: ["profile", "email"], session: false }),
 );
@@ -47,13 +70,7 @@ router.get("/google/callback", (req, res, next) => {
     const { id, email, displayName } = user as { id: number; email: string; displayName: string };
     const token = jwt.sign({ id, email, displayName }, process.env.JWT_SECRET!, { expiresIn: "7d" });
 
-    const isProd = process.env.NODE_ENV === "production";
-    res.cookie("token", token, {
-      httpOnly: true,
-      secure:   isProd,
-      sameSite: isProd ? "none" : "lax",
-      maxAge:   7 * 24 * 60 * 60 * 1000,
-    });
+    res.cookie("token", token, getCookieOptions(req));
 
     res.redirect(`${process.env.FRONTEND_URL}/`);
   })(req, res, next);
@@ -71,9 +88,9 @@ router.get("/me", (req, res) => {
   }
 });
 
-router.post("/logout", (_req, res) => {
-  const isProd = process.env.NODE_ENV === "production";
-  res.clearCookie("token", { httpOnly: true, secure: isProd, sameSite: isProd ? "none" : "lax" });
+router.post("/logout", (req, res) => {
+  const { maxAge, ...cookieOptions } = getCookieOptions(req);
+  res.clearCookie("token", cookieOptions);
   res.json({ ok: true });
 });
 

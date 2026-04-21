@@ -40,22 +40,12 @@ router.get("/google",
   passport.authenticate("google", { scope: ["profile", "email"], session: false }),
 );
 
-router.get("/google/callback",
-  (req, res, next) => {
-    passport.authenticate("google", { session: false }, (err: any, user: any, info: any) => {
-      console.error("[auth/callback] err:", err?.message, "| user:", !!user, "| info:", info);
-      if (err || !user) { res.redirect(`${process.env.FRONTEND_URL}/`); return; }
-      req.user = user;
-      next();
-    })(req, res, next);
-  },
-  (req, res) => {
-    const user = req.user as { id: number; email: string; displayName: string };
-    const token = jwt.sign(
-      { id: user.id, email: user.email, displayName: user.displayName },
-      process.env.JWT_SECRET!,
-      { expiresIn: "7d" },
-    );
+router.get("/google/callback", (req, res, next) => {
+  passport.authenticate("google", { session: false }, (err: any, user: any) => {
+    if (err || !user) { res.redirect(`${process.env.FRONTEND_URL}/`); return; }
+
+    const { id, email, displayName } = user as { id: number; email: string; displayName: string };
+    const token = jwt.sign({ id, email, displayName }, process.env.JWT_SECRET!, { expiresIn: "7d" });
 
     const isProd = process.env.NODE_ENV === "production";
     res.cookie("token", token, {
@@ -66,8 +56,8 @@ router.get("/google/callback",
     });
 
     res.redirect(`${process.env.FRONTEND_URL}/`);
-  },
-);
+  })(req, res, next);
+});
 
 router.get("/me", (req, res) => {
   const token = req.cookies?.token;

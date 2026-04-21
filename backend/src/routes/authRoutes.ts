@@ -42,22 +42,29 @@ router.get("/google",
 
 router.get("/google/callback", (req, res, next) => {
   console.log("[auth/callback] hit", req.url);
-  passport.authenticate("google", { session: false }, (err: any, user: any) => {
-    if (err || !user) { res.redirect(`${process.env.FRONTEND_URL}/`); return; }
+  try {
+    passport.authenticate("google", { session: false }, (err: any, user: any) => {
+      console.log("[auth/callback] passport cb fired, err:", err?.message, "user:", !!user);
+      if (err || !user) { res.redirect(`${process.env.FRONTEND_URL}/`); return; }
 
-    const { id, email, displayName } = user as { id: number; email: string; displayName: string };
-    const token = jwt.sign({ id, email, displayName }, process.env.JWT_SECRET!, { expiresIn: "7d" });
+      const { id, email, displayName } = user as { id: number; email: string; displayName: string };
+      const token = jwt.sign({ id, email, displayName }, process.env.JWT_SECRET!, { expiresIn: "7d" });
 
-    const isProd = process.env.NODE_ENV === "production";
-    res.cookie("token", token, {
-      httpOnly: true,
-      secure:   isProd,
-      sameSite: isProd ? "none" : "lax",
-      maxAge:   7 * 24 * 60 * 60 * 1000,
-    });
+      const isProd = process.env.NODE_ENV === "production";
+      res.cookie("token", token, {
+        httpOnly: true,
+        secure:   isProd,
+        sameSite: isProd ? "none" : "lax",
+        maxAge:   7 * 24 * 60 * 60 * 1000,
+      });
 
+      console.log("[auth/callback] redirecting to", process.env.FRONTEND_URL);
+      res.redirect(`${process.env.FRONTEND_URL}/`);
+    })(req, res, next);
+  } catch (e: any) {
+    console.error("[auth/callback] sync throw:", e?.message);
     res.redirect(`${process.env.FRONTEND_URL}/`);
-  })(req, res, next);
+  }
 });
 
 router.get("/me", (req, res) => {

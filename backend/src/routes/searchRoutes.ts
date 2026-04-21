@@ -70,9 +70,8 @@ async function scoreSingleListingWithContext(listing: any) {
 
   return {
     ...result,
-    ...(group?.priceLow   != null ? { priceLow:   group.priceLow   } : {}),
-    ...(group?.priceHigh  != null ? { priceHigh:  group.priceHigh  } : {}),
-    ...(group?.priceSource != null ? { priceSource: group.priceSource } : {}),
+    ...(group?.priceLow  != null ? { priceLow:  group.priceLow  } : {}),
+    ...(group?.priceHigh != null ? { priceHigh: group.priceHigh } : {}),
   };
 }
 

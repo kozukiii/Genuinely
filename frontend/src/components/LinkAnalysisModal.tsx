@@ -55,7 +55,7 @@ export default function LinkAnalysisModal({ onClose }: Props) {
               return;
             }
           }
-        } catch {}
+        } catch { /* ignore sessionStorage parse errors */ }
       }
 
       navigate(`/listing/${listing.id}`, { state: { listing } });

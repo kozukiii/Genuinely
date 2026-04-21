@@ -137,8 +137,8 @@ async function runAnalysisPipeline(
     if (!ctxRes.ok) throw new Error(`context HTTP ${ctxRes.status}`);
     const ctxData = await ctxRes.json();
     groups = ctxData.groups ?? [];
-  } catch (err: any) {
-    if (err?.name === "AbortError") return;
+  } catch (err: unknown) {
+    if ((err as { name?: string })?.name === "AbortError") return;
     console.error("[analysis] context call failed:", err);
     // Fallback: one group with no context
     groups = [{ canonicalName: query, specificity: "broad", indices: items.map((_, i) => i), context: null }];
@@ -200,7 +200,7 @@ async function runAnalysisPipeline(
               sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(stored));
             }
           }
-        } catch {}
+        } catch { /* ignore sessionStorage errors */ }
 
         // Notify any ListingPage currently viewing one of these listings
         for (const s of scored) {
@@ -217,8 +217,8 @@ async function runAnalysisPipeline(
           }
           return updated;
         });
-      } catch (err: any) {
-        if (err?.name === "AbortError") return;
+      } catch (err: unknown) {
+        if ((err as { name?: string })?.name === "AbortError") return;
         console.error(`[analysis] batch-analyze failed for group "${group.canonicalName}":`, err);
 
         // Clear pending in sessionStorage directly (same reason as above)
@@ -234,7 +234,7 @@ async function runAnalysisPipeline(
               sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(stored));
             }
           }
-        } catch {}
+        } catch { /* ignore sessionStorage errors */ }
 
         // Let any subscribed ListingPage know the analysis failed
         for (const l of groupListings) {
@@ -585,7 +585,7 @@ export default function SearchPage() {
         const parsed = JSON.parse(savedFilters) as FilterState;
         if (parsed && typeof parsed === "object") setFilters(parsed);
       }
-    } catch {}
+    } catch { /* ignore sessionStorage parse errors */ }
   }
 
   useEffect(() => {

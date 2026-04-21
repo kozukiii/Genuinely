@@ -21,17 +21,12 @@ export interface ProductGroup {
   priceLow: number | null;
   priceHigh: number | null;
   estimatedShippingPrice: number | null;
-  priceSource: { name: string; url: string } | null;
 }
-
-type ItemCategory = "video_game" | "console" | "trading_card" | "other";
 
 interface RawGroup {
   canonicalName: string;
   indices: number[];
   serperQuery: string;
-  category: ItemCategory;
-  pricechartingQuery: string | null;
 }
 
 // ─── Serper ───────────────────────────────────────────────────────────────────
@@ -46,6 +41,7 @@ function sleep(ms: number) { return new Promise<void>((r) => setTimeout(r, ms));
 let serperRateLimitResetPromise: Promise<void> | null = null;
 
 async function serperSearch(apiKey: string, query: string, num: number): Promise<any | null> {
+  console.log(`[serper] → "${query}" (num=${num})`);
   for (let attempt = 0; attempt <= SERPER_MAX_RETRIES; attempt++) {
     if (serperRateLimitResetPromise) await serperRateLimitResetPromise;
 
@@ -78,7 +74,9 @@ async function serperSearch(apiKey: string, query: string, num: number): Promise
         return null;
       }
 
-      return await res.json();
+      const json = await res.json();
+      console.log(`[serper] ✓ "${query}" — ${json?.organic?.length ?? 0} organic results`);
+      return json;
     } catch (err: any) {
       if (err?.name === "AbortError") {
         console.warn(`[listingContext] Serper timed out: ${query}`);
@@ -165,27 +163,12 @@ SERPER QUERY RULES:
 - The serperQuery MUST include the product type word so it cannot match a different item in the same brand/model family. For golf clubs include "driver", "iron set", "wedge", etc. explicitly.
 - Example: "Callaway Ai Smoke Max Driver 9 degree used price" not "Callaway Ai Smoke Max used price" (which could return iron results)
 
-CATEGORY: identify which of these best fits the product:
-- "video_game" — any game for any gaming platform (PS5, Xbox, Switch, PC, retro consoles, etc.)
-- "console" — gaming consoles or handheld systems (PS5, Xbox Series X, Nintendo Switch, Game Boy, Steam Deck, etc.)
-- "trading_card" — any trading or collectible card (Pokémon, Yu-Gi-Oh, Magic: The Gathering, sports cards — baseball, basketball, football, etc.) including graded cards (PSA, BGS, CGC slabs)
-- "other" — anything else
-
-PRICECHARTING QUERY: only set when category is "video_game", "console", or "trading_card". A short, clean search string optimised for PriceCharting's search engine — strip set numbers (#153/172), rarity labels (ULTRA RARE, FA, Full Art), grading info (PSA 9, BGS 9.5), condition descriptors, and marketing words. Keep only: card/game name + set/platform name.
-- "Pokemon TCG SWSH 2022 Brilliant Stars #153/172 FA/CHARIZARD V ULTRA RARE PSA 9" → "Charizard V Brilliant Stars"
-- "Pokemon Base Set Charizard Holo 1st Edition PSA 10" → "Charizard Holo Base Set"
-- "The Legend of Zelda Breath of the Wild Nintendo Switch CIB" → "Zelda Breath of the Wild Switch"
-- "Sony PlayStation 5 Disc Edition Console 825GB" → "PlayStation 5"
-Set to null for category "other".
-
 Return ONLY a JSON array (no markdown, no backticks, no extra text):
 [
   {
     "canonicalName": "exact product name with key specs",
     "indices": [0, 3],
-    "serperQuery": "targeted used resale price search query",
-    "category": "other",
-    "pricechartingQuery": null
+    "serperQuery": "targeted used resale price search query"
   }
 ]
 `.trim();
@@ -213,20 +196,24 @@ async function groupListings(titles: string[], query: string): Promise<RawGroup[
     const parsed = JSON.parse(raw.slice(start, end + 1));
     if (!Array.isArray(parsed) || parsed.length === 0) throw new Error("Empty groups array");
 
-    const validCategories = new Set<ItemCategory>(["video_game", "console", "trading_card", "other"]);
-
-    return parsed
+    const groups = parsed
       .filter((g: any) => typeof g.canonicalName === "string" && Array.isArray(g.indices) && typeof g.serperQuery === "string")
       .map((g: any): RawGroup => ({
         canonicalName: g.canonicalName,
         indices: (g.indices as any[]).filter((i) => typeof i === "number"),
         serperQuery: g.serperQuery,
-        category: validCategories.has(g.category) ? g.category : "other",
-        pricechartingQuery: typeof g.pricechartingQuery === "string" && g.pricechartingQuery.trim() ? g.pricechartingQuery.trim() : null,
       }));
+
+    console.log("[groupListings] groups:", groups.map(g => ({
+      canonicalName: g.canonicalName,
+      indices: g.indices,
+      serperQuery: g.serperQuery,
+    })));
+
+    return groups;
   } catch (err) {
     console.error("[listingContext] Grouping failed, falling back to single group:", err);
-    return [{ canonicalName: query, indices: titles.map((_, i) => i), serperQuery: `${query} used resale price`, category: "other", pricechartingQuery: null }];
+    return [{ canonicalName: query, indices: titles.map((_, i) => i), serperQuery: `${query} used resale price` }];
   }
 }
 
@@ -253,7 +240,7 @@ THE SYSTEM PROMPT (everything after ---) MUST CONTAIN ALL OF THESE IN ORDER:
 
 2. MARKET VALUE
    State the used market price range: "Used [product] typically sells for $X–$Y."
-   Favour the most cited or most reputable sources (eBay sold, Swappa, PriceCharting, StockX, etc.).
+   Favour the most cited or most reputable sources (eBay sold, Swappa, StockX, etc.).
    If data is thin, use your own knowledge — never say "data unavailable".
 
 3. PHYSICAL INSPECTION POINTS (numbered list, 4–6 items)
@@ -295,6 +282,13 @@ RULES:
 - PRICE_LOW and PRICE_HIGH are plain integers, e.g. 450, or the word null
 `.trim();
 
+function parsePriceValue(raw: string): number | null {
+  // Strip currency symbols, commas, tildes, spaces so "$1,200" / "~45" / "$ 80" all parse
+  const match = raw.replace(/[$,~\s]/g, "").match(/^\d+/);
+  const v = match ? parseInt(match[0], 10) : NaN;
+  return isNaN(v) ? null : v;
+}
+
 function parseEngineeredOutput(raw: string): { systemPrompt: string | null; priceLow: number | null; priceHigh: number | null } {
   const lines = raw.split("\n");
   let priceLow: number | null = null;
@@ -304,11 +298,9 @@ function parseEngineeredOutput(raw: string): { systemPrompt: string | null; pric
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
     if (line.startsWith("PRICE_LOW:")) {
-      const v = parseInt(line.replace("PRICE_LOW:", "").trim(), 10);
-      priceLow = isNaN(v) ? null : v;
+      priceLow = parsePriceValue(line.replace("PRICE_LOW:", "").trim());
     } else if (line.startsWith("PRICE_HIGH:")) {
-      const v = parseInt(line.replace("PRICE_HIGH:", "").trim(), 10);
-      priceHigh = isNaN(v) ? null : v;
+      priceHigh = parsePriceValue(line.replace("PRICE_HIGH:", "").trim());
     } else if (line === "---") {
       dividerIdx = i;
       break;
@@ -323,6 +315,11 @@ function parseEngineeredOutput(raw: string): { systemPrompt: string | null; pric
     console.error("[listingContext] No system prompt found after ---. Raw output snippet:\n", raw.slice(0, 400));
   }
 
+  if (systemPrompt && (priceLow === null || priceHigh === null)) {
+    console.warn("[listingContext] System prompt parsed but price values missing — raw header lines:\n",
+      lines.slice(0, Math.min(dividerIdx >= 0 ? dividerIdx : 5, 5)).join("\n"));
+  }
+
   return { systemPrompt, priceLow, priceHigh };
 }
 
@@ -331,6 +328,7 @@ async function engineerPrompt(
   marketData: string,
 ): Promise<{ systemPrompt: string | null; priceLow: number | null; priceHigh: number | null }> {
   try {
+    console.log(`[engineerPrompt] → "${canonicalName}" (market data: ${marketData.length} chars)`);
     const response = await groq.chat.completions.create({
       model: "llama-3.1-8b-instant",
       messages: [
@@ -341,81 +339,17 @@ async function engineerPrompt(
       temperature: 0.15,
     });
 
-    return parseEngineeredOutput((response.choices[0].message.content ?? "").trim());
+    const result = parseEngineeredOutput((response.choices[0].message.content ?? "").trim());
+    console.log(`[engineerPrompt] ✓ "${canonicalName}" — priceLow=${result.priceLow} priceHigh=${result.priceHigh} systemPrompt=${result.systemPrompt ? result.systemPrompt.length + " chars" : "null"}`);
+    return result;
   } catch (err) {
     console.error(`[listingContext] Prompt engineering failed for "${canonicalName}":`, err);
     return { systemPrompt: null, priceLow: null, priceHigh: null };
   }
 }
 
-// ─── PriceCharting ───────────────────────────────────────────────────────────
-
-const PRICECHARTING_CATEGORIES_WITH_LOOSE = new Set<ItemCategory>(["video_game", "trading_card"]);
-
-interface PricechartingResult {
-  text: string;
-  sourceUrl: string;
-}
-
-async function fetchPriceCharting(searchQuery: string, canonicalName: string, category: ItemCategory): Promise<PricechartingResult | null> {
-  const apiKey = process.env.PRICECHARTING_API_KEY;
-  const qs = new URLSearchParams({ q: searchQuery });
-  if (apiKey) qs.set("id", apiKey);
-
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 6000);
-    const resp = await fetch(`https://www.pricecharting.com/api/products?${qs}`, {
-      headers: { "User-Agent": "Mozilla/5.0" },
-      signal: controller.signal as any,
-    });
-    clearTimeout(timer);
-
-    if (!resp.ok) {
-      console.warn(`[pricecharting] HTTP ${resp.status} for "${canonicalName}"`);
-      return null;
-    }
-    const data = await resp.json() as any;
-    const products: any[] = data.products ?? [];
-    console.log(`[pricecharting] "${searchQuery}" → ${products.length} results`);
-    if (!products.length) return null;
-
-    const top = products.slice(0, 3);
-    const topProduct = top[0];
-    const lines: string[] = [`PriceCharting market data (crowdsourced from verified sold listings) for "${canonicalName}":`];
-
-    for (const p of top) {
-      const name: string = p["product-name"] ?? "Unknown";
-      const consoleName: string = p["console-name"] ?? "";
-      const fmt = (cents: number | null | undefined) =>
-        cents != null && cents > 0 ? `$${(cents / 100).toFixed(2)}` : null;
-
-      const priceParts = [
-        PRICECHARTING_CATEGORIES_WITH_LOOSE.has(category) && fmt(p["loose-price"])
-          ? `Loose/Ungraded: ${fmt(p["loose-price"])}` : null,
-        fmt(p["complete-price"]) ? `Complete: ${fmt(p["complete-price"])}` : null,
-        fmt(p["new-price"]) ? `New/Sealed: ${fmt(p["new-price"])}` : null,
-        fmt(p["graded-price"]) ? `Graded: ${fmt(p["graded-price"])}` : null,
-        !PRICECHARTING_CATEGORIES_WITH_LOOSE.has(category) && fmt(p["loose-price"])
-          ? `Used: ${fmt(p["loose-price"])}` : null,
-      ].filter(Boolean);
-
-      if (priceParts.length === 0) continue;
-      lines.push(`\n${name}${consoleName ? ` (${consoleName})` : ""}: ${priceParts.join(" | ")}`);
-    }
-
-    if (lines.length <= 1) return null;
-
-    const topName: string = topProduct["product-name"] ?? searchQuery;
-    const sourceUrl = `https://www.pricecharting.com/search-products?q=${encodeURIComponent(topName)}`;
-
-    return { text: lines.join("\n"), sourceUrl };
-  } catch {
-    return null;
-  }
-}
-
 // ─── Shipping weight estimation ──────────────────────────────────────────────
+
 
 function parseWeightLbs(text: string): number | null {
   // Ordered by specificity — prefer "shipping weight" matches first
@@ -481,48 +415,27 @@ export async function groupAndContextualize(
           hasCalculatedShipping &&
           group.indices.some(idx => hasCalculatedShipping[idx]);
 
-        const DEDICATED_CATEGORIES = new Set<ItemCategory>(["video_game", "console", "trading_card"]);
-        const hasDedicatedSource = DEDICATED_CATEGORIES.has(group.category);
-
-        // Fetch price data + inspection data in parallel.
-        // Price: try dedicated source first for supported categories, fall back to Serper.
-        // Inspection: always Serper.
-        const [pricechartingResult, inspectJson, priceSerperJson, weightJson] = await Promise.all([
-          hasDedicatedSource && group.pricechartingQuery
-            ? fetchPriceCharting(group.pricechartingQuery, group.canonicalName, group.category).catch(() => null)
+        const [priceJson, inspectJson, weightJson] = await Promise.all([
+          serperApiKey
+            ? serperSearch(serperApiKey, `${group.serperQuery} used resale price sold 2025 2026`, 8).catch(() => null)
             : Promise.resolve(null),
           serperApiKey
-            ? serperSearch(serperApiKey, `${group.serperQuery} used buying guide inspect condition accessories what to look for`, 8).catch(() => null)
+            ? serperSearch(serperApiKey, `${group.canonicalName} used buying guide inspect condition accessories what to look for`, 8).catch(() => null)
             : Promise.resolve(null),
-          // Only fire Serper price search if no dedicated source (will be skipped via Promise.resolve if dedicated)
-          Promise.resolve(null) as Promise<any>,
           needsWeightLookup
             ? serperSearch(serperApiKey!, `${group.canonicalName} shipping weight`, 5).catch(() => null)
             : Promise.resolve(null),
         ]);
 
-        // If dedicated source came back empty, fall back to Serper for price
-        const usePriceSerper = hasDedicatedSource ? !pricechartingResult : true;
-        const priceSerperResult = usePriceSerper && serperApiKey
-          ? await serperSearch(serperApiKey, `${group.serperQuery} used resale price sold 2025 2026`, 8).catch(() => null)
-          : priceSerperJson;
-
-        const priceSource: ProductGroup["priceSource"] = pricechartingResult
-          ? { name: "pricecharting.com", url: pricechartingResult.sourceUrl }
-          : null;
-
         // Build unified market data string
         const parts: string[] = [];
 
-        if (pricechartingResult) {
-          parts.push(pricechartingResult.text);
-          console.log(`[listingContext] PriceCharting hit for "${group.canonicalName}" (${group.category})`);
-        } else if (priceSerperResult) {
-          const ab = priceSerperResult?.answerBox;
+        if (priceJson) {
+          const ab = priceJson?.answerBox;
           if (ab?.answer) parts.push(`Price summary: ${ab.answer}`);
           else if (ab?.snippet) parts.push(`Price summary: ${ab.snippet}`);
-          if (priceSerperResult?.knowledgeGraph?.description) parts.push(`Product overview: ${priceSerperResult.knowledgeGraph.description}`);
-          const rows = extractOrganic(priceSerperResult, 8);
+          if (priceJson?.knowledgeGraph?.description) parts.push(`Product overview: ${priceJson.knowledgeGraph.description}`);
+          const rows = extractOrganic(priceJson, 8);
           if (rows.length) parts.push(`Pricing data:\n${rows.map((s: string, i: number) => `${i + 1}. ${s}`).join("\n")}`);
         }
 
@@ -543,7 +456,6 @@ export async function groupAndContextualize(
           const snippetText = extractOrganic(weightJson, 5).join(" ");
           const weightLbs = parseWeightLbs(`${answerText} ${snippetText}`);
           if (weightLbs !== null) {
-            // Clamp: product weight < 0.5 lbs likely excludes packaging — add 0.5 lb buffer
             const shippingLbs = Math.max(weightLbs, 0.5) + (weightLbs < 0.5 ? 0.5 : 0);
             estimatedShippingPrice = estimateShippingFromWeight(shippingLbs);
           }
@@ -558,11 +470,11 @@ export async function groupAndContextualize(
             priceLow: null,
             priceHigh: null,
             estimatedShippingPrice,
-            priceSource: null,
           };
         }
 
         const { systemPrompt, priceLow, priceHigh } = await engineerPrompt(group.canonicalName, marketData);
+        console.log(`[group] "${group.canonicalName}" — final priceLow=${priceLow} priceHigh=${priceHigh}`);
 
         return {
           canonicalName: group.canonicalName,
@@ -572,7 +484,6 @@ export async function groupAndContextualize(
           priceLow,
           priceHigh,
           estimatedShippingPrice,
-          priceSource,
         };
       }),
     );

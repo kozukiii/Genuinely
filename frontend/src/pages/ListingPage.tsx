@@ -19,7 +19,7 @@ function looksLikeDebugPayload(value?: string | null) {
   const trimmed = value.trim();
   if (!trimmed) return false;
   return /DEBUG INFO:/i.test(trimmed)
-    || (/^\s*[\[{]/.test(trimmed) && /"scores"\s*:/.test(trimmed));
+    || (/^\s*[[{]/.test(trimmed) && /"scores"\s*:/.test(trimmed));
 }
 
 function sanitizeVisibleText(value?: string | null) {
@@ -157,7 +157,7 @@ function AnimatedRing({
 export default function ListingPage() {
   const { state } = useLocation();
   const navigate = useNavigate();
-  const listing = (state as any)?.listing as Listing | undefined;
+  const listing = (state as { listing?: Listing } | null)?.listing;
 
   const [showDebug,   setShowDebug]   = useState(false);
   const [showRaw,     setShowRaw]     = useState(false);
@@ -200,7 +200,7 @@ export default function ListingPage() {
     const onChange = () => setSaved(isSaved(listing.id));
     window.addEventListener("saved:listings:changed", onChange);
     return () => window.removeEventListener("saved:listings:changed", onChange);
-  }, [listing?.id]);
+  }, [listing?.id, listing]);
 
   // ── Marketplace image enrichment ──────────────────────────────────────────
   useEffect(() => {
@@ -359,6 +359,59 @@ export default function ListingPage() {
     }
   }
 
+  // ── Hooks that must precede the early return ─────────────────────────────
+  const money = useMemo(() => {
+    try {
+      return new Intl.NumberFormat(undefined, {
+        style: "currency", currency: listing?.currency ?? "USD", maximumFractionDigits: 0,
+      }).format(listing?.price ?? 0);
+    } catch { return `$${listing?.price ?? 0}`; }
+  }, [listing?.price, listing?.currency]);
+
+  const sellerLine = useMemo(() => {
+    if (!listing) return null;
+    if (listing.source === "marketplace") return listing.location ? `\u{1F4CD} ${listing.location}` : null;
+    return listing.seller?.trim() || null;
+  }, [listing]);
+
+  const similarListings = useMemo(() => {
+    if (!listing) return [] as Listing[];
+    try {
+      const raw = sessionStorage.getItem(SEARCH_LISTINGS_KEY);
+      if (!raw) return [] as Listing[];
+      const parsed = JSON.parse(raw) as Listing[];
+      if (!Array.isArray(parsed)) return [] as Listing[];
+      return parsed
+        .filter((item) => item && item.id && item.source && item.title)
+        .filter((item) => !(item.id === listing.id && item.source === listing.source))
+        .slice(0, 4);
+    } catch { return [] as Listing[]; }
+  }, [listing]);
+
+  const [summaryChars, setSummaryChars] = useState(0);
+
+  useEffect(() => {
+    if (analysisPhase !== "done") { setSummaryChars(0); return; }
+    const currentAi = analysisResult ?? listing;
+    const overview = currentAi
+      ? sanitizeVisibleText(currentAi.overview) ?? (looksLikeDebugPayload(currentAi.overview)
+        ? "Analysis completed. Expand raw AI output if you want to inspect the underlying response."
+        : currentAi.overview)
+      : null;
+    const text = overview ?? "";
+    let chars = 0;
+    const delay = window.setTimeout(() => {
+      const interval = window.setInterval(() => {
+        chars++;
+        setSummaryChars(chars);
+        if (chars >= text.length) window.clearInterval(interval);
+      }, 12);
+      return () => window.clearInterval(interval);
+    }, 600);
+    return () => window.clearTimeout(delay);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [analysisPhase]);
+
   if (!listing) {
     return (
       <p style={{ padding: 20 }}>
@@ -373,14 +426,6 @@ export default function ListingPage() {
     ? enrichedImages : listing.images ?? [];
   const safeIndex    = Math.min(Math.max(imageIndex, 0), Math.max(images.length - 1, 0));
   const currentImage = getHighResImage(images[safeIndex] ?? "", listing.source);
-
-  const money = useMemo(() => {
-    try {
-      return new Intl.NumberFormat(undefined, {
-        style: "currency", currency: listing.currency ?? "USD", maximumFractionDigits: 0,
-      }).format(listing.price ?? 0);
-    } catch { return `$${listing.price ?? 0}`; }
-  }, [listing.price, listing.currency]);
 
   const ai          = analysisResult ?? listing;
   const targetScore = ai.aiScore ?? 0;
@@ -408,45 +453,8 @@ export default function ListingPage() {
     descriptionQuality: listing.source === "marketplace" ? "Listing Quality" : "Description Detail",
   };
 
-  const sellerLine = useMemo(() => {
-    if (listing.source === "marketplace") return listing.location ? `\u{1F4CD} ${listing.location}` : null;
-    return listing.seller?.trim() || null;
-  }, [listing.source, listing.location, listing.seller]);
-
-  const similarListings = useMemo(() => {
-    try {
-      const raw = sessionStorage.getItem(SEARCH_LISTINGS_KEY);
-      if (!raw) return [] as Listing[];
-      const parsed = JSON.parse(raw) as Listing[];
-      if (!Array.isArray(parsed)) return [] as Listing[];
-      return parsed
-        .filter((item) => item && item.id && item.source && item.title)
-        .filter((item) => !(item.id === listing.id && item.source === listing.source))
-        .slice(0, 4);
-    } catch { return [] as Listing[]; }
-  }, [listing.id, listing.source]);
-
   const showRing    = analysisPhase !== "idle";
   const showSummary = analysisPhase === "done" && ai.aiScore != null;
-
-  // ── Summary typing effect ─────────────────────────────────────────────────
-  const [summaryChars, setSummaryChars] = useState(0);
-
-  useEffect(() => {
-    if (analysisPhase !== "done") { setSummaryChars(0); return; }
-    const text = visibleOverview ?? "";
-    let chars = 0;
-    const delay = window.setTimeout(() => {
-      const interval = window.setInterval(() => {
-        chars++;
-        setSummaryChars(chars);
-        if (chars >= text.length) window.clearInterval(interval);
-      }, 12);
-      return () => window.clearInterval(interval);
-    }, 600);
-    return () => window.clearTimeout(delay);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [analysisPhase]);
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -562,20 +570,6 @@ export default function ListingPage() {
                           <span className="demo-score-label-end" style={{ left: `${highPct}%` }}>High · ${ai.priceHigh}</span>
                         </div>
                       </div>
-                      {analysisPhase === "done" && ai.priceSource && (
-                        <div style={{ marginTop: 6, textAlign: "right" }}>
-                          <a
-                            href={ai.priceSource.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            style={{ fontSize: 11, color: "#888", textDecoration: "none" }}
-                            onMouseEnter={e => (e.currentTarget.style.color = "#aaa")}
-                            onMouseLeave={e => (e.currentTarget.style.color = "#888")}
-                          >
-                            {ai.priceSource.name}
-                          </a>
-                        </div>
-                      )}
                     </div>
                   );
                 })()}

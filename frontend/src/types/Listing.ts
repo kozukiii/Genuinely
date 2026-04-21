@@ -58,7 +58,6 @@ export interface Listing {
   // Market price range from context analysis
   priceLow?: number;
   priceHigh?: number;
-  priceSource?: { name: string; url: string };
 
   // Set when a Marketplace listing was resolved to an eBay cross-listing
   crossListedEbayId?: string;

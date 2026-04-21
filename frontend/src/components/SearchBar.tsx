@@ -16,11 +16,11 @@ function getRecentQueries(): string[] {
   catch { return []; }
 }
 
-export function saveRecentQuery(q: string) {
+function saveRecentQuery(q: string) {
   try {
     const prev = getRecentQueries().filter(r => r.toLowerCase() !== q.toLowerCase());
     sessionStorage.setItem(RECENT_KEY, JSON.stringify([q, ...prev].slice(0, 8)));
-  } catch {}
+  } catch { /* ignore sessionStorage errors */ }
 }
 
 function HighlightMatch({ text, query }: { text: string; query: string }) {

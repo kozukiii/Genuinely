@@ -78,7 +78,7 @@ export function toggleSaved(listing: Listing): boolean {
 
 export async function syncFromServer(): Promise<void> {
   try {
-    const local = localGet();
+    const local = getSavedListings();
 
     // Push any local guest saves up to the server first
     for (const listing of local) {

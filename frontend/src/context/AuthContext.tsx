@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
 import type { ReactNode } from "react";
-import { syncFromServer } from "../utils/savedListings";
+import { syncFromServer, setLoggedIn } from "../utils/savedListings";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -34,9 +34,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .then(async (data) => {
         const u = data.user ?? null;
         setUser(u);
+        setLoggedIn(!!u);
         if (u) await syncFromServer();
       })
-      .catch(() => setUser(null))
+      .catch(() => { setUser(null); setLoggedIn(false); })
       .finally(() => setLoading(false));
   }, []);
 
@@ -47,6 +48,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(async () => {
     await fetch(`${API_BASE}/auth/logout`, { method: "POST", credentials: "include" });
     setUser(null);
+    setLoggedIn(false);
     window.dispatchEvent(new Event("saved:listings:changed"));
   }, []);
 

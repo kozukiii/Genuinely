@@ -41,7 +41,12 @@ router.get("/google",
 );
 
 router.get("/google/callback",
-  passport.authenticate("google", { session: false, failureRedirect: `${process.env.FRONTEND_URL}/` }),
+  (req, res, next) => passport.authenticate("google", { session: false }, (err: any, user: any) => {
+    if (err) { console.error("[auth] OAuth error:", err.message ?? err); }
+    if (!user) { res.redirect(`${process.env.FRONTEND_URL}/`); return; }
+    req.user = user;
+    next();
+  })(req, res, next),
   (req, res) => {
     const user = req.user as { id: number; email: string; displayName: string };
     const token = jwt.sign(
@@ -56,10 +61,7 @@ router.get("/google/callback",
       maxAge:   7 * 24 * 60 * 60 * 1000,
     };
 
-    // httpOnly JWT — not readable by JS
     res.cookie("token", token, { ...cookieOpts, httpOnly: true });
-    // readable flag so frontend can cheaply detect login state via document.cookie
-    res.cookie("auth", "1", cookieOpts);
 
     res.redirect(`${process.env.FRONTEND_URL}/`);
   },
@@ -80,7 +82,6 @@ router.get("/me", (req, res) => {
 router.post("/logout", (_req, res) => {
   const clearOpts = { secure: process.env.NODE_ENV === "production", sameSite: "lax" as const };
   res.clearCookie("token", { ...clearOpts, httpOnly: true });
-  res.clearCookie("auth", clearOpts);
   res.json({ ok: true });
 });
 

@@ -11,8 +11,12 @@ function safeParse<T>(value: string | null, fallback: T): T {
 }
 
 export function isLoggedIn(): boolean {
-  return document.cookie.includes("auth=1");
+  // Populated by AuthContext after /auth/me resolves
+  return _loggedIn;
 }
+
+let _loggedIn = false;
+export function setLoggedIn(val: boolean) { _loggedIn = val; }
 
 function notify() {
   window.dispatchEvent(new Event("saved:listings:changed"));

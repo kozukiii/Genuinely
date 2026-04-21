@@ -41,12 +41,7 @@ router.get("/google",
 );
 
 router.get("/google/callback",
-  (req, res, next) => passport.authenticate("google", { session: false }, (err: any, user: any) => {
-    if (err) { console.error("[auth] OAuth error:", err.message ?? err); }
-    if (!user) { res.redirect(`${process.env.FRONTEND_URL}/`); return; }
-    req.user = user;
-    next();
-  })(req, res, next),
+  passport.authenticate("google", { session: false, failureRedirect: `${process.env.FRONTEND_URL}/` }),
   (req, res) => {
     const user = req.user as { id: number; email: string; displayName: string };
     const token = jwt.sign(
@@ -55,13 +50,13 @@ router.get("/google/callback",
       { expiresIn: "7d" },
     );
 
-    const cookieOpts = {
-      secure:   process.env.NODE_ENV === "production",
-      sameSite: "lax" as const,
+    const isProd = process.env.NODE_ENV === "production";
+    res.cookie("token", token, {
+      httpOnly: true,
+      secure:   isProd,
+      sameSite: isProd ? "none" : "lax",
       maxAge:   7 * 24 * 60 * 60 * 1000,
-    };
-
-    res.cookie("token", token, { ...cookieOpts, httpOnly: true });
+    });
 
     res.redirect(`${process.env.FRONTEND_URL}/`);
   },
@@ -80,8 +75,8 @@ router.get("/me", (req, res) => {
 });
 
 router.post("/logout", (_req, res) => {
-  const clearOpts = { secure: process.env.NODE_ENV === "production", sameSite: "lax" as const };
-  res.clearCookie("token", { ...clearOpts, httpOnly: true });
+  const isProd = process.env.NODE_ENV === "production";
+  res.clearCookie("token", { httpOnly: true, secure: isProd, sameSite: isProd ? "none" : "lax" });
   res.json({ ok: true });
 });
 

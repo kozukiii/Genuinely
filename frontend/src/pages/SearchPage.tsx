@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigationType } from "react-router-dom";
+import { Helmet } from "react-helmet-async";
 import SearchBar from "../components/SearchBar";
 import LinkAnalysisModal from "../components/LinkAnalysisModal";
 import ListingCard from "../components/ListingCard";
@@ -617,8 +618,19 @@ export default function SearchPage() {
     if (scored.length > 0) addToSearchCache(scored);
   }, [listings]);
 
+  const metaTitle = currentQuery
+    ? `${currentQuery} — Search | Genuinely`
+    : "Search Listings | Genuinely";
+  const metaDescription = currentQuery
+    ? `Browse AI-scored ${currentQuery} listings across eBay and Facebook Marketplace.`
+    : "Search eBay and Facebook Marketplace listings. Genuinely scores every deal with AI so you know if you're getting a fair price.";
+
   return (
     <div className="home-page">
+      <Helmet>
+        <title>{metaTitle}</title>
+        <meta name="description" content={metaDescription} />
+      </Helmet>
       <SearchBar
         onSearch={handleSearch}
         initialQuery={initialQuery}

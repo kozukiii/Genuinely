@@ -1,5 +1,6 @@
 import "./styles/HomePage.css";
 import React, { useEffect, useMemo, useState } from "react";
+import { Helmet } from "react-helmet-async";
 import { useNavigate } from "react-router-dom";
 import ListingCard from "../components/ListingCard";
 import type { Listing } from "../types/Listing";
@@ -161,6 +162,10 @@ export default function HomePage() {
 
   return (
     <div className="home-page">
+      <Helmet>
+        <title>Genuinely — The Secondhand Market, Analyzed</title>
+        <meta name="description" content="Shop smarter on eBay and Facebook Marketplace. Genuinely uses AI to score deals on electronics, sneakers, trading cards, and more." />
+      </Helmet>
       <section className="home-hero">
         <div className="home-hero-top">
           <div className="home-hero-logo">

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Helmet } from "react-helmet-async";
 import ListingCard from "../components/ListingCard";
 import type { Listing } from "../types/Listing";
 import { getSavedListings, setSavedListings } from "../utils/savedListings";
@@ -44,8 +45,11 @@ export default function CartPage() {
   }
 
   return (
-    // ✅ Use the same page wrapper class as SearchPage (optional but helps)
     <div className="home-page">
+      <Helmet>
+        <title>Saved Items | Genuinely</title>
+        <meta name="description" content="Your saved eBay and Facebook Marketplace listings, all in one place." />
+      </Helmet>
       <div className="cart-header">
         <div className="cart-title-row">
           <h1 className="cart-title">Saved</h1>

@@ -1,4 +1,5 @@
 import { useLocation, useNavigate } from "react-router-dom";
+import { Helmet } from "react-helmet-async";
 import type { Listing } from "../types/Listing";
 import RatingRing from "../components/RatingRing";
 import ListingCard from "../components/ListingCard";
@@ -458,8 +459,19 @@ export default function ListingPage() {
 
   // ── Render ────────────────────────────────────────────────────────────────
 
+  const metaTitle = listing.title
+    ? `${listing.title}${listing.price != null ? ` — ${money}` : ""} | Genuinely`
+    : "Listing | Genuinely";
+  const metaDescription = listing.title
+    ? `${listing.title}${listing.price != null ? ` listed for ${money}` : ""} on ${sourceLabel(listing.source)}. AI deal analysis available on Genuinely.`
+    : "View this listing and get an AI-powered deal score on Genuinely.";
+
   return (
     <div className="listing-page">
+      <Helmet>
+        <title>{metaTitle}</title>
+        <meta name="description" content={metaDescription} />
+      </Helmet>
       <div className="listing-card-block" style={{ flexDirection: "column" }}>
         <div className="listing-top-row">
 

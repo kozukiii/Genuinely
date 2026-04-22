@@ -1,6 +1,7 @@
 // src/App.tsx
 import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import NavBar from "./components/NavBar";
+import SignInToast from "./components/SignInToast";
 import { AuthProvider } from "./context/AuthContext";
 
 // Pages
@@ -36,6 +37,7 @@ export default function App() {
       <AuthProvider>
         <NavBar />
         <AppRoutes />
+        <SignInToast />
       </AuthProvider>
     </BrowserRouter>
   );

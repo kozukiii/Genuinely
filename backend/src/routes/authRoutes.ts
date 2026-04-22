@@ -72,7 +72,7 @@ router.get("/google/callback", (req, res, next) => {
 
     res.cookie("token", token, getCookieOptions(req));
 
-    res.redirect(`${process.env.FRONTEND_URL}/`);
+    res.redirect(`${process.env.FRONTEND_URL}/?signed_in=1`);
   })(req, res, next);
 });
 

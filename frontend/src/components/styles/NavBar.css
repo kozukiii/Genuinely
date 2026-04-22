@@ -206,6 +206,12 @@
   border-color: rgba(255, 255, 255, 0.2);
 }
 
+.nav-auth-initial {
+  font-size: 0.95rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
 .nav-auth-label {
   font-size: 0.65rem;
   font-weight: 500;

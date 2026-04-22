@@ -15,7 +15,8 @@ declare global {
 }
 
 export function isAdminUser(user: AuthUser | undefined): boolean {
-  return user?.id === 2;
+  if (!user) return false;
+  return user.id === 2 || user.email.toLowerCase() === "zmhigdon@gmail.com";
 }
 
 export function requireAdmin(req: Request, res: Response, next: NextFunction) {

@@ -1,0 +1,127 @@
+.admin-page {
+  max-width: 900px;
+  margin: 2rem auto;
+  padding: 0 1.5rem;
+}
+
+.admin-heading {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin-bottom: 1.5rem;
+}
+
+.admin-subheading {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 1rem;
+  color: #aaa;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.admin-section {
+  margin-bottom: 2rem;
+}
+
+.admin-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 1rem;
+}
+
+.admin-card {
+  background: #1a1a1a;
+  border: 1px solid #2a2a2a;
+  border-radius: 10px;
+  padding: 1rem 1.25rem;
+}
+
+.admin-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.admin-card-name {
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.admin-card-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem 1rem;
+  margin: 0;
+}
+
+.admin-card-stats > div {
+  display: flex;
+  flex-direction: column;
+}
+
+.admin-card-stats dt {
+  font-size: 0.7rem;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.admin-card-stats dd {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 500;
+}
+
+.admin-ring {
+  display: block;
+  width: 110px;
+  height: 110px;
+  margin: 0.75rem auto 0;
+}
+
+.admin-ring-label {
+  fill: #fff;
+  font-size: 18px;
+  font-weight: 700;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+.admin-card-highlight {
+  margin: 0.6rem 0 0;
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: -0.02em;
+}
+
+.admin-card-note {
+  margin: 0.4rem 0 0;
+  font-size: 0.75rem;
+  color: #666;
+  line-height: 1.5;
+  white-space: pre-line;
+}
+
+.admin-status {
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.admin-status--ok       { background: #1a3d2a; color: #3dff8f; }
+.admin-status--warning  { background: #3d3010; color: #f0b429; }
+.admin-status--critical { background: #3d1010; color: #ff5555; }
+.admin-status--unknown  { background: #2a2a2a; color: #888; }
+
+.admin-forbidden,
+.admin-error,
+.admin-empty {
+  color: #888;
+  font-size: 0.9rem;
+}
+
+.admin-error { color: #ff5555; }

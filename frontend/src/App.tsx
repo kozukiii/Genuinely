@@ -10,6 +10,7 @@ import CartPage from "./pages/CartPage";
 import HomePage from "./pages/HomePage";
 import ListingPage from "./pages/ListingPage";
 import ListingCardDemo from "./pages/ListingCardDemo";
+import AdminPage from "./pages/AdminPage";
 
 import "./pages/styles/HomePage.css";
 
@@ -27,6 +28,7 @@ function AppRoutes() {
       {/* Individual listing — key forces full remount when navigating between listings */}
       <Route path="/listing/:id" element={<ListingPage key={location.pathname} />} />
       <Route path="/listingcard-demo" element={<ListingCardDemo />} />
+      <Route path="/admin" element={<AdminPage />} />
     </Routes>
   );
 }

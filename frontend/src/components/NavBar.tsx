@@ -67,6 +67,11 @@ export default function NavBar() {
           <Link to="/cart" className={pathname === "/cart" ? "nav-item active" : "nav-item"}>
             Saved{savedCount > 0 && <span className="nav-saved-count">{savedCount}</span>}
           </Link>
+          {user?.isAdmin && (
+            <Link to="/admin" className={pathname === "/admin" ? "nav-item active" : "nav-item"}>
+              Admin
+            </Link>
+          )}
         </div>
 
         <div className="nav-auth">

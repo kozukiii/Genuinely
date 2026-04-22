@@ -14,6 +14,16 @@ declare global {
   }
 }
 
+export function isAdminUser(user: AuthUser | undefined): boolean {
+  return user?.id === 2;
+}
+
+export function requireAdmin(req: Request, res: Response, next: NextFunction) {
+  if (!req.user) { res.status(401).json({ error: "Unauthorized" }); return; }
+  if (!isAdminUser(req.user)) { res.status(403).json({ error: "Forbidden" }); return; }
+  next();
+}
+
 export function requireAuth(req: Request, res: Response, next: NextFunction) {
   const token = req.cookies?.token;
   if (!token) { res.status(401).json({ error: "Unauthorized" }); return; }

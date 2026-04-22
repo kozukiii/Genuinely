@@ -4,6 +4,7 @@ import passport from "passport";
 import { Strategy as GoogleStrategy } from "passport-google-oauth20";
 import jwt from "jsonwebtoken";
 import db from "../db";
+import { isAdminUser } from "../middleware/auth";
 
 const router = Router();
 
@@ -82,7 +83,7 @@ router.get("/me", (req, res) => {
 
   try {
     const payload = jwt.verify(token, process.env.JWT_SECRET!) as { id: number; email: string; displayName: string };
-    res.json({ user: { id: payload.id, email: payload.email, displayName: payload.displayName } });
+    res.json({ user: { id: payload.id, email: payload.email, displayName: payload.displayName, isAdmin: isAdminUser(payload) } });
   } catch {
     res.status(401).json({ user: null });
   }

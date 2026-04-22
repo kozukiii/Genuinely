@@ -12,6 +12,7 @@ import marketplaceRoutes from "./routes/marketplaceRoutes";
 import featuredRoutes from "./routes/featuredRoutes";
 import authRoutes from "./routes/authRoutes";
 import savedRoutes from "./routes/savedRoutes";
+import internalRoutes from "./routes/internalRoutes";
 
 const app = express();
 app.disable("x-powered-by");
@@ -52,6 +53,7 @@ api.use("/marketplace", limiter, marketplaceRoutes);
 api.use("/proxy-image", limiter, imageProxyRoutes);
 api.use("/featured", featuredRoutes);
 api.use("/saved", savedRoutes);
+api.use("/internal", internalRoutes);
 
 // Mount all API routes under /api
 app.use("/api", api);

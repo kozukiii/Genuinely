@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import dotenv from "dotenv";
 import fetch from "node-fetch";
+import { logUsage } from "../services/usageLogger";
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { HttpsProxyAgent } = require("https-proxy-agent");
@@ -371,6 +372,7 @@ Do NOT wrap JSON in backticks.
     max_tokens: 1000,
     temperature: 0.2,
   });
+  logUsage("groq", "llama-4-scout-17b", response.usage);
 
   return response.choices[0].message.content?.trim() || "No analysis.";
 }
@@ -590,6 +592,7 @@ async function _runMarketplaceBatch(listings: any[], allDataUrls: string[][], co
       max_tokens: Math.min(listings.length * 800, 5000),
       temperature: 0.2,
     }));
+    logUsage("groq", "llama-4-scout-17b", response.usage);
     rawResponse = response.choices[0].message.content?.trim() ?? "[]";
   } catch (err) {
     console.error("Marketplace batch API call failed, falling back to sequential individual calls:", err);

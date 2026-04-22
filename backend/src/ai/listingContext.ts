@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import fetch from "node-fetch";
 import dotenv from "dotenv";
+import { logUsage } from "../services/usageLogger";
 
 dotenv.config({ quiet: true });
 
@@ -187,6 +188,7 @@ async function groupListings(titles: string[], query: string): Promise<RawGroup[
       max_tokens: 1200,
       temperature: 0.1,
     });
+    logUsage("groq", "llama-3.1-8b-instant", response.usage);
 
     const raw = (response.choices[0].message.content ?? "").trim();
     const start = raw.indexOf("[");
@@ -338,6 +340,7 @@ async function engineerPrompt(
       max_tokens: 2000,
       temperature: 0.15,
     });
+    logUsage("groq", "llama-3.1-8b-instant", response.usage);
 
     const result = parseEngineeredOutput((response.choices[0].message.content ?? "").trim());
     console.log(`[engineerPrompt] ✓ "${canonicalName}" — priceLow=${result.priceLow} priceHigh=${result.priceHigh} systemPrompt=${result.systemPrompt ? result.systemPrompt.length + " chars" : "null"}`);

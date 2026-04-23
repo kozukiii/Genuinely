@@ -285,8 +285,8 @@ RULES:
 `.trim();
 
 function parsePriceValue(raw: string): number | null {
-  // Strip currency symbols, commas, tildes, spaces so "$1,200" / "~45" / "$ 80" all parse
-  const match = raw.replace(/[$,~\s]/g, "").match(/^\d+/);
+  // Find the first integer anywhere in the string so "around $1,200" / "~45" / "approx 80" all parse
+  const match = raw.replace(/[$,]/g, "").match(/\d+/);
   const v = match ? parseInt(match[0], 10) : NaN;
   return isNaN(v) ? null : v;
 }
@@ -298,11 +298,13 @@ function parseEngineeredOutput(raw: string): { systemPrompt: string | null; pric
   let dividerIdx = -1;
 
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (line.startsWith("PRICE_LOW:")) {
-      priceLow = parsePriceValue(line.replace("PRICE_LOW:", "").trim());
-    } else if (line.startsWith("PRICE_HIGH:")) {
-      priceHigh = parsePriceValue(line.replace("PRICE_HIGH:", "").trim());
+    // Strip markdown bold markers (**PRICE_LOW:** or __PRICE_LOW:__) that LLMs sometimes add
+    const line = lines[i].trim().replace(/^\*{1,2}|^\_{1,2}|\*{1,2}$|\_{1,2}$/g, "").trim();
+    const upper = line.toUpperCase();
+    if (upper.startsWith("PRICE_LOW:")) {
+      priceLow = parsePriceValue(line.slice(line.indexOf(":") + 1).trim());
+    } else if (upper.startsWith("PRICE_HIGH:")) {
+      priceHigh = parsePriceValue(line.slice(line.indexOf(":") + 1).trim());
     } else if (line === "---") {
       dividerIdx = i;
       break;

@@ -174,6 +174,7 @@
 .listing-condition {
   width: fit-content;
   margin-top: 0.4rem;
+  white-space: nowrap;
 
   font-size: 0.75rem;
   color: rgba(209, 213, 219, 0.82);

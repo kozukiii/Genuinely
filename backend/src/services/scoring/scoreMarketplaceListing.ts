@@ -72,7 +72,7 @@ export async function scoreMarketplaceListing(listing: any, context?: string | n
   };
 }
 
-function parseMarketplaceAnalysis(listing: any, analysis: string, context?: string | null) {
+function parseMarketplaceAnalysis(listing: any, analysis: string, context?: string | null, priceLow?: number | null, priceHigh?: number | null) {
   const acceptsOffers = isAcceptsOffersPrice(listing.price, context);
   const jsonBlock = extractStructuredAnalysis(analysis);
 
@@ -85,7 +85,7 @@ function parseMarketplaceAnalysis(listing: any, analysis: string, context?: stri
 
   const calculatedPriceFairness = acceptsOffers
     ? null
-    : calculatePriceFairness(listing.price, context, listing.condition, listing.title);
+    : calculatePriceFairness(listing.price, context, listing.condition, listing.title, priceLow, priceHigh);
   if (calculatedPriceFairness !== null) {
     scores.priceFairness = calculatedPriceFairness;
   }
@@ -109,11 +109,11 @@ function parseMarketplaceAnalysis(listing: any, analysis: string, context?: stri
   };
 }
 
-export async function scoreMarketplaceListings(listings: any[], context?: string | null, systemPrompt?: string | null) {
+export async function scoreMarketplaceListings(listings: any[], context?: string | null, systemPrompt?: string | null, priceLow?: number | null, priceHigh?: number | null) {
   if (listings.length === 0) return [];
   const rawStrings = await batchAnalyzeMarketplaceListingsWithImages(listings, context, systemPrompt);
   return listings.map((listing, i) => ({
-    ...parseMarketplaceAnalysis(listing, rawStrings[i], context),
+    ...parseMarketplaceAnalysis(listing, rawStrings[i], context, priceLow, priceHigh),
     systemPrompt: systemPrompt ?? MARKETPLACE_BATCH_SYSTEM_PROMPT,
   }));
 }

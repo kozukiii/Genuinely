@@ -1,4 +1,5 @@
 // src/App.tsx
+import { useEffect } from "react";
 import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import NavBar from "./components/NavBar";
 import SignInToast from "./components/SignInToast";
@@ -13,6 +14,14 @@ import ListingCardDemo from "./pages/ListingCardDemo";
 import AdminPage from "./pages/AdminPage";
 
 import "./pages/styles/HomePage.css";
+
+function ScrollToTop() {
+  const { pathname } = useLocation();
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [pathname]);
+  return null;
+}
 
 function AppRoutes() {
   const location = useLocation();
@@ -34,9 +43,14 @@ function AppRoutes() {
 }
 
 export default function App() {
+  useEffect(() => {
+    fetch("/api/search/warmup").catch(() => null);
+  }, []);
+
   return (
     <BrowserRouter>
       <AuthProvider>
+        <ScrollToTop />
         <NavBar />
         <AppRoutes />
         <SignInToast />

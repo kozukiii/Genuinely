@@ -10,6 +10,18 @@ function formatDeliveryType(type: string): string {
   return type.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+function abbreviateCondition(condition: string): string {
+  const c = condition.toLowerCase();
+  if (c.includes("certified") && c.includes("refurb")) return "Cert. Refurbished";
+  if (c.includes("seller") && c.includes("refurb")) return "Refurbished";
+  if (c.includes("manufacturer") && c.includes("refurb")) return "Mfr. Refurbished";
+  if (c.includes("refurb")) return "Refurbished";
+  if (c.includes("like new") || c.includes("like-new")) return "Like New";
+  if (c.includes("open box")) return "Open Box";
+  if (c.includes("very good")) return "Very Good";
+  return condition;
+}
+
 function sourceLabel(source: Listing["source"]) {
   if (source === "marketplace") return "Marketplace";
   return "eBay";
@@ -101,7 +113,7 @@ export default function ListingCard({ data }: { data: Listing }) {
             </div>
 
             {data.condition && (
-              <span className="listing-condition">{data.condition}</span>
+              <span className="listing-condition">{abbreviateCondition(data.condition)}</span>
             )}
 
             {data.source === "marketplace" ? (

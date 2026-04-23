@@ -66,7 +66,7 @@ async function scoreSingleListingWithContext(listing: any) {
     ? { ...enriched, shippingPrice: group.estimatedShippingPrice, shippingEstimated: true, shippingCalculated: undefined }
     : enriched;
 
-  const [result] = await scoreListings([toScore], null, group?.systemPrompt ?? null);
+  const [result] = await scoreListings([toScore], null, group?.systemPrompt ?? null, group?.priceLow ?? null, group?.priceHigh ?? null);
 
   return {
     ...result,
@@ -77,6 +77,13 @@ async function scoreSingleListingWithContext(listing: any) {
 
 // GET /api/search?query=...&limit=16
 router.get("/", searchAll);
+
+// GET /api/search/warmup — called on page load to prime the GeoIP cache
+router.get("/warmup", async (req, res) => {
+  const ip = extractClientIp(req as any);
+  getLocationFromIp(ip).catch(() => null);
+  res.json({ ok: true });
+});
 
 // POST /api/analyze — analyze a single listing on demand
 router.post("/analyze", async (req, res) => {
@@ -173,14 +180,14 @@ router.post("/context", async (req, res) => {
 // Accepts { listings, systemPrompt } — scores a batch with a pre-generated product-expert prompt.
 // systemPrompt replaces the static system prompt for this group of listings.
 router.post("/batch-analyze", async (req, res) => {
-  const { listings, systemPrompt } = req.body;
+  const { listings, systemPrompt, priceLow, priceHigh } = req.body;
   if (!Array.isArray(listings)) {
     return res.status(400).json({ error: "listings must be an array" });
   }
 
   try {
     const enriched = await Promise.all(listings.map((l: any) => enrichMarketplaceListing(l)));
-    const scored = await scoreListings(enriched, null, systemPrompt ?? null);
+    const scored = await scoreListings(enriched, null, systemPrompt ?? null, priceLow ?? null, priceHigh ?? null);
     return res.json(scored);
   } catch (err: any) {
     console.error("batch-analyze error:", err);

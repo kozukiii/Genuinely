@@ -96,10 +96,17 @@ export function calculatePriceFairness(
   context: string | null | undefined,
   condition?: string,
   title?: string,
+  priceLow?: number | null,
+  priceHigh?: number | null,
 ): number | null {
-  if (!context || price == null || price <= 0) return null;
+  if (price == null || price <= 0) return null;
 
-  const range = extractPriceRange(context);
+  // Prefer explicit low/high from the LLM header — same values shown in the chart
+  const range: [number, number] | null =
+    priceLow != null && priceHigh != null && priceHigh > priceLow
+      ? [priceLow, priceHigh]
+      : context ? extractPriceRange(context) : null;
+
   if (!range) return null;
 
   const [lo, hi] = range;

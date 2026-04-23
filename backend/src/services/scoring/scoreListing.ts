@@ -13,14 +13,14 @@ export async function scoreListing(listing: any, context?: string | null, system
   }
 }
 
-export async function scoreListings(listings: any[], context?: string | null, systemPrompt?: string | null) {
+export async function scoreListings(listings: any[], context?: string | null, systemPrompt?: string | null, priceLow?: number | null, priceHigh?: number | null) {
   const ebay = listings.filter((l) => l.source === "ebay");
   const marketplace = listings.filter((l) => l.source === "marketplace");
   const other = listings.filter((l) => l.source !== "ebay" && l.source !== "marketplace");
 
   const [scoredEbay, scoredMarketplace] = await Promise.all([
-    analyzeItemsWithAI(ebay, context, systemPrompt),
-    scoreMarketplaceListings(marketplace, context, systemPrompt),
+    analyzeItemsWithAI(ebay, context, systemPrompt, priceLow, priceHigh),
+    scoreMarketplaceListings(marketplace, context, systemPrompt, priceLow, priceHigh),
   ]);
 
   // Restore original order

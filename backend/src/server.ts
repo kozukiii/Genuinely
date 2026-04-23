@@ -28,8 +28,8 @@ app.use(cors({
 }));
 
 const limiter = rateLimit({
-  windowMs: 5 * 60 * 1000, // 5 minutes
-  max: 30,
+  windowMs: 60 * 1000, // 1 minute
+  max: 10000,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: "Too many requests, please slow down." },

@@ -174,7 +174,7 @@ async function runAnalysisPipeline(
         const res = await fetch(`${API_BASE}/api/search/batch-analyze`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ listings: patchedListings, systemPrompt: group.systemPrompt }),
+          body: JSON.stringify({ listings: patchedListings, systemPrompt: group.systemPrompt, priceLow: group.priceLow ?? null, priceHigh: group.priceHigh ?? null }),
           signal,
         });
         if (!res.ok) throw new Error(`batch-analyze HTTP ${res.status}`);

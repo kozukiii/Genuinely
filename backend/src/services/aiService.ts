@@ -53,7 +53,7 @@ function buildEbayDebugInfo(listing: any): string {
   }, null, 2);
 }
 
-function parseAIAnalysis(listing: any, analysis: string, context?: string | null) {
+function parseAIAnalysis(listing: any, analysis: string, context?: string | null, priceLow?: number | null, priceHigh?: number | null) {
   const jsonBlock = extractStructuredAnalysis(analysis);
 
   if (!jsonBlock) {
@@ -63,12 +63,14 @@ function parseAIAnalysis(listing: any, analysis: string, context?: string | null
   const scores = { ...(jsonBlock?.scores || {}) };
   const { sellerTrust, conditionHonesty, shippingFairness, locationRisk, descriptionQuality } = scores;
 
-  // Override LLM price fairness with deterministic context-based score when available
+  // Override LLM price fairness with deterministic score using the same range shown in the chart
   const calculatedPriceFairness = calculatePriceFairness(
     listing.price,
     context,
     listing.condition,
     listing.title,
+    priceLow,
+    priceHigh,
   );
   if (calculatedPriceFairness !== null) {
     scores.priceFairness = calculatedPriceFairness;
@@ -127,7 +129,7 @@ export async function analyzeItemWithAI(merged: any, context?: string | null) {
   return result;
 }
 
-export async function analyzeItemsWithAI(items: any[], context?: string | null, systemPrompt?: string | null) {
+export async function analyzeItemsWithAI(items: any[], context?: string | null, systemPrompt?: string | null, priceLow?: number | null, priceHigh?: number | null) {
   if (items.length === 0) return [];
 
   // Read store once — avoids N synchronous disk reads for N items
@@ -171,7 +173,7 @@ export async function analyzeItemsWithAI(items: any[], context?: string | null, 
     for (let j = 0; j < chunk.length; j++) {
       const item = chunk[j];
       const origIdx = batchIndices[j];
-      const parsed = parseAIAnalysis(item, rawStrings[j], context);
+      const parsed = parseAIAnalysis(item, rawStrings[j], context, priceLow, priceHigh);
 
       resultMap.set(origIdx, {
         ...item,

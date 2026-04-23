@@ -117,6 +117,20 @@
 .admin-status--critical { background: #3d1010; color: #ff5555; }
 .admin-status--unknown  { background: #2a2a2a; color: #888; }
 
+.admin-card--link {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.admin-card--link:hover {
+  border-color: #3dff8f;
+  background: #1e2a1e;
+}
+
 .admin-forbidden,
 .admin-error,
 .admin-empty {

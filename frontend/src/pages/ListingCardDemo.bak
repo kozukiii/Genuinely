@@ -79,46 +79,11 @@ function priceFillPct(price: number) {
 type PriceBadge = { label: string; color: string; bg: string };
 
 function getPriceBadge(price: number): PriceBadge {
-  if (price < PRICE_LOW * 0.5)  return { label: "RISKY PRICE", color: "#ef4444", bg: "rgba(239,68,68,0.13)" };
-  if (price < PRICE_LOW)        return { label: "GREAT PRICE", color: "#a855f7", bg: "rgba(168,85,247,0.13)" };
-  if (price <= PRICE_MID)       return { label: "GOOD PRICE",  color: "#22c55e", bg: "rgba(34,197,94,0.13)" };
-  if (price <= PRICE_HIGH)      return { label: "FAIR PRICE",  color: "#facc15", bg: "rgba(250,204,21,0.13)" };
-  return                               { label: "HIGH PRICE",  color: "#ef4444", bg: "rgba(239,68,68,0.13)" };
-}
-
-const STAR_DATA = [
-  { left: -9,    top: -8,    size: 7, delay: "0s"    },
-  { right: -8,   top: -7,    size: 6, delay: "0.6s"  },
-  { left: -7,    bottom: -7, size: 5, delay: "1.1s"  },
-  { right: -7,   bottom: -6, size: 7, delay: "0.35s" },
-  { left: "35%", top: -10,   size: 5, delay: "0.85s" },
-] as const;
-
-function StarSparkles() {
-  return (
-    <>
-      {STAR_DATA.map((s, i) => (
-        <svg
-          key={i}
-          viewBox="0 0 10 10"
-          aria-hidden="true"
-          style={{
-            position: "absolute",
-            width: s.size,
-            height: s.size,
-            ...(typeof s.left   !== "undefined" && { left:   s.left   }),
-            ...(typeof (s as any).right  !== "undefined" && { right:  (s as any).right  }),
-            ...(typeof s.top    !== "undefined" && { top:    s.top    }),
-            ...(typeof (s as any).bottom !== "undefined" && { bottom: (s as any).bottom }),
-            animation: `starTwinkle 2s ease-in-out ${s.delay} infinite`,
-            pointerEvents: "none",
-          }}
-        >
-          <path d="M5 0 L5.5 4.5 L10 5 L5.5 5.5 L5 10 L4.5 5.5 L0 5 L4.5 4.5 Z" fill="#a855f7" />
-        </svg>
-      ))}
-    </>
-  );
+  if (price > PRICE_HIGH)           return { label: "HIGH PRICE",  color: "#ff5555", bg: "rgba(255,85,85,0.13)" };
+  if (price >= PRICE_MID)           return { label: "FAIR PRICE",  color: "#facc15", bg: "rgba(250,204,21,0.13)" };
+  if (price >= PRICE_LOW)           return { label: "GOOD PRICE",  color: "#22c55e", bg: "rgba(34,197,94,0.13)" };
+  if (price > PRICE_LOW * 0.5)      return { label: "GREAT PRICE", color: "#a855f7", bg: "rgba(168,85,247,0.13)" };
+  return                                   { label: "RISKY PRICE", color: "#ff5555", bg: "rgba(255,85,85,0.13)" };
 }
 
 // ─── Animation timing ───────────────────────────────────────────────────────
@@ -443,7 +408,6 @@ export default function ListingCardDemo() {
                           className="demo-score-bar-title demo-fade-in"
                           style={done ? { color: badge.color, background: badge.bg, border: `1px solid ${badge.color}50` } : undefined}
                         >
-                          {done && badge.label === "GREAT PRICE" && <StarSparkles />}
                           {done ? badge.label : "Price Data"}
                         </div>
                       );
@@ -480,6 +444,11 @@ export default function ListingCardDemo() {
                         targetValue={FINAL_SCORE}
                         size={MAIN_RING_SIZE}
                       />
+                      {analysisPhase === "done" && analysisScore != null && (
+                        <p className="page-rating-label" style={{ position: "absolute", top: "155px", width: "100%", textAlign: "center", margin: 0 }}>
+                          {analysisScore}/100
+                        </p>
+                      )}
                     </div>
                   </div>
                 )}
@@ -488,23 +457,21 @@ export default function ListingCardDemo() {
 
             {/* Analyze button + marketplace link */}
             <div style={{ position: "absolute", left: 0, right: 0, top: "calc(22rem - 92px)", display: "flex", flexDirection: "column", gap: "8px" }}>
-              {analysisScore == null && (
-                <div className="analyze-row">
-                  <button
-                    type="button"
-                    className="analyze-btn"
-                    onClick={() => {
-                      setAnalysisScore(null);
-                      setCompressProgress(0);
-                      setFillValue(FILL_START_SCORE);
-                      setAnalysisPhase("loading");
-                    }}
-                    disabled={isAnalyzing}
-                  >
-                    {isAnalyzing ? "Analyzing\u2026" : "Analyze listing"}
-                  </button>
-                </div>
-              )}
+              <div className="analyze-row">
+                <button
+                  type="button"
+                  className="analyze-btn"
+                  onClick={() => {
+                    setAnalysisScore(null);
+                    setCompressProgress(0);
+                    setFillValue(FILL_START_SCORE);
+                    setAnalysisPhase("loading");
+                  }}
+                  disabled={isAnalyzing}
+                >
+                  {isAnalyzing ? "Analyzing\u2026" : analysisScore != null ? "Re-analyze" : "Analyze listing"}
+                </button>
+              </div>
               <a
                 className="external-ebay-link demo-external-link"
                 href={demoListing.url}
@@ -538,7 +505,7 @@ export default function ListingCardDemo() {
 
         {/* Listing detail badges */}
         {analysisPhase === "done" && (
-          <div className="demo-fade-in" style={{ marginTop: "0.6rem" }}>
+          <div className="demo-fade-in" style={{ marginTop: "1.25rem" }}>
           <p style={{ margin: "0 0 8px", fontSize: "0.68rem", fontWeight: 600, letterSpacing: "0.06em", color: "rgba(255,255,255,0.3)", textTransform: "uppercase" }}>At a glance</p>
           <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
             {[
@@ -620,11 +587,8 @@ export default function ListingCardDemo() {
 
         {/* Tab badges + content */}
         {analysisPhase === "done" && analysisScore != null && (
-          <hr style={{ border: "none", borderTop: "1px solid rgba(255,255,255,0.1)", margin: "0.75rem 0 0" }} />
-        )}
-        {analysisPhase === "done" && analysisScore != null && (
           <>
-            <div className="demo-fade-in" style={{ display: "flex", justifyContent: "space-evenly", marginTop: "0.75rem" }}>
+            <div className="demo-fade-in" style={{ display: "flex", justifyContent: "space-evenly", marginTop: "1.5rem" }}>
               {(["overview", "details"] as const).map((tab) => {
                 const label = tab === "overview" ? null : "Original Details";
                 const active = activeTab === tab;
@@ -655,23 +619,12 @@ export default function ListingCardDemo() {
             </div>
 
             {activeTab === "overview" && (
-              <div className="ai-overview-dropdown demo-fade-in" style={{ borderTop: "none", paddingTop: 0, marginTop: "0.2rem" }}>
+              <div className="ai-overview-dropdown demo-fade-in" style={{ borderTop: "none", paddingTop: 0, marginTop: "1rem" }}>
                 <h3>Summary</h3>
                 <p>
                   {SUMMARY_TEXT.slice(0, summaryChars)}
                   {summaryChars < SUMMARY_TEXT.length && <span className="demo-typing-cursor" />}
                 </p>
-                {summaryChars >= SUMMARY_TEXT.length && (
-                  <button
-                    type="button"
-                    className="analyze-btn demo-fade-in"
-                    style={{ marginTop: "1rem", fontSize: "0.78rem", opacity: 0.7, width: "100%", justifyContent: "center" }}
-                    onClick={() => { setAnalysisScore(null); setCompressProgress(0); setFillValue(FILL_START_SCORE); setAnalysisPhase("loading"); }}
-                    disabled={isAnalyzing}
-                  >
-                    Something look off? Rerun analysis with the latest market data!
-                  </button>
-                )}
               </div>
             )}
 

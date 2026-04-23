@@ -59,6 +59,9 @@ export interface Listing {
   priceLow?: number;
   priceHigh?: number;
 
+  // At-a-glance highlights (positive/negative quick facts)
+  highlights?: { label: string; positive: boolean }[];
+
   // Set when a Marketplace listing was resolved to an eBay cross-listing
   crossListedEbayId?: string;
 }

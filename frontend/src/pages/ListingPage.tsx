@@ -1,5 +1,6 @@
 import { useLocation, useNavigate } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
+import { useAuth } from "../context/AuthContext";
 import type { Listing } from "../types/Listing";
 import RatingRing from "../components/RatingRing";
 import ListingCard from "../components/ListingCard";
@@ -13,6 +14,10 @@ import { subscribeToAnalysis } from "../utils/analysisStore";
 function sourceLabel(source?: Listing["source"]) {
   if (source === "marketplace") return "Marketplace";
   return "eBay";
+}
+
+function formatDeliveryType(type: string): string {
+  return type.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 function looksLikeDebugPayload(value?: string | null) {
@@ -81,6 +86,50 @@ function scoreColor(score: number) {
   if (score >= 67) return "#22c55e";
   if (score >= 33) return "#facc15";
   return "#ef4444";
+}
+
+function getPriceBadge(price: number, priceLow: number, priceHigh: number): { label: string; color: string; bg: string } {
+  const mid = (priceLow + priceHigh) / 2;
+  if (price < priceLow * 0.5)  return { label: "RISKY PRICE", color: "#ef4444", bg: "rgba(239,68,68,0.08)" };
+  if (price < priceLow)        return { label: "GREAT PRICE", color: "#a855f7", bg: "rgba(168,85,247,0.08)" };
+  if (price <= mid)             return { label: "GOOD PRICE",  color: "#22c55e", bg: "rgba(34,197,94,0.08)" };
+  if (price <= priceHigh)       return { label: "FAIR PRICE",  color: "#facc15", bg: "rgba(250,204,21,0.08)" };
+  return                               { label: "HIGH PRICE",  color: "#ef4444", bg: "rgba(239,68,68,0.08)" };
+}
+
+const STAR_DATA = [
+  { left: -9,  top: -8,    size: 7, delay: "0s"     },
+  { right: -8, top: -7,    size: 6, delay: "0.6s"   },
+  { left: -7,  bottom: -7, size: 5, delay: "1.1s"   },
+  { right: -7, bottom: -6, size: 7, delay: "0.35s"  },
+  { left: "35%", top: -10, size: 5, delay: "0.85s"  },
+] as const;
+
+function StarSparkles() {
+  return (
+    <>
+      {STAR_DATA.map((s, i) => (
+        <svg
+          key={i}
+          viewBox="0 0 10 10"
+          aria-hidden="true"
+          style={{
+            position: "absolute",
+            width: s.size,
+            height: s.size,
+            ...(typeof s.left   !== "undefined" && { left:   s.left   }),
+            ...(typeof (s as any).right  !== "undefined" && { right:  (s as any).right  }),
+            ...(typeof s.top    !== "undefined" && { top:    s.top    }),
+            ...(typeof (s as any).bottom !== "undefined" && { bottom: (s as any).bottom }),
+            animation: `starTwinkle 2s ease-in-out ${s.delay} infinite`,
+            pointerEvents: "none",
+          }}
+        >
+          <path d="M5 0 L5.5 4.5 L10 5 L5.5 5.5 L5 10 L4.5 5.5 L0 5 L4.5 4.5 Z" fill="#a855f7" />
+        </svg>
+      ))}
+    </>
+  );
 }
 
 type AnalysisPhase = "idle" | "loading" | "compressing" | "filling" | "done";
@@ -160,10 +209,14 @@ export default function ListingPage() {
   const navigate = useNavigate();
   const listing = (state as { listing?: Listing } | null)?.listing;
 
+  const { user } = useAuth();
+  const isAdmin = user?.isAdmin === true;
+
   const [showDebug,   setShowDebug]   = useState(false);
   const [showRaw,     setShowRaw]     = useState(false);
   const [showContext, setShowContext] = useState(false);
   const [showPrompt,  setShowPrompt]  = useState(false);
+  const [activeTab,   setActiveTab]   = useState<"overview" | "details">("overview");
   const [imageIndex,  setImageIndex]  = useState(0);
   const [viewerOpen,  setViewerOpen]  = useState(false);
   const [saved,       setSaved]       = useState(false);
@@ -547,6 +600,15 @@ export default function ListingPage() {
                 </div>
                 {listing.condition && <span className="page-condition">{listing.condition}</span>}
                 {sellerLine && <p className="page-seller">{sellerLine}</p>}
+                {listing.source === "marketplace" && Array.isArray(listing.delivery_types) && listing.delivery_types.length > 0 && (
+                  <div className="page-delivery-types">
+                    {listing.delivery_types.map((type) => (
+                      <span key={type} className="page-delivery-badge">
+                        {formatDeliveryType(type)}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div className="ring-price-row">
@@ -563,7 +625,19 @@ export default function ListingPage() {
                       className={`demo-score-bar-wrap${analysisPhase !== "done" ? " demo-score-bar-wrap--pending" : ""}`}
                       style={{ marginTop: "30px" }}
                     >
-                      <div className="demo-score-bar-title">Price Data</div>
+                      {(() => {
+                        const done = analysisPhase === "done" && listing.price != null && ai.priceLow != null && ai.priceHigh != null;
+                        const badge = done ? getPriceBadge(listing.price!, ai.priceLow!, ai.priceHigh!) : null;
+                        return (
+                          <div
+                            className="demo-score-bar-title"
+                            style={badge ? { color: badge.color, background: badge.bg, borderColor: `${badge.color}48` } : undefined}
+                          >
+                            {badge?.label === "GREAT PRICE" && <StarSparkles />}
+                            {badge ? badge.label : "Price Data"}
+                          </div>
+                        );
+                      })()}
                       <div className="demo-score-bar-box">
                         <div className="demo-score-bar-track">
                           {analysisPhase === "done" && fillPct != null && (
@@ -666,44 +740,125 @@ export default function ListingPage() {
           </div>
         </div>
 
-        {/* Summary + debug */}
+        {/* Summary + at-a-glance + tabs */}
         {showSummary && (
-          <div className="ai-overview-dropdown demo-fade-in" style={{ borderTop: "none", paddingTop: 0, marginTop: "1rem" }}>
-            <h3>Summary</h3>
-            <p>
-              {(visibleOverview ?? "").slice(0, summaryChars)}
-              {summaryChars < (visibleOverview?.length ?? 0) && (
-                <span className="demo-typing-cursor" />
-              )}
-            </p>
+          <div className="ai-overview-dropdown demo-fade-in" style={{ borderTop: "none", paddingTop: 0, marginTop: "0.25rem" }}>
 
-            {ai.marketContext && (
+            {/* At a glance */}
+            {ai.highlights && ai.highlights.length > 0 && (
               <>
-                <button className="ai-debug-toggle" onClick={() => setShowContext(!showContext)}>
-                  {showContext ? "Hide market context \u2191" : "Show market context \u2193"}
-                </button>
-                {showContext && <pre className="debug-block">{ai.marketContext}</pre>}
+                <hr className="at-a-glance-hr" />
+                <p className="at-a-glance-label">At a glance:</p>
+                <div className="at-a-glance-badges">
+                  {ai.highlights.map((h, i) => (
+                    <span
+                      key={i}
+                      className={`at-a-glance-badge at-a-glance-badge--${h.positive ? "pos" : "neg"}`}
+                    >
+                      {h.positive ? "\u2713" : "\u2717"} {h.label}
+                    </span>
+                  ))}
+                </div>
               </>
             )}
 
-            {ai.systemPrompt && (
+            <hr className="at-a-glance-hr" />
+
+            {/* Tabs */}
+            <div className="overview-tabs">
+              <button
+                className={`overview-tab${activeTab === "overview" ? " overview-tab--active" : ""}`}
+                onClick={() => setActiveTab("overview")}
+              >
+                GENUINELY Overview
+              </button>
+              <button
+                className={`overview-tab${activeTab === "details" ? " overview-tab--active" : ""}`}
+                onClick={() => setActiveTab("details")}
+              >
+                Original Details
+              </button>
+            </div>
+
+            {/* Overview tab */}
+            {activeTab === "overview" && (
               <>
-                <button className="ai-debug-toggle" onClick={() => setShowPrompt(!showPrompt)}>
-                  {showPrompt ? "Hide analysis prompt \u2191" : "Show analysis prompt \u2193"}
-                </button>
-                {showPrompt && <pre className="debug-block">{ai.systemPrompt}</pre>}
+                <h3>Summary</h3>
+                <p>
+                  {(visibleOverview ?? "").slice(0, summaryChars)}
+                  {summaryChars < (visibleOverview?.length ?? 0) && (
+                    <span className="demo-typing-cursor" />
+                  )}
+                </p>
+
+                {isAdmin && (
+                  <>
+                    {ai.marketContext && (
+                      <>
+                        <button className="ai-debug-toggle" onClick={() => setShowContext(!showContext)}>
+                          {showContext ? "Hide market context \u2191" : "Show market context \u2193"}
+                        </button>
+                        {showContext && <pre className="debug-block">{ai.marketContext}</pre>}
+                      </>
+                    )}
+
+                    {ai.systemPrompt && (
+                      <>
+                        <button className="ai-debug-toggle" onClick={() => setShowPrompt(!showPrompt)}>
+                          {showPrompt ? "Hide analysis prompt \u2191" : "Show analysis prompt \u2193"}
+                        </button>
+                        {showPrompt && <pre className="debug-block">{ai.systemPrompt}</pre>}
+                      </>
+                    )}
+
+                    <button className="ai-debug-toggle" onClick={() => setShowDebug(!showDebug)}>
+                      {showDebug ? "Hide debug \u2191" : "Show debug info \u2193"}
+                    </button>
+                    {showDebug && <pre className="debug-block">{ai.debugInfo}</pre>}
+
+                    <button className="ai-debug-toggle" onClick={() => setShowRaw(!showRaw)}>
+                      {showRaw ? "Hide raw AI output \u2191" : "Show raw AI output \u2193"}
+                    </button>
+                    {showRaw && <pre className="debug-block">{ai.rawAnalysis}</pre>}
+                  </>
+                )}
               </>
             )}
 
-            <button className="ai-debug-toggle" onClick={() => setShowDebug(!showDebug)}>
-              {showDebug ? "Hide debug \u2191" : "Show debug info \u2193"}
-            </button>
-            {showDebug && <pre className="debug-block">{ai.debugInfo}</pre>}
-
-            <button className="ai-debug-toggle" onClick={() => setShowRaw(!showRaw)}>
-              {showRaw ? "Hide raw AI output \u2191" : "Show raw AI output \u2193"}
-            </button>
-            {showRaw && <pre className="debug-block">{ai.rawAnalysis}</pre>}
+            {/* Details tab */}
+            {activeTab === "details" && (
+              <div className="original-details-layout">
+                <dl className="original-details-meta">
+                  {listing.condition && <><dt>Condition</dt><dd>{listing.condition}</dd></>}
+                  {listing.source === "marketplace"
+                    ? listing.location && <><dt>Location</dt><dd>{listing.location}</dd></>
+                    : listing.seller && <><dt>Seller</dt><dd>{listing.seller}</dd></>
+                  }
+                  {listing.price != null && (
+                    <><dt>Price</dt><dd>{money}{listing.acceptsOffers ? " (Accepts Offers)" : ""}</dd></>
+                  )}
+                  {listing.shippingPrice != null && (
+                    <><dt>Shipping</dt><dd>
+                      {listing.shippingPrice === 0
+                        ? "Free"
+                        : `$${listing.shippingPrice}${listing.shippingEstimated ? " (est.)" : ""}`}
+                    </dd></>
+                  )}
+                  {listing.feedback && <><dt>Feedback</dt><dd>{listing.feedback}</dd></>}
+                  {Array.isArray(listing.delivery_types) && listing.delivery_types.length > 0 && (
+                    <><dt>Delivery</dt><dd>{listing.delivery_types.join(", ")}</dd></>
+                  )}
+                </dl>
+                <div className="original-details-divider" />
+                <div className="original-details-desc">
+                  <p className="at-a-glance-label" style={{ marginBottom: "0.6rem" }}>Seller's Description</p>
+                  {sanitizeVisibleText(listing.fullDescription ?? listing.description)
+                    ? <p className="page-description">{sanitizeVisibleText(listing.fullDescription ?? listing.description)}</p>
+                    : <p style={{ color: "rgba(255,255,255,0.3)", fontSize: "0.85rem" }}>No description provided.</p>
+                  }
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

@@ -118,11 +118,12 @@ export function calculatePriceFairness(
 
   let score: number;
 
+  // Below 50% of market low — suspiciously cheap (RISKY PRICE territory), not a deal
+  if (price < lo * 0.5) return 0;
+
   if (pos <= 0) {
-    // At or below market low — excellent deal
-    // Each 10% below low adds 1 bonus point, max bonus 5
-    const bonus = Math.min(Math.abs(pos) * 10, 5);
-    score = 95 + bonus;
+    // At or below market low — GREAT PRICE, perfect score
+    score = 100;
   } else if (pos <= 1) {
     // Within range — linear 95 → 55
     score = 95 - pos * 40;

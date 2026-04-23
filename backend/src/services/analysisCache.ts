@@ -10,6 +10,7 @@ export interface AnalysisCacheEntry {
   aiScore: number | null;
   aiScores: Record<string, number | null | undefined>;
   overview: string;
+  highlights?: { label: string; positive: boolean }[];
 }
 
 type AnalysisCacheStore = Record<string, AnalysisCacheEntry>;

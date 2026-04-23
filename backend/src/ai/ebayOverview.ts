@@ -191,6 +191,10 @@ If shipping is free, automatically give full points (100) for shippingFairness.
 If a shipping cost is present but marked as estimated (shippingEstimated: true), score it normally — judge whether the estimate is reasonable for the item's size and weight.
 If shipping cost is truly unknown (no price and no estimate), treat shippingFairness as neutral (score 65) — never penalize for unresolved calculated shipping.
 If the seller has excellent feedback (99%+) and many ratings (1000+), automatically give full points (100) for sellerTrust.
+If the seller has 100% feedback but fewer than 2 ratings, set sellerTrust to 0 — a perfect score from one or two buyers is meaningless and should not be rewarded.
+If the seller has 100% feedback but fewer than 10 ratings, cap sellerTrust at 75 — insufficient sample size to trust the rating at face value.
+If the price is at or below the PRODUCT CONTEXT market low end, set priceFairness to 100 — this is a great deal.
+If the price is below 50% of the PRODUCT CONTEXT market low end, set priceFairness to 0 — a price this far below market is a red flag, not a deal. It suggests the item may be counterfeit, severely damaged beyond description, or the listing is fraudulent. Do NOT treat extreme underpricing as a positive signal.
 
 If any field is missing/undefined, treat it as NEUTRAL (no deduction, no reward). Missing data should NEVER lower a score unless it's critical (e.g., description or seller ratings).
 ALWAYS INCLUDE A DESCRIPTION OF THE IMAGES IN THE OVERVIEW SECTION (unless none were provided).
@@ -227,8 +231,17 @@ OVERVIEW TONE RULES:
     "shippingFairness": <number>,
     "descriptionQuality": <number>
   },
-  "overview": "Short reasoning paragraph here."
+  "overview": "Short reasoning paragraph here.",
+  "highlights": [{ "label": "Headcover included", "positive": true }, { "label": "Grip worn", "positive": false }]
 }
+
+HIGHLIGHTS RULES:
+- First scan the PRODUCT CONTEXT block for accessories and inspection points specific to this item (e.g. original box, charger, case, manual, tools, cables, accessories). If those items are present or confirmed in the listing, mark positive. If they are expected but absent, mark negative.
+- Then add clearly observable positive or negative details from the title, description, or images — such as shipping, seller reputation, or notable item specifics.
+- Do NOT surface the condition label (e.g. "Used condition", "Like New") as a highlight. Only flag condition if the images visibly contradict the stated condition (e.g. visible damage on a "Like New" claim).
+- Output 3–6 highlights total. Each label must be ≤10 words and state a specific fact.
+- Good label examples: "Original box included", "Charger included", "Free shipping", "Top-rated seller", "Missing accessories", "Visible wear in images"
+- Only include highlights with clear evidence. Do NOT pad or invent.
 
 After that JSON block, output:
 
@@ -236,7 +249,7 @@ DEBUG INFO:
 <Only the raw fields the user sent>
 
 ‼️ DO NOT include any scoring numbers inside the overview text.
-‼️ DO NOT add extra fields to the JSON.
+‼️ DO NOT add extra fields to the JSON beyond scores, overview, and highlights.
 ‼️ DO NOT wrap JSON in backticks.
 `,
     },
@@ -297,7 +310,8 @@ You will receive multiple eBay listings numbered 1 through N (each wrapped in ==
 Analyze ALL of them and return results as a JSON array.
 
 ALWAYS APPLY:
-- sellerTrust auto 100 if 99%+ feedback and 1000+ ratings
+- sellerTrust auto 100 if 99%+ feedback and 1000+ ratings; if 100% feedback but fewer than 2 ratings set sellerTrust to 0; if 100% feedback but fewer than 10 ratings cap sellerTrust at 75
+- priceFairness: if price is at or below market low, set priceFairness to 100; if price is below 50% of market low, set priceFairness to 0 — suspiciously cheap is a red flag, not a deal
 - shippingFairness auto 100 if free; if shippingEstimated is true, score normally against the estimate; score 65 (neutral) only if cost is truly unknown
 - Missing data = NEUTRAL (no deduction unless truly critical)
 - Describe images in the overview if provided
@@ -316,12 +330,21 @@ JSON FORMATTING RULES — your output must pass JSON.parse() without any modific
 - Always put a comma between every object in the array; never omit commas between objects
 - Output nothing before the opening [ or after the closing ] — no preamble, no explanation
 
+HIGHLIGHTS RULES (apply to every listing):
+- First scan the PRODUCT CONTEXT block for accessories and inspection points for this item type. Surface presence as positive, absence as negative.
+- Then add clearly observable positive or negative details from title, description, or images — such as shipping, seller reputation, or notable item specifics.
+- Do NOT surface the condition label as a highlight. Only flag condition if images visibly contradict the stated condition (e.g. visible damage on a "Like New" claim).
+- Output 3–6 highlights per listing. Labels ≤10 words, factual.
+- Examples: "Original box included", "Charger included", "Free shipping", "Top-rated seller", "Missing accessories", "Visible wear in images"
+- Only include highlights with clear evidence. Do NOT pad.
+
 OUTPUT FORMAT — return ONLY a JSON array:
 [
   {
     "listingIndex": 0,
     "scores": { "priceFairness": <n>, "sellerTrust": <n>, "conditionHonesty": <n>, "shippingFairness": <n>, "descriptionQuality": <n> },
-    "overview": "Short reasoning paragraph."
+    "overview": "Short reasoning paragraph.",
+    "highlights": [{ "label": "...", "positive": true }]
   },
   ...one entry per listing, zero-indexed
 ]
@@ -335,7 +358,8 @@ Analyze ALL of them and return results as a JSON array.
 
 SCORING RULES (apply to every listing):
 - priceFairness (0–100): use PRODUCT CONTEXT price range and fairness guidance if provided; otherwise estimate from listing data and your knowledge
-- sellerTrust (0–100): based on feedback score and rating count; auto 100 if 99%+ feedback and 1000+ ratings
+- sellerTrust (0–100): based on feedback score and rating count; auto 100 if 99%+ feedback and 1000+ ratings; if 100% feedback but fewer than 2 ratings set to 0 (meaningless sample); if 100% feedback but fewer than 10 ratings cap at 75
+- priceFairness (0–100): use PRODUCT CONTEXT price range; at or below market low = 100 (great deal); CRITICAL EXCEPTION: if price is below 50% of market low, set priceFairness to 0 — this far below market is a red flag (RISKY), not a deal; do NOT reward extreme underpricing
 - conditionHonesty (0–100): scrutinize images for scratches, dents, scuffs, discoloration, missing parts, or damage to the ITEM ITSELF; when condition is "New", "Like New", or "Open Box" AND actual item wear is present: score MUST be 50 or below; multiple areas of wear = 35 or below; do NOT use "minor wear" / "no major damage"; SELF-CHECK: if overview mentions wear/scratch/damage ON THE ITEM and condition is new/like-new, cap at 50; EXCEPTION: box or packaging damage disclosed by the seller does NOT penalize conditionHonesty — the condition is about the product not the box, and proactive disclosure is honest; EXCEPTION: official/manufacturer images are normal for new factory-sealed items — do not flag as a discrepancy; EXCEPTION: graded items (PSA, BGS, CGC, etc.) are exempt — the grade IS the certified condition
 - shippingFairness (0–100): is shipping reasonable for the item; auto 100 if free; if shippingEstimated is true score it normally against the estimate; score 65 (neutral) only if cost is truly unknown
 - descriptionQuality (0–100): evaluate against PRODUCT CONTEXT description guidance if provided; otherwise judge on detail, accuracy, and completeness
@@ -358,12 +382,21 @@ JSON FORMATTING RULES — your output must pass JSON.parse() without any modific
 - Always put a comma between every object in the array; never omit commas between objects
 - Output nothing before the opening [ or after the closing ] — no preamble, no explanation
 
+HIGHLIGHTS RULES:
+- First scan the PRODUCT CONTEXT block for accessories and inspection points for this item type. Surface presence as positive, absence as negative.
+- Then add clearly observable positive or negative details from title, description, or images — such as shipping, seller reputation, or notable item specifics.
+- Do NOT surface the condition label as a highlight. Only flag condition if images visibly contradict the stated condition (e.g. visible damage on a "Like New" claim).
+- Output 3–6 highlights per listing. Labels ≤10 words, factual.
+- Examples: "Original box included", "Charger included", "Free shipping", "Top-rated seller", "Missing accessories", "Visible wear in images"
+- Only include highlights with clear evidence. Do NOT pad.
+
 OUTPUT FORMAT — return ONLY a JSON array:
 [
   {
     "listingIndex": 0,
     "scores": { "priceFairness": <n>, "sellerTrust": <n>, "conditionHonesty": <n>, "shippingFairness": <n>, "descriptionQuality": <n> },
-    "overview": "Short reasoning paragraph."
+    "overview": "Short reasoning paragraph.",
+    "highlights": [{ "label": "...", "positive": true }]
   },
   ...one entry per listing, zero-indexed
 ]
@@ -558,7 +591,7 @@ async function _runEbayBatch(entries: BatchEntry[], context?: string | null, sys
     return listings.map((_, i) => {
       const item = parsed.find((x: any) => x.listingIndex === i) ?? parsed[i];
       if (!item?.scores) return "No analysis.\nDEBUG INFO:\n(batch item missing)";
-      const jsonStr = JSON.stringify({ scores: item.scores, overview: item.overview ?? "" });
+      const jsonStr = JSON.stringify({ scores: item.scores, overview: item.overview ?? "", highlights: item.highlights ?? [] });
       return `${jsonStr}\nDEBUG INFO:\n(batched with ${listings.length} items)`;
     });
   } catch (err) {

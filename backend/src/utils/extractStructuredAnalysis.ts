@@ -1,6 +1,7 @@
 type ParsedAnalysis = {
   scores?: Record<string, number | null>;
   overview?: string;
+  highlights?: { label: string; positive: boolean }[];
 };
 
 function sanitizeOverview(value: unknown): string | undefined {

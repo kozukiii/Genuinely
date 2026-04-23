@@ -289,7 +289,8 @@ PRICE FAIRNESS RULES (CRITICAL):
 - If the Price field LITERALLY shows the text "Accepts Offers", set priceFairness to null and note it in the overview
 - If the Price field shows ANY real dollar amount, you MUST provide a numeric score — NEVER set it to null
 - Do NOT infer "Accepts Offers" from low price, vague title, or negotiable tone — only null when the price text is literally "Accepts Offers"
-- Any listing priced at or below the low end of the market range must score at minimum 80
+- Any listing priced at or below the low end of the market range must score 100 (great deal)
+- CRITICAL EXCEPTION: if price is below 50% of the market low end, set priceFairness to 0 — a price this far below market is a red flag, not a deal; do NOT treat extreme underpricing as positive
 
 COMPARABLE LISTINGS (if provided below):
 Use them as your primary reference for priceFairness.
@@ -328,15 +329,24 @@ OUTPUT FORMAT MUST BE EXACTLY:
     "shippingFairness": <number>,
     "descriptionQuality": <number>
   },
-  "overview": "Short reasoning paragraph here."
+  "overview": "Short reasoning paragraph here.",
+  "highlights": [{ "label": "Headcover included", "positive": true }, { "label": "Grip worn", "positive": false }]
 }
+
+HIGHLIGHTS RULES:
+- First scan the PRODUCT CONTEXT block for accessories and inspection points specific to this item (e.g. original box, charger, case, manual, tools, cables, accessories). If present or confirmed, mark positive. If expected but absent, mark negative.
+- Then add clearly observable positive or negative details from the title, description, or images — such as pickup/delivery options, notable item specifics, or seller signals.
+- Do NOT surface the condition label (e.g. "Used condition") as a highlight. Only flag condition if the images visibly contradict the stated condition (e.g. visible damage on a "Like New" claim).
+- Output 3–6 highlights total. Each label must be ≤10 words and state a specific fact.
+- Good label examples: "Original box included", "Charger included", "Local pickup only", "Active listing", "Missing accessories", "Visible wear in images"
+- Only include highlights with clear evidence. Do NOT pad or invent.
 
 After that JSON block, output exactly:
 
 DEBUG INFO:
 <Only the raw fields the user sent>
 
-Do NOT add extra JSON fields.
+Do NOT add extra JSON fields beyond scores, overview, and highlights.
 Do NOT wrap JSON in backticks.
 `,
     },
@@ -407,19 +417,29 @@ PRICE FAIRNESS RULES (read carefully):
 - If the Price field shows ANY real dollar amount (e.g. "80 USD", "275 USD"), you MUST provide a numeric score — NEVER null
 - Do NOT set priceFairness to null just because you think the price seems negotiable or low — only null when the actual text is "Accepts Offers"
 - Use the PRODUCT CONTEXT price range (if provided) as your primary anchor for scoring
-- Any listing priced at or below the low end of the market range must score at minimum 80
+- Any listing priced at or below the low end of the market range must score 100 (great deal)
+- CRITICAL EXCEPTION: if price is below 50% of the market low end, set priceFairness to 0 — a price this far below market is a red flag, not a deal; do NOT treat extreme underpricing as positive
 
 JSON FORMATTING RULES — your output must pass JSON.parse() without any modification:
 - Write every "overview" value as a single unbroken line — no literal newline characters inside any string value
 - Always put a comma between every object in the array; never omit commas between objects
 - Output nothing before the opening [ or after the closing ] — no preamble, no explanation
 
+HIGHLIGHTS RULES (apply to every listing):
+- First scan the PRODUCT CONTEXT block for accessories and inspection points for this item type. Surface presence as positive, absence as negative.
+- Then add clearly observable positive or negative details from title, description, or images — such as pickup/delivery options, notable item specifics, or seller signals.
+- Do NOT surface the condition label as a highlight. Only flag condition if images visibly contradict the stated condition (e.g. visible damage on a "Like New" claim).
+- Output 3–6 highlights per listing. Labels ≤10 words, factual.
+- Examples: "Original box included", "Charger included", "Local pickup only", "Active listing", "Missing accessories", "Visible wear in images"
+- Only include highlights with clear evidence. Do NOT pad.
+
 OUTPUT FORMAT — return ONLY a JSON array:
 [
   {
     "listingIndex": 0,
     "scores": { "priceFairness": <number or null>, "sellerTrust": <number>, "conditionHonesty": <number>, "shippingFairness": <number>, "descriptionQuality": <number> },
-    "overview": "Short confident reasoning paragraph."
+    "overview": "Short confident reasoning paragraph.",
+    "highlights": [{ "label": "...", "positive": true }]
   },
   ...one entry per listing, zero-indexed
 ]
@@ -469,12 +489,21 @@ JSON FORMATTING RULES — your output must pass JSON.parse() without any modific
 - Always put a comma between every object in the array; never omit commas between objects
 - Output nothing before the opening [ or after the closing ] — no preamble, no explanation
 
+HIGHLIGHTS RULES:
+- First scan the PRODUCT CONTEXT block for accessories and inspection points for this item type. Surface presence as positive, absence as negative.
+- Then add clearly observable positive or negative details from title, description, or images — such as pickup/delivery options, notable item specifics, or seller signals.
+- Do NOT surface the condition label as a highlight. Only flag condition if images visibly contradict the stated condition (e.g. visible damage on a "Like New" claim).
+- Output 3–6 highlights per listing. Labels ≤10 words, factual.
+- Examples: "Original box included", "Charger included", "Local pickup only", "Active listing", "Missing accessories", "Visible wear in images"
+- Only include highlights with clear evidence. Do NOT pad.
+
 OUTPUT FORMAT — return ONLY a JSON array:
 [
   {
     "listingIndex": 0,
     "scores": { "priceFairness": <n>, "sellerTrust": <n>, "conditionHonesty": <n>, "shippingFairness": <n>, "descriptionQuality": <n> },
-    "overview": "Short confident reasoning paragraph."
+    "overview": "Short confident reasoning paragraph.",
+    "highlights": [{ "label": "...", "positive": true }]
   },
   ...one entry per listing, zero-indexed
 ]
@@ -610,7 +639,7 @@ async function _runMarketplaceBatch(listings: any[], allDataUrls: string[][], co
     return listings.map((_, i) => {
       const item = parsed.find((x: any) => x.listingIndex === i) ?? parsed[i];
       if (!item?.scores) return "No analysis.\nDEBUG INFO:\n(batch item missing)";
-      const jsonStr = JSON.stringify({ scores: item.scores, overview: item.overview ?? "" });
+      const jsonStr = JSON.stringify({ scores: item.scores, overview: item.overview ?? "", highlights: item.highlights ?? [] });
       return `${jsonStr}\nDEBUG INFO:\n(batched with ${listings.length} items)`;
     });
   } catch (err) {

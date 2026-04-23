@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import "./styles/AdminPage.css";
 
@@ -83,6 +84,16 @@ export default function AdminPage() {
   return (
     <main className="admin-page">
       <h1 className="admin-heading">Admin</h1>
+
+      <section className="admin-section">
+        <h2 className="admin-subheading">Tools</h2>
+        <div className="admin-cards">
+          <Link to="/listingcard-demo" className="admin-card admin-card--link">
+            <span className="admin-card-name">Listing Card Demo</span>
+            <span className="admin-card-note">Interactive demo of the analysis flow</span>
+          </Link>
+        </div>
+      </section>
 
       <section className="admin-section">
         <h2 className="admin-subheading">Provider Usage</h2>

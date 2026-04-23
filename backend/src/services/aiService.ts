@@ -89,6 +89,7 @@ function parseAIAnalysis(listing: any, analysis: string, context?: string | null
     aiScore,
     aiScores: scores,
     overview: jsonBlock?.overview || "No overview.",
+    highlights: jsonBlock?.highlights,
     debugInfo: buildEbayDebugInfo(listing),
     rawAnalysis: analysis,
   };
@@ -104,6 +105,7 @@ export async function analyzeItemWithAI(merged: any, context?: string | null) {
       aiScore: cached.aiScore,
       aiScores: cached.aiScores,
       overview: cached.overview,
+      highlights: cached.highlights,
       debugInfo: buildEbayDebugInfo(merged),
       rawAnalysis: "",
       marketContext: context ?? undefined,
@@ -123,6 +125,7 @@ export async function analyzeItemWithAI(merged: any, context?: string | null) {
       aiScore: result.aiScore,
       aiScores: result.aiScores,
       overview: result.overview,
+      highlights: result.highlights,
     });
   }
 
@@ -150,6 +153,7 @@ export async function analyzeItemsWithAI(items: any[], context?: string | null, 
         aiScore: cached.aiScore,
         aiScores: cached.aiScores,
         overview: cached.overview,
+        highlights: cached.highlights,
         debugInfo: buildEbayDebugInfo(item),
         rawAnalysis: "",
         systemPrompt: systemPrompt ?? EBAY_BATCH_SYSTEM_PROMPT,
@@ -185,7 +189,7 @@ export async function analyzeItemsWithAI(items: any[], context?: string | null, 
         toCache.push({
           source: item.source,
           id: item.id,
-          result: { aiScore: parsed.aiScore, aiScores: parsed.aiScores, overview: parsed.overview },
+          result: { aiScore: parsed.aiScore, aiScores: parsed.aiScores, overview: parsed.overview, highlights: parsed.highlights },
         });
       }
     }

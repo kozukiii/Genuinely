@@ -20,8 +20,8 @@
 .listing-page {
   width: 100%;
   max-width: 1100px;
-  margin: 40px auto;
-  padding: 26px 22px;
+  margin: 0 auto;
+  padding: 0;
 
   color: var(--text);
   font-family:
@@ -55,7 +55,7 @@
   padding: 1.65rem;
 
   background: transparent;
-  border: 1px solid var(--line);
+  border: 1px solid rgba(255,255,255,0.09);
   border-radius: 18px;
   box-shadow: none;
   margin-bottom: 2rem;
@@ -266,6 +266,23 @@
 .page-seller {
   font-size: 0.95rem;
   color: var(--muted);
+}
+
+.page-delivery-types {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.35rem;
+}
+
+.page-delivery-badge {
+  font-size: 0.78rem;
+  color: rgba(77, 166, 255, 0.9);
+  background: rgba(77, 166, 255, 0.08);
+  border: 1px solid rgba(77, 166, 255, 0.22);
+  border-radius: 999px;
+  padding: 0.18rem 0.6rem;
+  white-space: nowrap;
 }
 
 /* Info + Ring row */
@@ -521,7 +538,7 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
   gap: 1.2rem;
-  padding: 1rem 0;
+  padding: 1rem 0 0.25rem;
 }
 
 .ai-score-item {
@@ -590,6 +607,13 @@
   background: rgba(34, 197, 94, 0.07);
   border: 1px solid rgba(34, 197, 94, 0.28);
   border-radius: 8px;
+  position: relative;
+  overflow: visible;
+}
+
+@keyframes starTwinkle {
+  0%, 100% { opacity: 0.1; transform: scale(0.5); }
+  50%       { opacity: 1;   transform: scale(1.05); }
 }
 
 .demo-score-bar-above {
@@ -1255,4 +1279,155 @@
   font-size: 0.85rem;
   padding: 0.36rem 0.9rem;
   letter-spacing: 0.4px;
+}
+
+/* =========================
+   At a glance
+   ========================= */
+.at-a-glance-hr {
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.09);
+  margin: 0.75rem 0;
+}
+
+.at-a-glance-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.4);
+  margin: 0 0 0.5rem;
+  text-align: center;
+}
+
+.at-a-glance-badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.4rem;
+  margin-bottom: 0.75rem;
+}
+
+.at-a-glance-badge {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 999px;
+  letter-spacing: 0.03em;
+}
+
+.at-a-glance-badge--pos {
+  background: rgba(61, 255, 143, 0.08);
+  border: 1px solid rgba(61, 255, 143, 0.28);
+  color: #3dff8f;
+}
+
+.at-a-glance-badge--neg {
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.28);
+  color: #f87171;
+}
+
+/* =========================
+   Overview / Details tabs
+   ========================= */
+.overview-tabs {
+  display: flex;
+  justify-content: center;
+  gap: 0.5rem;
+  margin: 0.75rem 0;
+}
+
+.overview-tab {
+  padding: 6px 16px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: transparent;
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+
+.overview-tab:hover {
+  border-color: rgba(61, 255, 143, 0.3);
+  color: rgba(61, 255, 143, 0.7);
+}
+
+.overview-tab--active {
+  background: rgba(61, 255, 143, 0.1);
+  border-color: rgba(61, 255, 143, 0.4);
+  color: #3dff8f;
+}
+
+/* =========================
+   Original details layout
+   ========================= */
+.original-details-layout {
+  display: flex;
+  gap: 0;
+  margin-top: 0.5rem;
+}
+
+.original-details-meta {
+  flex: 0 0 45%;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.3rem 1rem;
+  align-content: start;
+  margin: 0;
+  padding-right: 1.5rem;
+}
+
+.original-details-meta dt {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.35);
+  white-space: nowrap;
+  padding-top: 1px;
+}
+
+.original-details-meta dd {
+  margin: 0;
+  font-size: 0.88rem;
+  color: rgba(245, 245, 245, 0.85);
+  line-height: 1.4;
+}
+
+.original-details-divider {
+  width: 1px;
+  background: rgba(255, 255, 255, 0.09);
+  flex-shrink: 0;
+  align-self: stretch;
+}
+
+.original-details-desc {
+  flex: 1;
+  padding-left: 1.5rem;
+}
+
+@media (max-width: 640px) {
+  .original-details-layout {
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .original-details-meta {
+    padding-right: 0;
+  }
+
+  .original-details-divider {
+    width: auto;
+    height: 1px;
+    align-self: auto;
+  }
+
+  .original-details-desc {
+    padding-left: 0;
+  }
 }

@@ -76,6 +76,9 @@ export interface Listing {
   priceLow?: number;
   priceHigh?: number;
 
+  // At-a-glance highlights (positive/negative quick facts)
+  highlights?: { label: string; positive: boolean }[];
+
   // --- “never lose data” escape hatch ---
   raw?: unknown;
 

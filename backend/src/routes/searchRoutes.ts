@@ -36,6 +36,10 @@ async function enrichMarketplaceListing(listing: any): Promise<any> {
       patch.description = detailDescription;
       patch.fullDescription = detailDescription;
     }
+    if ((listing.price == null || listing.price === 0) && typeof detailed.price === "number" && detailed.price > 0) {
+      patch.price = detailed.price;
+      if (typeof detailed.currency === "string" && detailed.currency) patch.currency = detailed.currency;
+    }
 
     if (Object.keys(patch).length > 0) return { ...listing, ...patch };
   } catch (err) {

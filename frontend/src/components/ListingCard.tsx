@@ -162,6 +162,10 @@ export default function ListingCard({ data }: { data: Listing }) {
         maximumFractionDigits: 0,
       }).format(data.price)
     : null;
+  const showPendingMarketplacePrice = data.source === "marketplace"
+    && data.analysisPending
+    && data.acceptsOffers !== true
+    && data.price === 0;
 
   return (
     <div className="listing-card-wrapper">
@@ -216,7 +220,12 @@ export default function ListingCard({ data }: { data: Listing }) {
               );
             })()}
             <div className="listing-price-row">
-              {data.acceptsOffers ? (
+              {showPendingMarketplacePrice ? (
+                <div className="listing-price-accepts-offers">
+                  <p className="listing-price listing-price--offers">Loading price…</p>
+                  <span className="listing-price--offers-hint">Fetching seller-entered amount</span>
+                </div>
+              ) : data.acceptsOffers ? (
                 <div className="listing-price-accepts-offers">
                   <p className="listing-price listing-price--offers">Accepts Offers</p>
                   <span className="listing-price--offers-hint">View listing for more info</span>

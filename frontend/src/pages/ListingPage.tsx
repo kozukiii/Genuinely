@@ -268,6 +268,10 @@ export default function ListingPage() {
   // ── Animation state ───────────────────────────────────────────────────────
   const hasInitialScore = listing?.aiScore != null;
   const isPendingFromSearch = !hasInitialScore && listing?.analysisPending === true;
+  const showPendingMarketplacePrice = listing?.source === "marketplace"
+    && isPendingFromSearch
+    && listing?.acceptsOffers !== true
+    && listing?.price === 0;
   const [analysisPhase,    setAnalysisPhase]    = useState<AnalysisPhase>(
     hasInitialScore ? "filling" : isPendingFromSearch ? "loading" : "idle"
   );
@@ -629,7 +633,12 @@ export default function ListingPage() {
             <div className="info-ring-row" style={{ justifyContent: "flex-start", gap: "32px" }}>
               <div className="info-column">
                 <div className="price-heart-row" style={{ alignItems: "center" }}>
-                  {listing.acceptsOffers ? (
+                  {showPendingMarketplacePrice ? (
+                    <div className="page-price-accepts-offers">
+                      <p className="page-price page-price--offers">Loading price…</p>
+                      <span className="page-price--offers-hint">Fetching seller-entered amount</span>
+                    </div>
+                  ) : listing.acceptsOffers ? (
                     <div className="page-price-accepts-offers">
                       <p className="page-price page-price--offers">Accepts Offers</p>
                       <span className="page-price--offers-hint">Visit listing to determine price</span>

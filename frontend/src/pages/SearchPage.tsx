@@ -116,6 +116,34 @@ async function runAnalysisPipeline(
   setListings: React.Dispatch<React.SetStateAction<Listing[]>>,
   signal: AbortSignal,
 ) {
+  async function retryUnscoredListings(scored: Listing[]): Promise<Listing[]> {
+    const unresolved = scored.filter((l) => l.aiScore == null);
+    if (unresolved.length === 0) return scored;
+
+    const repaired = new Map<string, Listing>();
+    await Promise.all(
+      unresolved.map(async (listing) => {
+        try {
+          const res = await fetch(`${API_BASE}/api/search/analyze`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(listing),
+            signal,
+          });
+          if (!res.ok) return;
+          const retried = await res.json() as Listing;
+          repaired.set(`${retried.source}:${retried.id}`, retried);
+        } catch {
+          // keep original unresolved listing
+        }
+      }),
+    );
+
+    if (repaired.size === 0) return scored;
+
+    return scored.map((listing) => repaired.get(`${listing.source}:${listing.id}`) ?? listing);
+  }
+
   // 1. Get product groups + Tavily context per group
   let groups: Array<{
     canonicalName: string;
@@ -179,6 +207,7 @@ async function runAnalysisPipeline(
         });
         if (!res.ok) throw new Error(`batch-analyze HTTP ${res.status}`);
         const scored: Listing[] = await res.json();
+        const stabilized = await retryUnscoredListings(scored);
 
         if (signal.aborted) return;
 
@@ -194,7 +223,7 @@ async function runAnalysisPipeline(
           if (raw) {
             const stored: Listing[] = JSON.parse(raw);
             if (Array.isArray(stored)) {
-              for (const s of scored) {
+              for (const s of stabilized) {
                 const idx = stored.findIndex((l) => l.id === s.id && l.source === s.source);
                 if (idx !== -1) stored[idx] = { ...s, ...priceRange, analysisPending: undefined };
               }
@@ -204,7 +233,7 @@ async function runAnalysisPipeline(
         } catch { /* ignore sessionStorage errors */ }
 
         // Notify any ListingPage currently viewing one of these listings
-        for (const s of scored) {
+        for (const s of stabilized) {
           publishAnalysisResult({ ...s, ...priceRange } as Listing);
         }
 
@@ -212,7 +241,7 @@ async function runAnalysisPipeline(
         // since sessionStorage is already updated above.
         setListings((prev) => {
           const updated = [...prev];
-          for (const s of scored) {
+          for (const s of stabilized) {
             const idx = updated.findIndex((l) => l.id === s.id && l.source === s.source);
             if (idx !== -1) updated[idx] = { ...s, ...priceRange, analysisPending: false };
           }

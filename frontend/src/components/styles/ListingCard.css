@@ -2,6 +2,11 @@
    Listing Card — Premium Glass (single source of truth)
    ========================= */
 
+@keyframes starTwinkle {
+  0%, 100% { opacity: 0.1; transform: scale(0.5); }
+  50%       { opacity: 1;   transform: scale(1.05); }
+}
+
 :root {
   --bg: #07080a;
 
@@ -130,13 +135,21 @@
 /* =========================
    Title / Price / Meta
    ========================= */
+.listing-title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin-top: 0.85rem;
+}
+
 .listing-title {
+  flex: 1;
+  min-width: 0;
+
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
   overflow: hidden;
-
-  margin-top: 0.85rem;
 
   font-size: 1.05rem;
   line-height: 1.22;
@@ -145,6 +158,57 @@
   letter-spacing: -0.02em;
 
   color: rgba(255, 255, 255, 0.94);
+}
+
+.listing-title-row .badge-heart {
+  flex-shrink: 0;
+  width: 46px;
+  height: 46px;
+  border-radius: 13px;
+
+  display: grid;
+  place-items: center;
+
+  background: rgba(0, 0, 0, 0.22);
+  border: 1.5px solid rgba(255, 255, 255, 0.22);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.55);
+
+  color: rgba(245, 245, 245, 0.72);
+  line-height: 1;
+
+  cursor: pointer;
+  user-select: none;
+
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease,
+    border-color 160ms ease,
+    color 180ms ease;
+}
+
+.listing-title-row .badge-heart:hover {
+  transform: translateY(-2px);
+  color: rgba(245, 245, 245, 0.95);
+  border-color: rgba(57, 255, 157, 0.45);
+  box-shadow:
+    0 18px 48px rgba(0, 0, 0, 0.7),
+    0 0 0 3px rgba(57, 255, 157, 0.08);
+}
+
+.listing-title-row .badge-heart:active {
+  transform: translateY(-1px) scale(0.96);
+}
+
+.listing-price-badge {
+  display: inline-block;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid;
+  margin-bottom: 0.3rem;
+  background: transparent;
 }
 
 .listing-price {
@@ -190,19 +254,16 @@
    Price + Rating row
    ========================= */
 .price-rating {
-  position: relative; /* enables anchored ring */
+  position: relative;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.85rem;
-  padding-right: 96px;
-  padding-bottom: 6px;
-  min-height: 92px;
 }
 
 /* Ring: default size + float shadow */
 .rating-ring {
-  width: 50px;
-  height: 50px;
+  width: 75px;
+  height: 75px;
   filter: drop-shadow(0 16px 20px rgba(0, 0, 0, 0.65));
 }
 
@@ -215,9 +276,8 @@
     sans-serif;
 }
 
-/* Seller / location meta row (space so ring never collides) */
-.listing-seller-line,
-.listing-location {
+/* Seller meta row */
+.listing-seller-line {
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -225,7 +285,17 @@
   font-size: 0.85rem;
   line-height: 1.35;
   margin-top: 0.55rem;
-  min-height: calc(1.35em * 2);
+  color: var(--muted);
+}
+
+/* Location span inside .listing-location-row */
+.listing-location {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.85rem;
   color: var(--muted);
 }
 
@@ -238,14 +308,18 @@
   color: var(--muted);
 }
 
-.listing-delivery-types {
+.listing-location-row {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.3rem;
-  margin-top: 0.35rem;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.55rem;
+  overflow: hidden;
+  min-width: 0;
 }
 
 .listing-delivery-badge {
+  flex-shrink: 0;
   font-size: 0.72rem;
   color: rgba(77, 166, 255, 0.9);
   background: rgba(77, 166, 255, 0.08);
@@ -291,11 +365,45 @@
 }
 
 /* =========================
+   At-a-glance highlights
+   ========================= */
+.listing-bottom {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.listing-highlights {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.listing-highlight-badge {
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  letter-spacing: 0.02em;
+}
+
+.listing-highlight-badge--pos {
+  background: rgba(61, 255, 143, 0.08);
+  border: 1px solid rgba(61, 255, 143, 0.28);
+  color: #3dff8f;
+}
+
+.listing-highlight-badge--neg {
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.28);
+  color: #f87171;
+}
+
+/* =========================
    CTA Button
    ========================= */
 .listing-link {
-  margin-top: auto;
-
   /* button reset */
   border: 1px solid rgba(77, 166, 255, 0.35);
   background: rgba(0, 0, 0, 0.2);
@@ -354,70 +462,24 @@
    (works even if .card-badges stays INSIDE .price-rating)
    ========================================================= */
 
-/* Hard-lock the badge cluster to a single coordinate
-      inside the price-rating anchor zone */
-.price-rating .card-badges {
+/* Ring anchored to the card itself — same position on every card */
+.listing-card .card-badges {
   position: absolute;
-
   right: 14px;
-  top: 50%;
-  transform: translateY(-50%);
-
-  display: flex;
-  align-items: center;
-  gap: 10px;
-
+  bottom: 155px;
   z-index: 20;
+  pointer-events: none;
 }
 
-/* Ring: fixed size */
-.price-rating .badge-ring .rating-ring {
-  width: 50px !important;
-  height: 50px !important;
+.listing-card .badge-ring .rating-ring {
+  width: 75px !important;
+  height: 75px !important;
   pointer-events: none;
   filter: drop-shadow(0 16px 20px rgba(0, 0, 0, 0.65));
 }
 
-/* Heart: glass button */
-.price-rating .badge-heart {
-  width: 40px;
-  height: 40px;
-  border-radius: 12px;
 
-  display: grid;
-  place-items: center;
-
-  background: rgba(0, 0, 0, 0.22);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.55);
-
-  color: rgba(245, 245, 245, 0.72);
-  line-height: 1;
-
-  cursor: pointer;
-  user-select: none;
-
-  transition:
-    transform 160ms ease,
-    box-shadow 160ms ease,
-    border-color 160ms ease,
-    color 180ms ease;
-}
-
-.price-rating .badge-heart:hover {
-  transform: translateY(-2px);
-  color: rgba(245, 245, 245, 0.95);
-  border-color: rgba(57, 255, 157, 0.28);
-  box-shadow:
-    0 18px 48px rgba(0, 0, 0, 0.7),
-    0 0 0 3px rgba(57, 255, 157, 0.08);
-}
-
-.price-rating .badge-heart:active {
-  transform: translateY(-1px) scale(0.96);
-}
-
-.price-rating .badge-heart[aria-pressed="true"] {
+.listing-title-row .badge-heart[aria-pressed="true"] {
   color: #ff4d8b;
   border-color: rgba(255, 77, 139, 0.5);
   box-shadow:
@@ -562,10 +624,13 @@
     font-size: 0.7rem;
   }
 
-  .listing-seller-line,
-  .listing-location {
+  .listing-seller-line {
     font-size: 0.7rem;
     margin-top: 0.3rem;
+  }
+
+  .listing-location {
+    font-size: 0.7rem;
   }
 
   .listing-condition {
@@ -579,26 +644,17 @@
   }
 
   .price-rating {
-    padding-right: 56px;
-    min-height: 64px;
     gap: 0.4rem;
   }
 
-  .price-rating .card-badges {
-    right: 4px;
-    bottom: 4px;
-    gap: 4px;
+  .listing-card .card-badges {
+    right: 8px;
+    bottom: 46px;
   }
 
-  .price-rating .badge-ring .rating-ring {
-    width: 34px !important;
-    height: 34px !important;
-  }
-
-  .price-rating .badge-heart {
-    width: 28px;
-    height: 28px;
-    border-radius: 8px;
+  .listing-card .badge-ring .rating-ring {
+    width: 51px !important;
+    height: 51px !important;
   }
 
   .listing-overview {

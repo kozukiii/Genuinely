@@ -92,6 +92,10 @@ export default function AdminPage() {
             <span className="admin-card-name">Listing Card Demo</span>
             <span className="admin-card-note">Interactive demo of the analysis flow</span>
           </Link>
+          <Link to="/search-demo" className="admin-card admin-card--link">
+            <span className="admin-card-name">Search Page Demo</span>
+            <span className="admin-card-note">16 mixed listings, all scored 100</span>
+          </Link>
         </div>
       </section>
 

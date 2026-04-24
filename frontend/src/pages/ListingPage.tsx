@@ -98,34 +98,70 @@ function getPriceBadge(price: number, priceLow: number, priceHigh: number): { la
 }
 
 const STAR_DATA = [
-  { left: -9,  top: -8,    size: 7, delay: "0s"     },
-  { right: -8, top: -7,    size: 6, delay: "0.6s"   },
-  { left: -7,  bottom: -7, size: 5, delay: "1.1s"   },
-  { right: -7, bottom: -6, size: 7, delay: "0.35s"  },
-  { left: "35%", top: -10, size: 5, delay: "0.85s"  },
+  { left: -9,    top: -8,     size: 7, delay: "0s"    },
+  { right: -8,   top: -7,     size: 6, delay: "0.6s"  },
+  { left: -7,    bottom: -7,  size: 5, delay: "1.1s"  },
+  { right: -7,   bottom: -6,  size: 7, delay: "0.35s" },
+  { left: "35%", top: -10,    size: 5, delay: "0.85s" },
+  { left: "60%", bottom: -9,  size: 6, delay: "0.5s"  },
+  { right: -12,  top: "40%",  size: 5, delay: "1.4s"  },
+  { left: -12,   top: "45%",  size: 4, delay: "0.2s"  },
+  { left: "20%", top: -8,     size: 4, delay: "1.7s"  },
+  { right: -6,   bottom: -11, size: 5, delay: "0.9s"  },
+  { left: "50%", bottom: -12, size: 6, delay: "1.3s"  },
+  { right: -14,  top: "20%",  size: 4, delay: "0.75s" },
+  { left: -14,   top: "20%",  size: 5, delay: "1.55s" },
+  { left: "75%", top: -9,     size: 4, delay: "0.15s" },
+  { right: -10,  bottom: -10, size: 6, delay: "1.8s"  },
+] as const;
+
+const FAIR_STAR_DATA = [
+  { left: -7,    top: -6,    size: 4, delay: "0s"    },
+  { right: -7,   bottom: -6, size: 5, delay: "0.8s"  },
+  { left: "50%", top: -8,    size: 4, delay: "1.3s"  },
+  { left: -9,    bottom: -7, size: 4, delay: "0.45s" },
+  { right: -8,   top: -7,    size: 4, delay: "1.6s"  },
+] as const;
+
+function FairStarSparkles() {
+  return (
+    <>
+      {FAIR_STAR_DATA.map((s, i) => (
+        <svg key={i} viewBox="0 0 10 10" aria-hidden="true" style={{ position: "absolute", width: (s as any).size, height: (s as any).size, ...(typeof (s as any).left !== "undefined" && { left: (s as any).left }), ...(typeof (s as any).right !== "undefined" && { right: (s as any).right }), ...(typeof (s as any).top !== "undefined" && { top: (s as any).top }), ...(typeof (s as any).bottom !== "undefined" && { bottom: (s as any).bottom }), animation: `starTwinkle 2s ease-in-out ${(s as any).delay} infinite`, pointerEvents: "none" }}>
+          <path d="M5 0 L5.5 4.5 L10 5 L5.5 5.5 L5 10 L4.5 5.5 L0 5 L4.5 4.5 Z" fill="#facc15" />
+        </svg>
+      ))}
+    </>
+  );
+}
+
+const GOOD_STAR_DATA = [
+  { left: -8,    top: -7,    size: 5, delay: "0s"    },
+  { right: -7,   top: -6,    size: 4, delay: "0.7s"  },
+  { right: -6,   bottom: -7, size: 5, delay: "1.2s"  },
+  { left: "40%", top: -8,    size: 4, delay: "0.4s"  },
+  { left: -10,   bottom: -6, size: 4, delay: "1.0s"  },
+  { left: "65%", bottom: -8, size: 5, delay: "0.55s" },
 ] as const;
 
 function StarSparkles() {
   return (
     <>
       {STAR_DATA.map((s, i) => (
-        <svg
-          key={i}
-          viewBox="0 0 10 10"
-          aria-hidden="true"
-          style={{
-            position: "absolute",
-            width: s.size,
-            height: s.size,
-            ...(typeof (s as any).left   !== "undefined" && { left:   (s as any).left   }),
-            ...(typeof (s as any).right  !== "undefined" && { right:  (s as any).right  }),
-            ...(typeof (s as any).top    !== "undefined" && { top:    (s as any).top    }),
-            ...(typeof (s as any).bottom !== "undefined" && { bottom: (s as any).bottom }),
-            animation: `starTwinkle 2s ease-in-out ${s.delay} infinite`,
-            pointerEvents: "none",
-          }}
-        >
+        <svg key={i} viewBox="0 0 10 10" aria-hidden="true" style={{ position: "absolute", width: (s as any).size, height: (s as any).size, ...(typeof (s as any).left !== "undefined" && { left: (s as any).left }), ...(typeof (s as any).right !== "undefined" && { right: (s as any).right }), ...(typeof (s as any).top !== "undefined" && { top: (s as any).top }), ...(typeof (s as any).bottom !== "undefined" && { bottom: (s as any).bottom }), animation: `starTwinkle 2s ease-in-out ${(s as any).delay} infinite`, pointerEvents: "none" }}>
           <path d="M5 0 L5.5 4.5 L10 5 L5.5 5.5 L5 10 L4.5 5.5 L0 5 L4.5 4.5 Z" fill="#a855f7" />
+        </svg>
+      ))}
+    </>
+  );
+}
+
+function GoodStarSparkles() {
+  return (
+    <>
+      {GOOD_STAR_DATA.map((s, i) => (
+        <svg key={i} viewBox="0 0 10 10" aria-hidden="true" style={{ position: "absolute", width: (s as any).size, height: (s as any).size, ...(typeof (s as any).left !== "undefined" && { left: (s as any).left }), ...(typeof (s as any).right !== "undefined" && { right: (s as any).right }), ...(typeof (s as any).top !== "undefined" && { top: (s as any).top }), ...(typeof (s as any).bottom !== "undefined" && { bottom: (s as any).bottom }), animation: `starTwinkle 2s ease-in-out ${(s as any).delay} infinite`, pointerEvents: "none" }}>
+          <path d="M5 0 L5.5 4.5 L10 5 L5.5 5.5 L5 10 L4.5 5.5 L0 5 L4.5 4.5 Z" fill="#22c55e" />
         </svg>
       ))}
     </>
@@ -403,6 +439,19 @@ export default function ListingPage() {
       updateSavedListing(enriched);
       updateRecentlyViewed(enriched);
       navigate(".", { replace: true, state: { listing: enriched } });
+
+      // Write back to sessionStorage so the search page shows the new analysis when navigating back
+      try {
+        const raw = sessionStorage.getItem(SEARCH_LISTINGS_KEY);
+        if (raw) {
+          const stored: Listing[] = JSON.parse(raw);
+          if (Array.isArray(stored)) {
+            const idx = stored.findIndex((l) => l.id === enriched.id && l.source === enriched.source);
+            if (idx !== -1) stored[idx] = { ...enriched, analysisPending: false };
+            sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(stored));
+          }
+        }
+      } catch { /* ignore */ }
       setCompressStartFrac((performance.now() - loadingStartRef.current) % LOADING_PERIOD_MS / LOADING_PERIOD_MS);
       setAnalysisPhase("compressing");
     } catch (err) {
@@ -634,6 +683,8 @@ export default function ListingPage() {
                             style={badge ? { color: badge.color, background: badge.bg, borderColor: `${badge.color}48` } : undefined}
                           >
                             {badge?.label === "GREAT PRICE" && <StarSparkles />}
+                            {badge?.label === "GOOD PRICE" && <GoodStarSparkles />}
+                            {badge?.label === "FAIR PRICE" && <FairStarSparkles />}
                             {badge ? badge.label : "Price Data"}
                           </div>
                         );

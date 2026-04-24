@@ -68,9 +68,10 @@ h6 {
 /* --- Results Grid (scoped) --- */
 .home-page .results-container {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 2.5rem;
-  margin: 1rem 2rem auto auto;
+  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  grid-auto-rows: 1fr;
+  gap: 1rem;
+  margin: 1rem 0.5rem;
   max-width: 100%;
 }
 
@@ -1103,7 +1104,12 @@ h6 {
 
 /* Remove the top margin from results-container when inside search-layout */
 .home-page .search-layout .results-container {
-  margin-top: 0;
+  margin: 0 0.5rem;
+}
+
+/* 4-column grid when the filter sidebar is collapsed */
+.home-page .filters-sidebar.collapsed ~ .search-main .results-container {
+  grid-template-columns: repeat(4, 1fr);
 }
 
 /* =========================

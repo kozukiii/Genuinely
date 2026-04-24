@@ -188,7 +188,17 @@ router.post("/batch-analyze", async (req, res) => {
   try {
     const enriched = await Promise.all(listings.map((l: any) => enrichMarketplaceListing(l)));
     const scored = await scoreListings(enriched, null, systemPrompt ?? null, priceLow ?? null, priceHigh ?? null);
-    return res.json(scored);
+
+    // Attach price range to every item so the frontend doesn't have to patch it client-side.
+    // Without this, priceLow/priceHigh only exist in the request and never reach the listing cards.
+    const pricePatch: Record<string, number> = {};
+    if (priceLow  != null) pricePatch.priceLow  = priceLow;
+    if (priceHigh != null) pricePatch.priceHigh = priceHigh;
+    const result = Object.keys(pricePatch).length > 0
+      ? scored.map((item: any) => ({ ...item, ...pricePatch }))
+      : scored;
+
+    return res.json(result);
   } catch (err: any) {
     console.error("batch-analyze error:", err);
     return res.status(500).json({ error: err?.message ?? "Batch analysis failed" });

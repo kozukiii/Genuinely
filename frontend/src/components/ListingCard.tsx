@@ -172,7 +172,7 @@ export default function ListingCard({ data }: { data: Listing }) {
       <Link
         to={`/listing/${data.id}`}
         state={{ listing: data }}
-        className="listing-card"
+        className={`listing-card${data.source === "marketplace" ? " listing-card--marketplace" : ""}`}
       >
         <div
           className="listing-image"
@@ -280,7 +280,7 @@ export default function ListingCard({ data }: { data: Listing }) {
         <div className="card-badges">
           {data.aiScore !== undefined ? (
             <div className="badge-ring">
-              <RatingRing value={data.aiScore} />
+              <RatingRing value={data.aiScore} size={75} />
             </div>
           ) : data.analysisPending ? (
             <div className="badge-ring">

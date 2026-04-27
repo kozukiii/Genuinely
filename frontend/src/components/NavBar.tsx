@@ -100,6 +100,10 @@ export default function NavBar() {
         </div>
       </nav>
 
+      <div className="nav-notice" role="status" aria-live="polite">
+        eBay is currently experiencing outages — eBay search results may be unavailable or incomplete.
+      </div>
+
     </header>
   );
 }

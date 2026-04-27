@@ -652,8 +652,6 @@ export default function ListingPage() {
                         ? "Free shipping"
                         : `${listing.shippingEstimated ? "~" : "+ "}${new Intl.NumberFormat(undefined, { style: "currency", currency: listing.currency ?? "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(listing.shippingPrice)} shipping${listing.shippingEstimated ? " (est.)" : ""}`}
                     </span>
-                  ) : listing.shippingCalculated ? (
-                    <span className="page-shipping">Calculated shipping</span>
                   ) : null}
                 </div>
                 {listing.condition && <span className="page-condition">{listing.condition}</span>}

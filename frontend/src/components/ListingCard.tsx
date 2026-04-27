@@ -239,8 +239,6 @@ export default function ListingCard({ data }: { data: Listing }) {
                     ? "Free shipping"
                     : `${data.shippingEstimated ? "~" : "+ "}${new Intl.NumberFormat(undefined, { style: "currency", currency: data.currency ?? "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(data.shippingPrice)} shipping${data.shippingEstimated ? " (est.)" : ""}`}
                 </span>
-              ) : data.shippingCalculated ? (
-                <span className="listing-shipping">Calculated shipping</span>
               ) : null}
             </div>
 

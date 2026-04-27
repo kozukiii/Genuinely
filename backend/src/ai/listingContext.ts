@@ -465,6 +465,10 @@ export async function groupAndContextualize(
             estimatedShippingPrice = estimateShippingFromWeight(shippingLbs);
           }
         }
+        // Fallback: weight parse failed but this group has calculated-shipping listings — use a generic estimate
+        if (estimatedShippingPrice === null && needsWeightLookup) {
+          estimatedShippingPrice = estimateShippingFromWeight(1);
+        }
 
         if (!marketData) {
           return {

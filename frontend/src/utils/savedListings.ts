@@ -62,16 +62,25 @@ export function toggleSaved(listing: Listing): boolean {
 
   if (isLoggedIn()) {
     if (exists) {
+      const rollback = () => {
+        const current = getSavedListings();
+        if (!current.some((x) => x.id === listing.id)) {
+          setSavedListings([...current, listing]);
+        }
+      };
       fetch(`${API_BASE}/api/saved/${listing.source}/${listing.id}`, {
         method: "DELETE", credentials: "include",
-      }).catch(() => {});
+      }).then((res) => { if (!res.ok) rollback(); }).catch(rollback);
     } else {
+      const rollback = () => {
+        setSavedListings(getSavedListings().filter((x) => x.id !== listing.id));
+      };
       fetch(`${API_BASE}/api/saved`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ listing }),
-      }).catch(() => {});
+      }).then((res) => { if (!res.ok) rollback(); }).catch(rollback);
     }
   }
 

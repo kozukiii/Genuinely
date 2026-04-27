@@ -481,6 +481,21 @@ export default function ListingPage() {
     return listing.seller?.trim() || null;
   }, [listing]);
 
+  const sellerFeedback = useMemo(() => {
+    if (!listing || listing.source !== "ebay") return null;
+    const fb = listing.feedback?.trim();
+    let pct: string | null = null;
+    if (fb) {
+      const m = fb.match(/^([\d.]+)/);
+      if (m) pct = `${m[1]}%`;
+    }
+    const count = typeof listing.score === "number"
+      ? `(${new Intl.NumberFormat().format(listing.score)})`
+      : null;
+    if (!pct && !count) return null;
+    return [pct, count].filter(Boolean).join(" ");
+  }, [listing]);
+
   const similarListings = useMemo(() => {
     if (!listing) return [] as Listing[];
     try {
@@ -608,6 +623,22 @@ export default function ListingPage() {
                 </button>
               </div>
             )}
+            {/* At a glance — below image panel */}
+            {ai.highlights && ai.highlights.length > 0 && (
+              <div className="at-a-glance-under-image">
+                <p className="at-a-glance-label">At a glance</p>
+                <div className="at-a-glance-badges">
+                  {ai.highlights.map((h, i) => (
+                    <span
+                      key={i}
+                      className={`at-a-glance-badge at-a-glance-badge--${h.positive ? "pos" : "neg"}`}
+                    >
+                      {h.positive ? "✓" : "✗"} {h.label}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Info panel */}
@@ -655,7 +686,11 @@ export default function ListingPage() {
                   ) : null}
                 </div>
                 {listing.condition && <span className="page-condition">{listing.condition}</span>}
-                {sellerLine && <p className="page-seller">{sellerLine}</p>}
+                {sellerLine && (
+                  <p className="page-seller">
+                    {sellerLine}{sellerFeedback && <span className="page-seller-feedback"> {sellerFeedback}</span>}
+                  </p>
+                )}
                 {listing.source === "marketplace" && Array.isArray(listing.delivery_types) && listing.delivery_types.length > 0 && (
                   <div className="page-delivery-types">
                     {listing.delivery_types.map((type) => (
@@ -720,7 +755,7 @@ export default function ListingPage() {
 
                 {/* Main ring */}
                 {showRing && (
-                  <div className="ring-main-container" style={{ position: "relative", width: "150px", height: "190px", flexShrink: 0, left: "28px" }}>
+                  <div className="ring-main-container" style={{ position: "relative", width: "100px", height: "100px", flexShrink: 0, left: "28px" }}>
                     <div className="page-rating-ring demo-ring" style={{ position: "absolute", top: 0, left: 0 }}>
                       <AnimatedRing
                         phase={analysisPhase}
@@ -728,7 +763,7 @@ export default function ListingPage() {
                         compressProgress={compressProgress}
                         compressStartFrac={compressStartFrac}
                         targetValue={targetScore}
-                        size={150}
+                        size={100}
                       />
                     </div>
                   </div>
@@ -801,24 +836,6 @@ export default function ListingPage() {
         {/* Summary + at-a-glance + tabs */}
         {showSummary && (
           <div className="ai-overview-dropdown demo-fade-in" style={{ borderTop: "none", paddingTop: 0, marginTop: "0.25rem" }}>
-
-            {/* At a glance */}
-            {ai.highlights && ai.highlights.length > 0 && (
-              <>
-                <hr className="at-a-glance-hr" />
-                <p className="at-a-glance-label">At a glance:</p>
-                <div className="at-a-glance-badges">
-                  {ai.highlights.map((h, i) => (
-                    <span
-                      key={i}
-                      className={`at-a-glance-badge at-a-glance-badge--${h.positive ? "pos" : "neg"}`}
-                    >
-                      {h.positive ? "\u2713" : "\u2717"} {h.label}
-                    </span>
-                  ))}
-                </div>
-              </>
-            )}
 
             <hr className="at-a-glance-hr" />
 
@@ -964,9 +981,7 @@ export default function ListingPage() {
           <h2 className="similar-listings-title">You may like</h2>
           <div className="similar-listings-grid">
             {(similarListings.length > 0 ? similarListings : fetchedSimilar).map((item) => (
-              <div className="similar-card" key={`${item.source}:${item.id}`}>
-                <ListingCard data={item} />
-              </div>
+              <ListingCard key={`${item.source}:${item.id}`} data={item} />
             ))}
           </div>
         </section>

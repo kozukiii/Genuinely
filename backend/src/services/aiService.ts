@@ -1,6 +1,6 @@
 import { analyzeListingWithImages, batchAnalyzeListingsWithImages, EBAY_BATCH_SYSTEM_PROMPT } from "../ai/ebayOverview";
 import { extractStructuredAnalysis } from "../utils/extractStructuredAnalysis";
-import { calculatePriceFairness } from "./scoring/priceFairnessScore";
+import { parseEbaySellerData, calculateSellerTrust } from "./scoring/sellerTrustScore";
 import { getCachedAnalysis, setCachedAnalysis, setCachedAnalysisBatch, readCacheStore, getCachedAnalysisFromStore } from "./analysisCache";
 
 // Helper for safe average
@@ -53,7 +53,7 @@ function buildEbayDebugInfo(listing: any): string {
   }, null, 2);
 }
 
-function parseAIAnalysis(listing: any, analysis: string, context?: string | null, priceLow?: number | null, priceHigh?: number | null) {
+function parseAIAnalysis(listing: any, analysis: string, context?: string | null) {
   const jsonBlock = extractStructuredAnalysis(analysis);
 
   if (!jsonBlock) {
@@ -61,24 +61,19 @@ function parseAIAnalysis(listing: any, analysis: string, context?: string | null
   }
 
   const scores = { ...(jsonBlock?.scores || {}) };
-  const { sellerTrust, conditionHonesty, shippingFairness, locationRisk, descriptionQuality } = scores;
+  const { conditionHonesty, shippingFairness, locationRisk, descriptionQuality } = scores;
 
-  // Override LLM price fairness with deterministic score using the same range shown in the chart
-  const calculatedPriceFairness = calculatePriceFairness(
-    listing.price,
-    context,
-    listing.condition,
-    listing.title,
-    priceLow,
-    priceHigh,
-  );
-  if (calculatedPriceFairness !== null) {
-    scores.priceFairness = calculatedPriceFairness;
+  // Calculate sellerTrust deterministically — never use the LLM's value
+  const { p, n } = parseEbaySellerData(listing);
+  if (p !== null && n !== null) {
+    scores.sellerTrust = calculateSellerTrust(p, n);
+  } else {
+    delete scores.sellerTrust;
   }
 
   const aiScore = average([
     scores.priceFairness,
-    sellerTrust,
+    scores.sellerTrust,
     conditionHonesty,
     shippingFairness,
     locationRisk,
@@ -177,7 +172,7 @@ export async function analyzeItemsWithAI(items: any[], context?: string | null, 
     for (let j = 0; j < chunk.length; j++) {
       const item = chunk[j];
       const origIdx = batchIndices[j];
-      const parsed = parseAIAnalysis(item, rawStrings[j], context, priceLow, priceHigh);
+      const parsed = parseAIAnalysis(item, rawStrings[j], context);
 
       resultMap.set(origIdx, {
         ...item,

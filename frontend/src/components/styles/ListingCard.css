@@ -450,16 +450,15 @@
     0 0 0 6px rgba(77, 166, 255, 0.1);
 }
 
-/* =========================================================
-   FIX: Badge cluster locked to the same spot on every card
-   (works even if .card-badges stays INSIDE .price-rating)
-   ========================================================= */
+.image-badge-wrapper {
+  position: relative;
+}
 
-/* Ring anchored to the card itself — same position on every card */
+/* Ring anchored to image bottom-right — never shifts when card text grows */
 .listing-card .card-badges {
   position: absolute;
-  right: 14px;
-  bottom: 155px;
+  right: 8px;
+  bottom: 8px;
   z-index: 20;
   pointer-events: none;
 }
@@ -467,10 +466,6 @@
 .listing-card .badge-ring .rating-ring {
   pointer-events: none;
   filter: drop-shadow(0 16px 20px rgba(0, 0, 0, 0.65));
-}
-
-.listing-card--marketplace .card-badges {
-  bottom: 130px;
 }
 
 

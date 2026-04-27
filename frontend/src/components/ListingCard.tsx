@@ -174,17 +174,42 @@ export default function ListingCard({ data }: { data: Listing }) {
         state={{ listing: data }}
         className={`listing-card${data.source === "marketplace" ? " listing-card--marketplace" : ""}`}
       >
-        <div
-          className="listing-image"
-          onMouseEnter={startImageCycle}
-          onMouseLeave={stopImageCycle}
-        >
-          <img
-            src={proxiedImage}
-            alt={data.title}
-            onError={(e) => (e.currentTarget.src = "/placeholder.jpg")}
-            loading="lazy"
-          />
+        <div className="image-badge-wrapper">
+          <div
+            className="listing-image"
+            onMouseEnter={startImageCycle}
+            onMouseLeave={stopImageCycle}
+          >
+            <img
+              src={proxiedImage}
+              alt={data.title}
+              onError={(e) => (e.currentTarget.src = "/placeholder.jpg")}
+              loading="lazy"
+            />
+          </div>
+
+          <div className="card-badges">
+            {data.aiScore !== undefined ? (
+              <div className="badge-ring">
+                <RatingRing value={data.aiScore} size={75} />
+              </div>
+            ) : data.analysisPending ? (
+              <div className="badge-ring">
+                <svg className="ring-pending" width="75" height="75" viewBox="0 0 50 50">
+                  <circle cx="25" cy="25" r="18.5" stroke="#374151" strokeWidth="5" fill="none" />
+                  <circle
+                    cx="25" cy="25" r="18.5"
+                    stroke="rgba(77,166,255,0.6)"
+                    strokeWidth="5"
+                    fill="none"
+                    strokeDasharray="29 87"
+                    strokeLinecap="round"
+                    transform="rotate(-90 25 25)"
+                  />
+                </svg>
+              </div>
+            ) : null}
+          </div>
         </div>
 
         <div className="listing-title-row">
@@ -273,29 +298,6 @@ export default function ListingCard({ data }: { data: Listing }) {
             )}
           </div>
 
-        </div>
-
-        <div className="card-badges">
-          {data.aiScore !== undefined ? (
-            <div className="badge-ring">
-              <RatingRing value={data.aiScore} size={75} />
-            </div>
-          ) : data.analysisPending ? (
-            <div className="badge-ring">
-              <svg className="ring-pending" width="75" height="75" viewBox="0 0 50 50">
-                <circle cx="25" cy="25" r="18.5" stroke="#374151" strokeWidth="5" fill="none" />
-                <circle
-                  cx="25" cy="25" r="18.5"
-                  stroke="rgba(77,166,255,0.6)"
-                  strokeWidth="5"
-                  fill="none"
-                  strokeDasharray="29 87"
-                  strokeLinecap="round"
-                  transform="rotate(-90 25 25)"
-                />
-              </svg>
-            </div>
-          ) : null}
         </div>
 
         <div className="listing-bottom">

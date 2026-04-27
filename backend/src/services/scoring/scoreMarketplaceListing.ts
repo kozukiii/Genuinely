@@ -48,7 +48,7 @@ export async function scoreMarketplaceListing(listing: any, context?: string | n
   // Override LLM price fairness with deterministic context-based score when available
   const calculatedPriceFairness = acceptsOffers
     ? null
-    : calculatePriceFairness(listing.price, context, listing.condition, listing.title);
+    : calculatePriceFairness(listing.price, context);
   if (calculatedPriceFairness !== null) {
     scores.priceFairness = calculatedPriceFairness;
   }
@@ -86,7 +86,7 @@ function parseMarketplaceAnalysis(listing: any, analysis: string, context?: stri
 
   const calculatedPriceFairness = acceptsOffers
     ? null
-    : calculatePriceFairness(listing.price, context, listing.condition, listing.title, priceLow, priceHigh);
+    : calculatePriceFairness(listing.price, context, priceLow, priceHigh);
   if (calculatedPriceFairness !== null) {
     scores.priceFairness = calculatedPriceFairness;
   }

@@ -272,7 +272,6 @@ THE SYSTEM PROMPT (everything after ---) MUST CONTAIN ALL OF THESE IN ORDER:
    PRICE FAIRNESS: [anchor to the market range — at or below the low end = 100 (great deal); CRITICAL EXCEPTION: if price is below 50% of the low end, set priceFairness to 0 — this is a red flag (RISKY PRICE), not a deal; do NOT reward extreme underpricing; at or above high end = penalise based on condition and extras]
    CONDITION HONESTY: [reference the inspection points above; CRITICAL HARD CAP: if ANY wear, scratch, scuff, dent, or damage from the inspection list is visible in the images OR acknowledged in the description, AND the condition is claimed "new", "like new", or equivalent, the conditionHonesty score MUST be 50 or below — no exceptions, no qualifiers; wear across multiple areas = 35 or below; do NOT write off defects as "minor" or "no major damage" — any defect under a new/like-new claim IS a mismatch; penalise blurry or angled shots that hide known wear areas for this product]
    DESCRIPTION QUALITY: [what a complete honest listing for this exact product includes — model, variant, condition details, accessory list, disclosed defects]
-   SELLER TRUST: [how to apply the red flags above; what raises vs lowers trust for this product]
    SHIPPING FAIRNESS: [judge shipping cost given this product's size, weight, and fragility]
 
 RULES:

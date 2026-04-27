@@ -55,15 +55,6 @@ function extractPriceRange(context: string): [number, number] | null {
   return [lo, hi];
 }
 
-function isNewCondition(condition?: string, title?: string): boolean {
-  const src = `${condition ?? ""} ${title ?? ""}`.toLowerCase();
-  return (
-    src.startsWith("new") ||
-    /\bnew\s+(in\s+box|in\s+package|sealed|open\s+box|other)\b/.test(src) ||
-    /\b(brand[- ]new|factory[- ]sealed|nos|nib)\b/.test(src)
-  );
-}
-
 /**
  * Returns true when a price should be treated as "Accepts Offers":
  *  - price is 0
@@ -87,58 +78,56 @@ export function isAcceptsOffersPrice(
   return false;
 }
 
+function priceFairnessScore(price: number, low: number, high: number): number {
+  if (price <= 0 || low <= 0 || high <= 0 || high <= low) return 50;
+
+  const median = (low + high) / 2;
+  const sweetSpotCeil = Math.min(low * 1.1, median);
+  const medianScore = sweetSpotCeil >= median ? 100 : 90;
+
+  if (price <= low * 0.5) return 0;
+
+  if (price < low) {
+    const t = (price - low * 0.5) / (low * 0.5);
+    return Math.round(Math.pow(t, 0.3) * 100);
+  }
+
+  if (price <= sweetSpotCeil) return 100;
+
+  if (sweetSpotCeil < median && price <= median) {
+    const t = (price - sweetSpotCeil) / (median - sweetSpotCeil);
+    return Math.round(100 - t * 10);
+  }
+
+  if (price <= high) {
+    const t = (price - median) / (high - median);
+    return Math.round(medianScore - t * (medianScore - 80));
+  }
+
+  const overpayRatio = (price - high) / high;
+  return Math.max(0, Math.round(80 - Math.pow(overpayRatio, 0.5) * 100));
+}
+
 /**
- * Returns a 0–100 price fairness score, or null if context doesn't yield
- * a usable price range (caller should fall back to LLM score).
+ * Returns a 0–100 price fairness score, or null if no price range is available
+ * (caller falls back to the LLM score for niche products without reliable data).
  */
 export function calculatePriceFairness(
   price: number | null,
   context: string | null | undefined,
-  condition?: string,
-  title?: string,
   priceLow?: number | null,
   priceHigh?: number | null,
 ): number | null {
   if (price == null || price <= 0) return null;
 
-  // Prefer explicit low/high from the LLM header — same values shown in the chart
+  // Prefer explicit low/high from context generation — same values shown in the chart
   const range: [number, number] | null =
     priceLow != null && priceHigh != null && priceHigh > priceLow
       ? [priceLow, priceHigh]
       : context ? extractPriceRange(context) : null;
 
+  // No range → return null so caller uses LLM's guess (niche/unpriced products)
   if (!range) return null;
 
-  const [lo, hi] = range;
-  const span = hi - lo;
-  const isNew = isNewCondition(condition, title);
-
-  // Normalised position: 0 = at market low, 1 = at market high
-  const pos = (price - lo) / span;
-
-  let score: number;
-
-  // Below 50% of market low — suspiciously cheap (RISKY PRICE territory), not a deal
-  if (price < lo * 0.5) return 0;
-
-  if (pos <= 0) {
-    // At or below market low — GREAT PRICE, perfect score
-    score = 100;
-  } else if (pos <= 1) {
-    // Within range — linear 95 → 55
-    score = 95 - pos * 40;
-  } else {
-    // Above market high
-    // Each 10% above high adds 4 penalty points for new, 2 for used
-    const overage = pos - 1;
-    const penaltyRate = isNew ? 40 : 20;
-    score = 55 - overage * penaltyRate;
-  }
-
-  // Non-new items: cap the downside at 10 points below neutral (75 → floor 65)
-  if (!isNew && score < 65) {
-    score = 65;
-  }
-
-  return Math.round(Math.max(0, Math.min(100, score)));
+  return priceFairnessScore(price, range[0], range[1]);
 }

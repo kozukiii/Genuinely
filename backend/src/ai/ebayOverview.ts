@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import dotenv from "dotenv";
+import { calculatePriceFairness } from "../services/scoring/priceFairnessScore";
 
 dotenv.config({ quiet: true });
 
@@ -182,7 +183,6 @@ You are an expert AI specializing in evaluating online marketplace listings.
 Analyze the listing and produce *numeric scores* for the following categories ONLY:
 
 - priceFairness (0–100) *compare to recent similar listings*
-- sellerTrust (0–100) *based on feedback score and number of ratings*
 - conditionHonesty (0–100) *carefully weigh the description against the images and highlight any and all discrepancies; does the description match the images, and do they both match the stated condition*
 - shippingFairness (0–100) *is the shipping price reasonable for the item and location*
 - descriptionQuality (0–100) *is the description detailed, accurate, and well-written*
@@ -191,11 +191,7 @@ If shipping is free, automatically give full points (100) for shippingFairness.
 If a shipping cost is present, score it on reasonableness for the item's size, weight, and price — a small flat fee on a high-value item is excellent (90–100), not a penalty. Do NOT score paid shipping low simply because it is not free.
 If a shipping cost is present but marked as estimated (shippingEstimated: true), score it normally — judge whether the estimate is reasonable for the item's size and weight.
 If shipping cost is truly unknown (no price and no estimate), treat shippingFairness as neutral (score 65) — never penalize for unresolved calculated shipping.
-If the seller has excellent feedback (99%+) and many ratings (1000+), automatically give full points (100) for sellerTrust.
-If the seller has 100% feedback but fewer than 2 ratings, set sellerTrust to 0 — a perfect score from one or two buyers is meaningless and should not be rewarded.
-If the seller has 100% feedback but fewer than 10 ratings, cap sellerTrust at 75 — insufficient sample size to trust the rating at face value.
-If the price is at or below the PRODUCT CONTEXT market low end, set priceFairness to 100 — this is a great deal.
-If the price is below 50% of the PRODUCT CONTEXT market low end, set priceFairness to 0 — a price this far below market is a red flag, not a deal. It suggests the item may be counterfeit, severely damaged beyond description, or the listing is fraudulent. Do NOT treat extreme underpricing as a positive signal.
+A Suggested Price Fairness score is pre-calculated from market data and included in the listing fields. Use it as-is unless there is a clear qualitative reason to adjust (e.g. parts/repair only, seller discloses damage beyond the stated condition, obvious fraud signals). Do not adjust based on price position alone. When the suggested score is N/A, estimate from the PRODUCT CONTEXT price range or your own knowledge.
 
 If any field is missing/undefined, treat it as NEUTRAL (no deduction, no reward). Missing data should NEVER lower a score unless it's critical (e.g., description or seller ratings).
 ALWAYS INCLUDE A DESCRIPTION OF THE IMAGES IN THE OVERVIEW SECTION (unless none were provided).
@@ -227,7 +223,6 @@ OVERVIEW TONE RULES:
 {
   "scores": {
     "priceFairness": <number>,
-    "sellerTrust": <number>,
     "conditionHonesty": <number>,
     "shippingFairness": <number>,
     "descriptionQuality": <number>
@@ -280,6 +275,7 @@ DEBUG INFO:
 
         { type: "text", text: `Listing URL: ${link}` },
         { type: "text", text: `Images Provided: ${imageUrls.length}` },
+        { type: "text", text: `Suggested Price Fairness: ${calculatePriceFairness(listing.price, context, listing.priceLow, listing.priceHigh) ?? "N/A"}` },
         ...(context ? [{ type: "text", text: `\n--- PRODUCT CONTEXT ---\n${context}\n--- END PRODUCT CONTEXT ---` }] : []),
       ],
     },
@@ -313,8 +309,7 @@ You will receive multiple eBay listings numbered 1 through N (each wrapped in ==
 Analyze ALL of them and return results as a JSON array.
 
 ALWAYS APPLY:
-- sellerTrust auto 100 if 99%+ feedback and 1000+ ratings; if 100% feedback but fewer than 2 ratings set sellerTrust to 0; if 100% feedback but fewer than 10 ratings cap sellerTrust at 75
-- priceFairness: if price is at or below market low, set priceFairness to 100; if price is below 50% of market low, set priceFairness to 0 — suspiciously cheap is a red flag, not a deal
+- priceFairness: a Suggested Price Fairness score is pre-calculated from market data and included with each listing. Use it as-is unless there is a clear qualitative reason to adjust (e.g. listing is for parts/repair only, seller discloses damage beyond the stated condition, obvious fraud signals). Do not adjust based on price position alone — that is already accounted for. When the suggested score is N/A, estimate from the PRODUCT CONTEXT price range or your own knowledge.
 - shippingFairness auto 100 if free; if a cost is present, score on reasonableness for the item's size and price (small flat fee on a high-value item = 90–100, NOT a penalty); if shippingEstimated is true, score normally against the estimate; score 65 (neutral) only if cost is truly unknown — never score paid shipping low just because it is not free
 - Missing data = NEUTRAL (no deduction unless truly critical)
 - Describe images in the overview if provided
@@ -347,7 +342,7 @@ OUTPUT FORMAT — return ONLY a JSON array:
 [
   {
     "listingIndex": 0,
-    "scores": { "priceFairness": <n>, "sellerTrust": <n>, "conditionHonesty": <n>, "shippingFairness": <n>, "descriptionQuality": <n> },
+    "scores": { "priceFairness": <n>, "conditionHonesty": <n>, "shippingFairness": <n>, "descriptionQuality": <n> },
     "overview": "Short reasoning paragraph.",
     "highlights": [{ "label": "...", "positive": true }]
   },
@@ -362,9 +357,7 @@ You will receive multiple listings numbered 1 through N (each wrapped in === LIS
 Analyze ALL of them and return results as a JSON array.
 
 SCORING RULES (apply to every listing):
-- priceFairness (0–100): use PRODUCT CONTEXT price range and fairness guidance if provided; otherwise estimate from listing data and your knowledge
-- sellerTrust (0–100): based on feedback score and rating count; auto 100 if 99%+ feedback and 1000+ ratings; if 100% feedback but fewer than 2 ratings set to 0 (meaningless sample); if 100% feedback but fewer than 10 ratings cap at 75
-- priceFairness (0–100): use PRODUCT CONTEXT price range; at or below market low = 100 (great deal); CRITICAL EXCEPTION: if price is below 50% of market low, set priceFairness to 0 — this far below market is a red flag (RISKY), not a deal; do NOT reward extreme underpricing
+- priceFairness (0–100): a Suggested Price Fairness score is pre-calculated from market data and included with each listing. Use it as-is unless there is a clear qualitative reason to adjust (e.g. parts/repair only, seller discloses damage beyond the stated condition, obvious fraud signals). Do not adjust based on price position alone. When the suggested score is N/A, estimate from the PRODUCT CONTEXT price range or your own knowledge.
 - conditionHonesty (0–100): scrutinize images for scratches, dents, scuffs, discoloration, missing parts, or damage to the ITEM ITSELF; when condition is "New", "Like New", or "Open Box" AND actual item wear is present: score MUST be 50 or below; multiple areas of wear = 35 or below; do NOT use "minor wear" / "no major damage"; SELF-CHECK: if overview mentions wear/scratch/damage ON THE ITEM and condition is new/like-new, cap at 50; EXCEPTION: box or packaging damage disclosed by the seller does NOT penalize conditionHonesty — the condition is about the product not the box, and proactive disclosure is honest; EXCEPTION: official/manufacturer images are normal for new factory-sealed items — do not flag as a discrepancy; EXCEPTION: graded items (PSA, BGS, CGC, etc.) are exempt — the grade IS the certified condition
 - shippingFairness (0–100): is shipping reasonable for the item; auto 100 if free; if a cost is present, score on reasonableness relative to item size and price (small flat fee on a high-value item = 90–100, NOT a penalty — never score paid shipping low just because it is not free); if shippingEstimated is true score it normally against the estimate; score 65 (neutral) only if cost is truly unknown
 - descriptionQuality (0–100): evaluate against PRODUCT CONTEXT description guidance if provided; otherwise judge on detail, accuracy, and completeness
@@ -372,7 +365,7 @@ SCORING RULES (apply to every listing):
 PRODUCT CONTEXT RULES:
 - A structured PRODUCT CONTEXT block may be provided at the end of the listings
 - When present, use it as your primary reference for scoring — it contains pre-researched price ranges, condition signals, red flags, and per-score guidance specific to this exact product
-- Apply the red flags list to conditionHonesty and sellerTrust scoring
+- Apply the red flags list to conditionHonesty scoring
 - If PRODUCT CONTEXT is absent, fall back to general knowledge
 
 GENERAL RULES:
@@ -401,7 +394,7 @@ OUTPUT FORMAT — return ONLY a JSON array:
 [
   {
     "listingIndex": 0,
-    "scores": { "priceFairness": <n>, "sellerTrust": <n>, "conditionHonesty": <n>, "shippingFairness": <n>, "descriptionQuality": <n> },
+    "scores": { "priceFairness": <n>, "conditionHonesty": <n>, "shippingFairness": <n>, "descriptionQuality": <n> },
     "overview": "Short reasoning paragraph.",
     "highlights": [{ "label": "...", "positive": true }]
   },
@@ -532,6 +525,8 @@ async function _runEbayBatch(entries: BatchEntry[], context?: string | null, sys
     const description = clean(stripHtml(rawDesc)) ?? "";
     const imageUrls = getListingImageUrls(listing).slice(0, imageCount);
 
+    const suggestedPriceFairness = calculatePriceFairness(listing.price, context, listing.priceLow, listing.priceHigh);
+
     contentParts.push({ type: "text", text: `=== LISTING ${i + 1} ===` });
     contentParts.push({ type: "text", text: `Title: ${title}` });
     contentParts.push({ type: "text", text: `Price: ${listing.price} ${currency}` });
@@ -548,6 +543,7 @@ async function _runEbayBatch(entries: BatchEntry[], context?: string | null, sys
     contentParts.push({ type: "text", text: `Description: ${description}` });
     contentParts.push({ type: "text", text: `Listing URL: ${link}` });
     contentParts.push({ type: "text", text: `Images Provided: ${imageUrls.length}` });
+    contentParts.push({ type: "text", text: `Suggested Price Fairness: ${suggestedPriceFairness ?? "N/A"}` });
 
     if (imageUrls.length > 0) {
       contentParts.push({ type: "text", text: `[Images for Listing ${i + 1}]` });

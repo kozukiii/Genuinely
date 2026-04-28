@@ -220,18 +220,6 @@
 }
 
 /* =========================
-   eBay notice banner
-   ========================= */
-.nav-notice {
-  padding: 0.65rem 1.6rem;
-  border-top: 1px solid rgba(255, 159, 67, 0.35);
-  background: rgba(255, 159, 67, 0.06);
-  color: #ffe7c2;
-  text-align: center;
-  font-size: 0.85rem;
-}
-
-/* =========================
    Mobile
    ========================= */
 @media (max-width: 600px) {

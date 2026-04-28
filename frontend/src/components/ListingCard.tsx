@@ -187,29 +187,6 @@ export default function ListingCard({ data }: { data: Listing }) {
               loading="lazy"
             />
           </div>
-
-          <div className="card-badges">
-            {data.aiScore !== undefined ? (
-              <div className="badge-ring">
-                <RatingRing value={data.aiScore} size={75} />
-              </div>
-            ) : data.analysisPending ? (
-              <div className="badge-ring">
-                <svg className="ring-pending" width="75" height="75" viewBox="0 0 50 50">
-                  <circle cx="25" cy="25" r="18.5" stroke="#374151" strokeWidth="5" fill="none" />
-                  <circle
-                    cx="25" cy="25" r="18.5"
-                    stroke="rgba(77,166,255,0.6)"
-                    strokeWidth="5"
-                    fill="none"
-                    strokeDasharray="29 87"
-                    strokeLinecap="round"
-                    transform="rotate(-90 25 25)"
-                  />
-                </svg>
-              </div>
-            ) : null}
-          </div>
         </div>
 
         <div className="listing-title-row">
@@ -229,6 +206,28 @@ export default function ListingCard({ data }: { data: Listing }) {
               <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
             </svg>
           </button>
+          <div className="card-badges">
+            {data.aiScore !== undefined ? (
+              <div className="badge-ring">
+                <RatingRing value={data.aiScore} size={75} />
+              </div>
+            ) : data.analysisPending ? (
+              <div className="badge-ring">
+                <svg className="ring-pending" width="75" height="75" viewBox="0 0 75 75">
+                  <circle cx="37.5" cy="37.5" r="27.75" stroke="#374151" strokeWidth="7.5" fill="none" />
+                  <circle
+                    cx="37.5" cy="37.5" r="27.75"
+                    stroke="rgba(77,166,255,0.6)"
+                    strokeWidth="7.5"
+                    fill="none"
+                    strokeDasharray="43.5 130.5"
+                    strokeLinecap="round"
+                    transform="rotate(-90 37.5 37.5)"
+                  />
+                </svg>
+              </div>
+            ) : null}
+          </div>
         </div>
 
         <div className="price-rating">

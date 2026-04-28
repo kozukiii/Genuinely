@@ -87,10 +87,7 @@ function priceFairnessScore(price: number, low: number, high: number): number {
 
   if (price <= low * 0.5) return 0;
 
-  if (price < low) {
-    const t = (price - low * 0.5) / (low * 0.5);
-    return Math.round(Math.pow(t, 0.3) * 100);
-  }
+  if (price < low) return 100; // GREAT PRICE zone — below market low but not suspiciously cheap
 
   if (price <= sweetSpotCeil) return 100;
 

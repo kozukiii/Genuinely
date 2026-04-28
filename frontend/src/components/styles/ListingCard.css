@@ -454,11 +454,15 @@
   position: relative;
 }
 
-/* Ring anchored to image bottom-right — never shifts when card text grows */
+/* Ring absolutely positioned below the heart */
+.listing-title-row {
+  position: relative;
+}
+
 .listing-card .card-badges {
   position: absolute;
   right: 8px;
-  bottom: 8px;
+  top: calc(46px + 1.6rem); /* heart height + gap */
   z-index: 20;
   pointer-events: none;
 }
@@ -578,19 +582,6 @@
   border-radius: 14px;
 }
 
-/* Mobile: keep it clean */
-@media (max-width: 520px) {
-  .price-rating {
-    padding-right: 88px;
-    min-height: 88px;
-  }
-  .price-rating .card-badges {
-    right: 12px;
-    top: auto;
-    bottom: 6px;
-    transform: none;
-  }
-}
 
 /* Mobile: compact card for two-column grid */
 @media (max-width: 768px) {
@@ -635,16 +626,6 @@
 
   .price-rating {
     gap: 0.4rem;
-  }
-
-  .listing-card .card-badges {
-    right: 8px;
-    bottom: 46px;
-  }
-
-  .listing-card .badge-ring .rating-ring {
-    width: 51px !important;
-    height: 51px !important;
   }
 
   .listing-overview {

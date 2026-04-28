@@ -1,6 +1,7 @@
 import { analyzeListingWithImages, batchAnalyzeListingsWithImages, EBAY_BATCH_SYSTEM_PROMPT } from "../ai/ebayOverview";
 import { extractStructuredAnalysis } from "../utils/extractStructuredAnalysis";
 import { parseEbaySellerData, calculateSellerTrust } from "./scoring/sellerTrustScore";
+import { calculatePriceFairness } from "./scoring/priceFairnessScore";
 import { getCachedAnalysis, setCachedAnalysis, setCachedAnalysisBatch, readCacheStore, getCachedAnalysisFromStore } from "./analysisCache";
 
 // Helper for safe average
@@ -192,5 +193,19 @@ export async function analyzeItemsWithAI(items: any[], context?: string | null, 
     setCachedAnalysisBatch(toCache);
   }
 
-  return items.map((_, i) => resultMap.get(i)!);
+  return items.map((item, i) => {
+    const result = resultMap.get(i)!;
+    const fairness = calculatePriceFairness(item.price, context, priceLow, priceHigh);
+    if (fairness === null || !result.aiScores) return result;
+    const updatedScores = { ...result.aiScores, priceFairness: fairness };
+    const updatedAiScore = average([
+      updatedScores.priceFairness,
+      updatedScores.sellerTrust,
+      updatedScores.conditionHonesty,
+      updatedScores.shippingFairness,
+      updatedScores.locationRisk,
+      updatedScores.descriptionQuality,
+    ]);
+    return { ...result, aiScores: updatedScores, aiScore: updatedAiScore };
+  });
 }

@@ -774,7 +774,7 @@
 .ring-price-row {
   display: flex;
   align-items: flex-start;
-  gap: 56px;
+  gap: 32px;
 }
 
 /* =========================

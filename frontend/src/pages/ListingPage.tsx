@@ -755,7 +755,7 @@ export default function ListingPage() {
 
                 {/* Main ring */}
                 {showRing && (
-                  <div className="ring-main-container" style={{ position: "relative", width: "100px", height: "100px", flexShrink: 0, left: "28px" }}>
+                  <div className="ring-main-container" style={{ position: "relative", width: "100px", height: "100px", flexShrink: 0, left: "12px" }}>
                     <div className="page-rating-ring demo-ring" style={{ position: "absolute", top: 0, left: 0 }}>
                       <AnimatedRing
                         phase={analysisPhase}

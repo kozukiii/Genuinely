@@ -100,6 +100,43 @@ function extractOrganic(json: any, limit: number): string[] {
     .filter(Boolean);
 }
 
+function extractPricesFromSerper(priceJson: any): { priceLow: number | null; priceHigh: number | null } {
+  const texts: string[] = [];
+  const ab = priceJson?.answerBox;
+  if (ab?.answer) texts.push(ab.answer);
+  if (ab?.snippet) texts.push(ab.snippet);
+  if (priceJson?.knowledgeGraph?.description) texts.push(priceJson.knowledgeGraph.description);
+  for (const r of (priceJson?.organic ?? [])) {
+    if (r?.title) texts.push(r.title);
+    if (r?.snippet) texts.push(r.snippet);
+  }
+
+  const allText = texts.join(" ");
+  const prices: number[] = [];
+  const pricePattern = /\$\s*(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?)/g;
+  let m: RegExpExecArray | null;
+  while ((m = pricePattern.exec(allText)) !== null) {
+    const v = parseFloat(m[1].replace(/,/g, ""));
+    if (v >= 10 && v <= 100_000) prices.push(Math.round(v));
+  }
+
+  if (prices.length < 2) return { priceLow: null, priceHigh: null };
+
+  prices.sort((a, b) => a - b);
+
+  // Trim top/bottom 15% as outliers when we have enough data points
+  const trimmed = prices.length >= 5
+    ? prices.slice(Math.floor(prices.length * 0.15), Math.ceil(prices.length * 0.85))
+    : prices;
+
+  if (trimmed.length < 2) return { priceLow: null, priceHigh: null };
+
+  const p25 = trimmed[Math.floor(trimmed.length * 0.25)];
+  const p75 = trimmed[Math.min(Math.floor(trimmed.length * 0.75), trimmed.length - 1)];
+
+  return { priceLow: p25, priceHigh: Math.max(p25, p75) };
+}
+
 /**
  * Two parallel Serper searches for a specific product query:
  * one for resale pricing, one for condition/inspection/buying-guide signals.
@@ -431,6 +468,9 @@ export async function groupAndContextualize(
             : Promise.resolve(null),
         ]);
 
+        // Extract price range directly from Serper results — primary source
+        const serperPrices = priceJson ? extractPricesFromSerper(priceJson) : { priceLow: null, priceHigh: null };
+
         // Build unified market data string
         const parts: string[] = [];
 
@@ -481,8 +521,12 @@ export async function groupAndContextualize(
           };
         }
 
-        const { systemPrompt, priceLow, priceHigh } = await engineerPrompt(group.canonicalName, marketData);
-        console.log(`[group] "${group.canonicalName}" — final priceLow=${priceLow} priceHigh=${priceHigh}`);
+        const { systemPrompt, priceLow: groqPriceLow, priceHigh: groqPriceHigh } = await engineerPrompt(group.canonicalName, marketData);
+
+        // Serper is primary; Groq extraction is fallback for when snippets had no clear dollar amounts
+        const priceLow = serperPrices.priceLow ?? groqPriceLow;
+        const priceHigh = serperPrices.priceHigh ?? groqPriceHigh;
+        console.log(`[group] "${group.canonicalName}" — priceLow=${priceLow} priceHigh=${priceHigh} (serper: ${serperPrices.priceLow}/${serperPrices.priceHigh}, groq: ${groqPriceLow}/${groqPriceHigh})`);
 
         return {
           canonicalName: group.canonicalName,

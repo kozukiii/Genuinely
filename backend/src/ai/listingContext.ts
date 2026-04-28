@@ -28,6 +28,7 @@ interface RawGroup {
   canonicalName: string;
   indices: number[];
   serperQuery: string;
+  hasReliableMarketData: boolean;
 }
 
 // ─── Serper ───────────────────────────────────────────────────────────────────
@@ -201,12 +202,16 @@ SERPER QUERY RULES:
 - The serperQuery MUST include the product type word so it cannot match a different item in the same brand/model family. For golf clubs include "driver", "iron set", "wedge", etc. explicitly.
 - Example: "Callaway Ai Smoke Max Driver 9 degree used price" not "Callaway Ai Smoke Max used price" (which could return iron results)
 
+MARKET DATA RULE:
+Set "hasReliableMarketData" to false if the product has no standardized resale market — e.g. custom-made items, handmade art, bespoke/one-of-a-kind pieces, heavily modified items, or anything where price is entirely subjective and no consistent sold-price data exists online. Set it to true for anything with a real secondhand market: electronics, phones, golf clubs, sneakers, trading cards, games, instruments, bikes, etc.
+
 Return ONLY a JSON array (no markdown, no backticks, no extra text):
 [
   {
     "canonicalName": "exact product name with key specs",
     "indices": [0, 3],
-    "serperQuery": "targeted used resale price search query"
+    "serperQuery": "targeted used resale price search query",
+    "hasReliableMarketData": true
   }
 ]
 `.trim();
@@ -241,6 +246,7 @@ async function groupListings(titles: string[], query: string): Promise<RawGroup[
         canonicalName: g.canonicalName,
         indices: (g.indices as any[]).filter((i) => typeof i === "number"),
         serperQuery: g.serperQuery,
+        hasReliableMarketData: g.hasReliableMarketData !== false, // default true
       }));
 
     console.log("[groupListings] groups:", groups.map(g => ({
@@ -252,7 +258,7 @@ async function groupListings(titles: string[], query: string): Promise<RawGroup[
     return groups;
   } catch (err) {
     console.error("[listingContext] Grouping failed, falling back to single group:", err);
-    return [{ canonicalName: query, indices: titles.map((_, i) => i), serperQuery: `${query} used resale price` }];
+    return [{ canonicalName: query, indices: titles.map((_, i) => i), serperQuery: `${query} used resale price`, hasReliableMarketData: true }];
   }
 }
 
@@ -456,8 +462,13 @@ export async function groupAndContextualize(
           hasCalculatedShipping &&
           group.indices.some(idx => hasCalculatedShipping[idx]);
 
+        const skipPriceSearch = !group.hasReliableMarketData;
+        if (skipPriceSearch) {
+          console.log(`[group] "${group.canonicalName}" — skipping price search (no reliable market data)`);
+        }
+
         const [priceJson, inspectJson, weightJson] = await Promise.all([
-          serperApiKey
+          serperApiKey && !skipPriceSearch
             ? serperSearch(serperApiKey, `${group.serperQuery} used resale price sold 2025 2026`, 8).catch(() => null)
             : Promise.resolve(null),
           serperApiKey

@@ -79,13 +79,79 @@ function formatAvailability(listing: any): string {
   ].join(", ");
 }
 
+function isMarketplaceAcceptsOffersPrice(price: unknown): boolean {
+  if (price == null) return false;
+
+  const numeric = Number(price);
+  if (!Number.isFinite(numeric)) return false;
+
+  return numeric === 0 || [123456, 1234567, 999999, 9999999].includes(Math.round(numeric));
+}
+
+function formatPriceForPrompt(price: unknown, currency: string): string {
+  if (isMarketplaceAcceptsOffersPrice(price)) return "Accepts Offers";
+
+  const numeric = Number(price);
+  return Number.isFinite(numeric) && numeric > 0 ? `${numeric} ${currency}` : "Unavailable";
+}
+
+function normalizeMarketplaceImageUrl(url: unknown): string | null {
+  if (typeof url !== "string") return null;
+
+  const trimmed = url.trim();
+  if (!trimmed.startsWith("http")) return null;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return null;
+  }
+
+  const host = parsed.hostname.toLowerCase();
+  const pathname = parsed.pathname.toLowerCase();
+
+  if (!/(^|[.-])scontent[.-]|(^|[.-])fbsbx[.-]/.test(host)) return null;
+  if (host.startsWith("static.") || pathname.includes("/rsrc.php")) return null;
+  if (/\.(?:svg|wasm|gif)(?:$|[?#])/.test(pathname)) return null;
+  if (/\/t1[._]/.test(trimmed)) return null;
+
+  return trimmed;
+}
+
+const MARKETPLACE_IMAGE_FETCH_HEADERS = {
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
+  "accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+  "accept-language": "en-US,en;q=0.9",
+  "referer": "https://www.facebook.com/",
+} as const;
+
+function getMarketplaceImageUrls(listing: any): string[] {
+  const rawUrls: unknown[] = Array.isArray(listing.imageUrls)
+    ? listing.imageUrls
+    : Array.isArray(listing.images)
+      ? listing.images
+      : [];
+
+  const seen = new Set<string>();
+  const urls: string[] = [];
+
+  for (const raw of rawUrls) {
+    const url = normalizeMarketplaceImageUrl(raw);
+    if (!url || seen.has(url)) continue;
+
+    seen.add(url);
+    urls.push(url);
+  }
+
+  return urls;
+}
+
 async function fetchImageAsDataUrl(url: string): Promise<string | null> {
   try {
     const agent = _getProxyAgent();
     const res = await fetch(url, {
-      headers: {
-        "user-agent": "Mozilla/5.0",
-      },
+      headers: MARKETPLACE_IMAGE_FETCH_HEADERS,
       ...(agent ? { agent } : {}),
     });
 
@@ -95,7 +161,17 @@ async function fetchImageAsDataUrl(url: string): Promise<string | null> {
     }
 
     const contentType = res.headers.get("content-type") || "image/jpeg";
+    if (!contentType.toLowerCase().startsWith("image/")) {
+      console.error(`Marketplace image fetch returned non-image content-type: ${contentType}`);
+      return null;
+    }
+
     const buffer = Buffer.from(await res.arrayBuffer());
+    if (buffer.length === 0) {
+      console.error("Marketplace image fetch returned an empty body");
+      return null;
+    }
+
     const base64 = buffer.toString("base64");
 
     return `data:${contentType};base64,${base64}`;
@@ -103,6 +179,20 @@ async function fetchImageAsDataUrl(url: string): Promise<string | null> {
     console.error("Marketplace image fetch error:", err);
     return null;
   }
+}
+
+async function fetchMarketplaceImageDataUrls(imageUrls: string[], limit: number): Promise<string[]> {
+  const dataUrls: string[] = [];
+
+  // Try later gallery URLs when early CDN URLs are stale or blocked.
+  for (const url of imageUrls) {
+    if (dataUrls.length >= limit) break;
+
+    const dataUrl = await fetchImageAsDataUrl(url);
+    if (dataUrl) dataUrls.push(dataUrl);
+  }
+
+  return dataUrls;
 }
 
 export async function analyzeMarketplaceListingWithImages(listing: any, context?: string | null) {
@@ -117,17 +207,11 @@ export async function analyzeMarketplaceListingWithImages(listing: any, context?
   );
   const availability = formatAvailability(listing);
 
-  const imageUrls: string[] = Array.isArray(listing.imageUrls)
-    ? listing.imageUrls.filter((u: any) => typeof u === "string" && u.trim())
-    : Array.isArray(listing.images)
-      ? listing.images.filter((u: any) => typeof u === "string" && u.trim())
-      : [];
+  const imageUrls = getMarketplaceImageUrls(listing);
+  const dataUrls = await fetchMarketplaceImageDataUrls(imageUrls, 3);
+  listing.__visionImageStats = { provided: imageUrls.length, attached: dataUrls.length };
 
-  const dataUrls = (
-    await Promise.all(imageUrls.slice(0, 3).map((url) => fetchImageAsDataUrl(url)))
-  ).filter(Boolean) as string[];
-
-  const isAcceptsOffers = !listing.price || Number(listing.price) === 0 || [123456, 1234567, 999999, 9999999].includes(Math.round(Number(listing.price)));
+  const priceText = formatPriceForPrompt(listing.price, currency);
 
   const messages: any[] = [
     {
@@ -286,7 +370,7 @@ PRICE EVALUATION RULES:
 - The overview must sound product-specific, not category-generic
 
 PRICE FAIRNESS RULES (CRITICAL):
-- If the Price field LITERALLY shows the text "Accepts Offers", set priceFairness to null and note it in the overview
+- If the Price field LITERALLY shows the text "Accepts Offers" or "Unavailable", set priceFairness to null and note it in the overview
 - If the Price field shows ANY real dollar amount, you MUST provide a numeric score — NEVER set it to null
 - Do NOT infer "Accepts Offers" from low price, vague title, or negotiable tone — only null when the price text is literally "Accepts Offers"
 - Any listing priced at or below the low end of the market range must score 100 (great deal)
@@ -355,7 +439,7 @@ Do NOT wrap JSON in backticks.
       role: "user",
       content: [
         { type: "text", text: `Title: ${title}` },
-        { type: "text", text: `Price: ${isAcceptsOffers ? "Accepts Offers" : `${listing.price} ${currency}`}` },
+        { type: "text", text: `Price: ${priceText}` },
         { type: "text", text: `Location: ${location}` },
         { type: "text", text: `Delivery Types: ${deliveryTypes}` },
         { type: "text", text: `Availability: ${availability}` },
@@ -414,7 +498,7 @@ MARKETPLACE RULES (always apply):
 - DO NOT add extra JSON fields
 
 PRICE FAIRNESS RULES (read carefully):
-- If the Price field for a listing LITERALLY shows the text "Accepts Offers" (not a dollar amount), set priceFairness to null and mention it in the overview
+- If the Price field for a listing LITERALLY shows the text "Accepts Offers" or "Unavailable" (not a dollar amount), set priceFairness to null and mention it in the overview
 - If the Price field shows ANY real dollar amount (e.g. "80 USD", "275 USD"), you MUST provide a numeric score — NEVER null
 - Do NOT set priceFairness to null just because you think the price seems negotiable or low — only null when the actual text is "Accepts Offers"
 - Use the PRODUCT CONTEXT price range (if provided) as your primary anchor for scoring
@@ -469,7 +553,7 @@ PRODUCT CONTEXT RULES:
 - If PRODUCT CONTEXT is absent, infer item identity from title + images and use your own knowledge
 
 PRICE FAIRNESS RULES (CRITICAL):
-- If the Price field LITERALLY shows the text "Accepts Offers", set priceFairness to null and mention it in the overview
+- If the Price field LITERALLY shows the text "Accepts Offers" or "Unavailable", set priceFairness to null and mention it in the overview
 - If the Price field shows ANY real dollar amount, you MUST provide a numeric score — NEVER null
 - Do NOT infer "Accepts Offers" from context or tone — only null when the price text is literally "Accepts Offers"
 - Use the PRODUCT CONTEXT price range as your primary anchor; listings at or below the market low must score at minimum 80
@@ -583,11 +667,11 @@ async function _runMarketplaceBatch(listings: any[], allDataUrls: string[][], co
     const availability = formatAvailability(listing);
     const batchDescription = clean(listing.fullDescription ?? listing.description);
     const dataUrls = allDataUrls[i];
-    const batchAcceptsOffers = !listing.price || Number(listing.price) === 0 || [123456, 1234567, 999999, 9999999].includes(Math.round(Number(listing.price)));
+    const batchPriceText = formatPriceForPrompt(listing.price, currency);
 
     contentParts.push({ type: "text", text: `=== LISTING ${i + 1} ===` });
     contentParts.push({ type: "text", text: `Title: ${title}` });
-    contentParts.push({ type: "text", text: `Price: ${batchAcceptsOffers ? "Accepts Offers" : `${listing.price} ${currency}`}` });
+    contentParts.push({ type: "text", text: `Price: ${batchPriceText}` });
     contentParts.push({ type: "text", text: `Location: ${location}` });
     contentParts.push({ type: "text", text: `Delivery Types: ${deliveryTypes}` });
     contentParts.push({ type: "text", text: `Availability: ${availability}` });
@@ -661,15 +745,11 @@ export async function batchAnalyzeMarketplaceListingsWithImages(listings: any[],
   // Fetch all images for every listing in parallel, capped at the model's hard limit
   const allDataUrls = await Promise.all(
     listings.map(async (listing) => {
-      const imageUrls: string[] = Array.isArray(listing.imageUrls)
-        ? listing.imageUrls.filter((u: any) => typeof u === "string" && u.trim())
-        : Array.isArray(listing.images)
-          ? listing.images.filter((u: any) => typeof u === "string" && u.trim())
-          : [];
-      const fetched = await Promise.all(
-        imageUrls.slice(0, MODEL_IMAGE_LIMIT).map(fetchImageAsDataUrl)
-      );
-      return fetched.filter(Boolean) as string[];
+      const imageUrls = getMarketplaceImageUrls(listing);
+      const dataUrls = await fetchMarketplaceImageDataUrls(imageUrls, MODEL_IMAGE_LIMIT);
+      listing.__visionImageStats = { provided: imageUrls.length, attached: dataUrls.length };
+      console.warn(`[marketplace:visionImages] id=${listing.id ?? "unknown"} provided=${imageUrls.length} attached=${dataUrls.length}`);
+      return dataUrls;
     })
   );
 

@@ -6,7 +6,7 @@ import RatingRing from "../components/RatingRing";
 import ListingCard from "../components/ListingCard";
 import "./styles/ListingPage.css";
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { getHighResImage } from "../utils/imageHelpers";
+import { getHighResImage, isDisplayableListingImage, PLACEHOLDER_IMAGE } from "../utils/imageHelpers";
 import { isSaved, toggleSaved, updateSavedListing } from "../utils/savedListings";
 import { recordView, updateRecentlyViewed } from "../utils/recentlyViewed";
 import { subscribeToAnalysis } from "../utils/analysisStore";
@@ -544,8 +544,9 @@ export default function ListingPage() {
 
   // ── Derived values ────────────────────────────────────────────────────────
 
-  const images = enrichedImages !== null && enrichedImages.length > 0
-    ? enrichedImages : listing.images ?? [];
+  const images = (enrichedImages !== null && enrichedImages.length > 0
+    ? enrichedImages : listing.images ?? []
+  ).filter((url) => isDisplayableListingImage(url, listing.source));
   const safeIndex    = Math.min(Math.max(imageIndex, 0), Math.max(images.length - 1, 0));
   const currentImage = getHighResImage(images[safeIndex] ?? "", listing.source);
 
@@ -600,9 +601,9 @@ export default function ListingPage() {
           <div className="page-image">
             <div className="image-frame">
               <img
-                src={currentImage || "/placeholder.jpg"}
+                src={currentImage || PLACEHOLDER_IMAGE}
                 alt={listing.title}
-                onError={(e) => (e.currentTarget.src = "/placeholder.jpg")}
+                onError={(e) => (e.currentTarget.src = PLACEHOLDER_IMAGE)}
                 className="image-frame-clickable"
                 onClick={() => setViewerOpen(true)}
                 title="Click to view full size"
@@ -957,9 +958,9 @@ export default function ListingPage() {
           </button>
           <div className="image-viewer-content" onClick={(e) => e.stopPropagation()}>
             <img
-              src={currentImage || "/placeholder.jpg"}
+              src={currentImage || PLACEHOLDER_IMAGE}
               alt={listing.title}
-              onError={(e) => (e.currentTarget.src = "/placeholder.jpg")}
+              onError={(e) => (e.currentTarget.src = PLACEHOLDER_IMAGE)}
             />
           </div>
           <button

@@ -90,6 +90,20 @@ function normalizeMarketplaceImageUrl(url: unknown): string | null {
 
   const trimmed = url.trim();
   if (!trimmed.startsWith("http")) return null;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return null;
+  }
+
+  const host = parsed.hostname.toLowerCase();
+  const pathname = parsed.pathname.toLowerCase();
+
+  if (!/(^|[.-])scontent[.-]|(^|[.-])fbsbx[.-]/.test(host)) return null;
+  if (host.startsWith("static.") || pathname.includes("/rsrc.php")) return null;
+  if (/\.(?:svg|wasm|gif)(?:$|[?#])/.test(pathname)) return null;
   if (/\/t1[._]/.test(trimmed)) return null;
 
   return trimmed;
@@ -108,6 +122,91 @@ function mergeMarketplaceImageArrays(...lists: unknown[]): string[] {
   }
 
   return Array.from(urls);
+}
+
+function parseMarketplacePrice(...candidates: unknown[]): number | null {
+  let sawExplicitZero = false;
+
+  const parseCandidate = (candidate: unknown, depth = 0): number | null => {
+    if (candidate == null || depth > 3) return null;
+
+    if (typeof candidate === "number") {
+      if (Number.isFinite(candidate) && candidate > 0) return candidate;
+      if (candidate === 0) sawExplicitZero = true;
+      return null;
+    }
+
+    if (typeof candidate === "string") {
+      const trimmed = candidate.trim();
+      if (!trimmed) return null;
+
+      if (/accepts?\s+offers?/i.test(trimmed)) {
+        sawExplicitZero = true;
+        return null;
+      }
+
+      const stripped = trimmed.replace(/,/g, "").match(/[0-9]+(?:\.[0-9]+)?/)?.[0] ?? "";
+      if (stripped === "0") {
+        sawExplicitZero = true;
+        return null;
+      }
+
+      const parsed = Number(stripped);
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+    }
+
+    if (typeof candidate !== "object") return null;
+
+    const objectCandidate = candidate as Record<string, unknown>;
+    const offsetAmount = Number(objectCandidate.amount);
+    const offset = Number(objectCandidate.offset);
+    if (Number.isFinite(offsetAmount) && offsetAmount > 0 && Number.isFinite(offset) && offset > 1) {
+      return offsetAmount / offset;
+    }
+
+    const nestedCandidates = [
+      objectCandidate.amount,
+      objectCandidate.formatted_amount,
+      objectCandidate.formattedAmount,
+      objectCandidate.text,
+      objectCandidate.price,
+      objectCandidate.listing_price,
+      objectCandidate.formatted_price,
+      objectCandidate.amount_with_offset,
+      objectCandidate.amountWithOffset,
+    ];
+
+    for (const nested of nestedCandidates) {
+      const parsed = parseCandidate(nested, depth + 1);
+      if (parsed !== null) return parsed;
+    }
+
+    return null;
+  };
+
+  for (const candidate of candidates) {
+    const parsed = parseCandidate(candidate);
+    if (parsed !== null) return parsed;
+  }
+
+  return sawExplicitZero ? 0 : null;
+}
+
+function extractMarketplacePrice(source: any): number | null {
+  return parseMarketplacePrice(
+    source?.listing_price,
+    source?.listing_price?.amount,
+    source?.listing_price?.formatted_amount,
+    source?.formatted_price,
+    source?.formatted_price?.text,
+    source?.price,
+    source?.price?.text,
+    source?.marketplace_listing_price,
+    source?.marketplace_listing_renderable_target?.listing_price,
+    source?.marketplace_listing_renderable_target?.formatted_price,
+    source?.product_item?.listing_price,
+    source?.product_item?.formatted_price,
+  );
 }
 
 async function searchMarketplaceListingsByLatLng({
@@ -177,12 +276,7 @@ async function searchMarketplaceListingsByLatLng({
       id: String(listing?.id ?? ""),
       source: "marketplace",
       title: listing?.marketplace_listing_title ?? "Untitled listing",
-      price: Number(
-        String(listing?.listing_price?.formatted_amount ?? "0").replace(
-          /[^0-9.]/g,
-          ""
-        ) || 0
-      ),
+      price: extractMarketplacePrice(listing) ?? extractMarketplacePrice(edge?.node),
       currency: "USD",
       url: listing?.id
         ? `https://www.facebook.com/marketplace/item/${listing.id}`
@@ -262,6 +356,31 @@ function extractMarketplaceImages(listing: any): string[] {
     pushIfValid(candidate?.node?.url);
   };
 
+  const pushDeepFacebookImages = (value: unknown, depth = 0) => {
+    if (!value || depth > 8) return;
+
+    if (typeof value === "string") {
+      if (/(?:scontent|fbcdn|fbsbx)/i.test(value)) {
+        pushIfValid(value);
+      }
+      return;
+    }
+
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        pushDeepFacebookImages(item, depth + 1);
+      }
+      return;
+    }
+
+    if (typeof value !== "object") return;
+
+    for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+      if (/feedback|comment|reaction|actor|profile|avatar/i.test(key)) continue;
+      pushDeepFacebookImages(child, depth + 1);
+    }
+  };
+
   // Primary listing photo
   pushIfValid(listing?.primary_listing_photo?.image?.uri);
   pushIfValid(listing?.primary_photo?.image?.uri);
@@ -285,6 +404,10 @@ function extractMarketplaceImages(listing: any): string[] {
       pushImageCandidate(item);
     }
   }
+
+  // Facebook Relay field names drift often; the PDP media query can expose
+  // gallery photos under nested image/uri/url paths that are not listed above.
+  pushDeepFacebookImages(listing);
 
   return Array.from(urls);
 }
@@ -424,24 +547,6 @@ async function fetchDescriptionFromMobileHtml(listingId: string): Promise<string
 }
 
 
-function parseMarketplacePrice(value: any, formattedText?: string): number | null {
-  // Explicit 0 means "Accepts Offers" on Facebook Marketplace — preserve it.
-  if (value === 0 || value === "0") return 0;
-
-  const numeric = Number(value);
-  if (Number.isFinite(numeric) && numeric > 0) return numeric;
-
-  if (typeof formattedText === "string") {
-    const stripped = formattedText.replace(/[^0-9.]/g, "");
-    if (stripped === "0") return 0;
-    const parsed = Number(stripped);
-    if (Number.isFinite(parsed) && parsed > 0) return parsed;
-  }
-
-  // Price field was absent — not the same as "Accepts Offers"
-  return null;
-}
-
 function extractMarketplaceDescription(target: any): string | undefined {
   const candidates = [
     target?.redacted_description?.text,
@@ -500,10 +605,19 @@ function attachSearchMetadataToMarketplaceListing(detailListing: Listing, search
     detailListing.raw && typeof detailListing.raw === "object" && searchMatch?.raw && typeof searchMatch.raw === "object"
       ? { ...(searchMatch.raw as Record<string, unknown>), ...(detailListing.raw as Record<string, unknown>) }
       : detailListing.raw ?? searchMatch?.raw;
+  const detailPrice = detailListing.price;
+  const searchPrice = searchMatch?.price;
+  const price =
+    typeof detailPrice === "number" && detailPrice > 0
+      ? detailPrice
+      : typeof searchPrice === "number" && searchPrice > 0
+        ? searchPrice
+        : detailPrice ?? searchPrice ?? null;
 
   return {
     ...searchMatch,
     ...detailListing,
+    price,
     images: mergeMarketplaceImageArrays(detailListing.images, searchMatch?.images),
     raw: mergedRaw,
   } as Listing;
@@ -536,7 +650,7 @@ function buildMarketplaceListingFromProductDetails(
     id: listingId,
     source: "marketplace",
     title: target?.marketplace_listing_title ?? "Marketplace Listing",
-    price: parseMarketplacePrice(target?.listing_price?.amount, target?.formatted_price?.text ?? target?.listing_price?.formatted_amount),
+    price: extractMarketplacePrice(target),
     currency: target?.listing_price?.currency ?? "USD",
     url,
     link: url,

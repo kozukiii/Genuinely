@@ -30,11 +30,13 @@ function buildMarketplaceDebugInfo(listing: any): string {
     is_sold: listing.is_sold ?? listing.raw?.is_sold ?? null,
     url: listing.link ?? listing.url ?? null,
     images_provided: imageUrls.length,
+    vision_images_attached: listing.__visionImageStats?.attached ?? null,
   }, null, 2);
 }
 
 export async function scoreMarketplaceListing(listing: any, context?: string | null, systemPrompt?: string | null) {
   const acceptsOffers = isAcceptsOffersPrice(listing.price, context);
+  const hasFixedPrice = typeof listing.price === "number" && listing.price > 0 && !acceptsOffers;
   const analysis = await analyzeMarketplaceListingWithImages(listing, context);
   const jsonBlock = extractStructuredAnalysis(analysis);
 
@@ -46,14 +48,16 @@ export async function scoreMarketplaceListing(listing: any, context?: string | n
   const { sellerTrust, conditionHonesty, shippingFairness, descriptionQuality } = scores;
 
   // Override LLM price fairness with deterministic context-based score when available
-  const calculatedPriceFairness = acceptsOffers
-    ? null
-    : calculatePriceFairness(listing.price, context);
+  const calculatedPriceFairness = hasFixedPrice
+    ? calculatePriceFairness(listing.price, context)
+    : null;
   if (calculatedPriceFairness !== null) {
     scores.priceFairness = calculatedPriceFairness;
+  } else if (!hasFixedPrice) {
+    scores.priceFairness = null;
   }
 
-  const scoreValues = acceptsOffers
+  const scoreValues = !hasFixedPrice
     ? [sellerTrust, conditionHonesty, shippingFairness, descriptionQuality]
     : [scores.priceFairness, sellerTrust, conditionHonesty, shippingFairness, descriptionQuality];
 
@@ -75,6 +79,7 @@ export async function scoreMarketplaceListing(listing: any, context?: string | n
 
 function parseMarketplaceAnalysis(listing: any, analysis: string, context?: string | null, priceLow?: number | null, priceHigh?: number | null) {
   const acceptsOffers = isAcceptsOffersPrice(listing.price, context);
+  const hasFixedPrice = typeof listing.price === "number" && listing.price > 0 && !acceptsOffers;
   const jsonBlock = extractStructuredAnalysis(analysis);
 
   if (!jsonBlock) {
@@ -84,14 +89,16 @@ function parseMarketplaceAnalysis(listing: any, analysis: string, context?: stri
   const scores = { ...(jsonBlock?.scores || {}) };
   const { sellerTrust, conditionHonesty, shippingFairness, descriptionQuality } = scores;
 
-  const calculatedPriceFairness = acceptsOffers
-    ? null
-    : calculatePriceFairness(listing.price, context, priceLow, priceHigh);
+  const calculatedPriceFairness = hasFixedPrice
+    ? calculatePriceFairness(listing.price, context, priceLow, priceHigh)
+    : null;
   if (calculatedPriceFairness !== null) {
     scores.priceFairness = calculatedPriceFairness;
+  } else if (!hasFixedPrice) {
+    scores.priceFairness = null;
   }
 
-  const scoreValues = acceptsOffers
+  const scoreValues = !hasFixedPrice
     ? [sellerTrust, conditionHonesty, shippingFairness, descriptionQuality]
     : [scores.priceFairness, sellerTrust, conditionHonesty, shippingFairness, descriptionQuality];
 

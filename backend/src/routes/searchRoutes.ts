@@ -9,6 +9,27 @@ import { deleteCachedAnalysis } from "../services/analysisCache";
 
 const router = Router();
 
+function mergeImageUrls(...lists: unknown[]): string[] {
+  const seen = new Set<string>();
+  const urls: string[] = [];
+
+  for (const list of lists) {
+    if (!Array.isArray(list)) continue;
+
+    for (const raw of list) {
+      if (typeof raw !== "string") continue;
+
+      const url = raw.trim();
+      if (!url.startsWith("http") || seen.has(url)) continue;
+
+      seen.add(url);
+      urls.push(url);
+    }
+  }
+
+  return urls;
+}
+
 async function enrichMarketplaceListing(listing: any): Promise<any> {
   if (listing.source !== "marketplace" || !listing.id) return listing;
 
@@ -17,21 +38,16 @@ async function enrichMarketplaceListing(listing: any): Promise<any> {
 
   console.warn(`[enrich] id=${listing.id} images=${existingImages.length} hasDescription=${hasDescription}`);
 
-  // Nothing to enrich
-  if (existingImages.length >= 2 && hasDescription) {
-    console.warn(`[enrich] skipping — already have images+description`);
-    return listing;
-  }
-
   try {
     const detailed = await getMarketplaceListingByGraphqlForAnalysis(listing.id);
     const detailImages: string[] = Array.isArray(detailed.images) ? detailed.images : [];
     const detailDescription = (detailed.fullDescription ?? detailed.description ?? "").trim() || undefined;
+    const mergedImages = mergeImageUrls(detailImages, existingImages);
 
-    console.warn(`[enrich] detailed: images=${detailImages.length} description=${detailDescription ? JSON.stringify(detailDescription.slice(0, 80)) : "none"}`);
+    console.warn(`[enrich] detailed: images=${detailImages.length} merged=${mergedImages.length} description=${detailDescription ? JSON.stringify(detailDescription.slice(0, 80)) : "none"}`);
 
     const patch: any = {};
-    if (detailImages.length > existingImages.length) patch.images = detailImages;
+    if (mergedImages.length > 0) patch.images = mergedImages;
     if (!hasDescription && detailDescription) {
       patch.description = detailDescription;
       patch.fullDescription = detailDescription;

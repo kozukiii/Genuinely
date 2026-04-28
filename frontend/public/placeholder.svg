@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 640" role="img" aria-label="Image unavailable">
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#101826"/>
+      <stop offset="1" stop-color="#06130d"/>
+    </linearGradient>
+  </defs>
+  <rect width="640" height="640" fill="url(#bg)"/>
+  <rect x="96" y="126" width="448" height="388" rx="34" fill="none" stroke="#2f3d4f" stroke-width="12"/>
+  <circle cx="232" cy="246" r="44" fill="#2f3d4f"/>
+  <path d="M142 462 278 326l78 78 54-54 88 112Z" fill="#233244"/>
+  <text x="320" y="560" text-anchor="middle" fill="#7f8ea3" font-family="Arial, sans-serif" font-size="30" font-weight="700">Image unavailable</text>
+</svg>

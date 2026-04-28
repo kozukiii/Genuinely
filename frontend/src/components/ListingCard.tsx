@@ -3,7 +3,7 @@ import RatingRing from "./RatingRing";
 import { Link } from "react-router-dom";
 import { useEffect, useRef, useState } from "react";
 import type { Listing } from "../types/Listing";
-import { getHighResImage } from "../utils/imageHelpers";
+import { getHighResImage, isDisplayableListingImage, PLACEHOLDER_IMAGE } from "../utils/imageHelpers";
 import { isSaved, toggleSaved } from "../utils/savedListings";
 
 function formatDeliveryType(type: string): string {
@@ -123,7 +123,7 @@ function getPriceBadge(price: number, priceLow: number, priceHigh: number) {
 }
 
 export default function ListingCard({ data }: { data: Listing }) {
-  const images = data.images ?? [];
+  const images = (data.images ?? []).filter((url) => isDisplayableListingImage(url, data.source));
   const [imageIndex, setImageIndex] = useState(0);
   const intervalRef = useRef<number | null>(null);
   const [saved, setSaved] = useState(false);
@@ -183,7 +183,7 @@ export default function ListingCard({ data }: { data: Listing }) {
             <img
               src={proxiedImage}
               alt={data.title}
-              onError={(e) => (e.currentTarget.src = "/placeholder.jpg")}
+              onError={(e) => (e.currentTarget.src = PLACEHOLDER_IMAGE)}
               loading="lazy"
             />
           </div>

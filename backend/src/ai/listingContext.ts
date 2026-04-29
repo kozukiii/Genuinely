@@ -101,6 +101,57 @@ function extractOrganic(json: any, limit: number): string[] {
     .filter(Boolean);
 }
 
+const RESALE_PRICE_POSITIVE_SIGNALS = [
+  "used",
+  "pre-owned",
+  "preowned",
+  "secondhand",
+  "resale",
+  "sold",
+  "ebay",
+  "swappa",
+  "stockx",
+  "goat",
+  "mercari",
+  "poshmark",
+  "reverb",
+  "marketplace",
+  "offerup",
+  "facebook",
+  "trade-in",
+  "refurbished",
+];
+
+const RESALE_PRICE_NEGATIVE_SIGNALS = [
+  "msrp",
+  "retail",
+  "starting at",
+  "starting from",
+  "brand new",
+  "new from",
+  "list price",
+];
+
+function looksLikeResalePriceText(text: string): boolean {
+  const lower = text.toLowerCase();
+  const hasPositive = RESALE_PRICE_POSITIVE_SIGNALS.some((signal) => lower.includes(signal));
+  if (hasPositive) return true;
+  return !RESALE_PRICE_NEGATIVE_SIGNALS.some((signal) => lower.includes(signal));
+}
+
+function extractDollarAmounts(text: string): number[] {
+  const prices: number[] = [];
+  const pricePattern = /\$\s*(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?)/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = pricePattern.exec(text)) !== null) {
+    const value = parseFloat(match[1].replace(/,/g, ""));
+    if (value >= 10 && value <= 100_000) prices.push(Math.round(value));
+  }
+
+  return prices;
+}
+
 function extractPricesFromSerper(priceJson: any): { priceLow: number | null; priceHigh: number | null } {
   const texts: string[] = [];
   const ab = priceJson?.answerBox;
@@ -112,14 +163,11 @@ function extractPricesFromSerper(priceJson: any): { priceLow: number | null; pri
     if (r?.snippet) texts.push(r.snippet);
   }
 
-  const allText = texts.join(" ");
-  const prices: number[] = [];
-  const pricePattern = /\$\s*(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?)/g;
-  let m: RegExpExecArray | null;
-  while ((m = pricePattern.exec(allText)) !== null) {
-    const v = parseFloat(m[1].replace(/,/g, ""));
-    if (v >= 10 && v <= 100_000) prices.push(Math.round(v));
-  }
+  const resaleTextPrices = texts
+    .filter(looksLikeResalePriceText)
+    .flatMap(extractDollarAmounts);
+  const fallbackPrices = texts.flatMap(extractDollarAmounts);
+  const prices = resaleTextPrices.length >= 2 ? resaleTextPrices : fallbackPrices;
 
   if (prices.length < 2) return { priceLow: null, priceHigh: null };
 

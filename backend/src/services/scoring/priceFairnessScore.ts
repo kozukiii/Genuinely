@@ -81,28 +81,17 @@ export function isAcceptsOffersPrice(
 function priceFairnessScore(price: number, low: number, high: number): number {
   if (price <= 0 || low <= 0 || high <= 0 || high <= low) return 50;
 
-  const median = (low + high) / 2;
-  const sweetSpotCeil = Math.min(low * 1.1, median);
-  const medianScore = sweetSpotCeil >= median ? 100 : 90;
-
   if (price <= low * 0.5) return 0;
 
   if (price < low) return 100; // GREAT PRICE zone — below market low but not suspiciously cheap
 
-  if (price <= sweetSpotCeil) return 100;
-
-  if (sweetSpotCeil < median && price <= median) {
-    const t = (price - sweetSpotCeil) / (median - sweetSpotCeil);
-    return Math.round(100 - t * 10);
-  }
-
   if (price <= high) {
-    const t = (price - median) / (high - median);
-    return Math.round(medianScore - t * (medianScore - 80));
+    const t = (price - low) / (high - low);
+    return Math.round(100 - Math.pow(t, 0.9) * 25);
   }
 
   const overpayRatio = (price - high) / high;
-  return Math.max(0, Math.round(80 - Math.pow(overpayRatio, 0.5) * 100));
+  return Math.max(0, Math.round(75 - Math.pow(overpayRatio, 0.65) * 90));
 }
 
 /**

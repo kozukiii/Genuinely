@@ -12,6 +12,15 @@
     "debug:marketplace": "ts-node src/scripts/dumpMarketplaceGraphql.ts"
   },
   "dependencies": {
+    "@types/better-sqlite3": "7.6.13",
+    "@types/cookie-parser": "1.4.10",
+    "@types/cors": "2.8.19",
+    "@types/express": "5.0.6",
+    "@types/jsonwebtoken": "9.0.10",
+    "@types/node": "24.12.2",
+    "@types/node-fetch": "2.6.13",
+    "@types/passport": "1.0.17",
+    "@types/passport-google-oauth20": "2.0.17",
     "axios": "^1.16.0",
     "better-sqlite3": "^12.9.0",
     "cheerio": "^1.2.0",
@@ -27,21 +36,12 @@
     "node-fetch": "^2.7.0",
     "openai": "^6.36.0",
     "passport": "^0.7.0",
-    "passport-google-oauth20": "^2.0.0"
+    "passport-google-oauth20": "^2.0.0",
+    "typescript": "5.9.3"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.13",
-    "@types/cookie-parser": "^1.4.10",
-    "@types/cors": "^2.8.19",
-    "@types/express": "^5.0.6",
-    "@types/jsonwebtoken": "^9.0.10",
-    "@types/node": "^24.12.2",
-    "@types/node-fetch": "^2.6.13",
-    "@types/passport": "^1.0.17",
-    "@types/passport-google-oauth20": "^2.0.17",
     "nodemon": "^3.1.14",
-    "ts-node": "^10.9.2",
-    "typescript": "^5.9.3"
+    "ts-node": "^10.9.2"
   },
   "overrides": {
     "path-to-regexp": "8.4.0",

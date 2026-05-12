@@ -2,7 +2,7 @@ import { analyzeListingWithImages, batchAnalyzeListingsWithImages, EBAY_BATCH_SY
 import { extractStructuredAnalysis } from "../utils/extractStructuredAnalysis";
 import { parseEbaySellerData, calculateSellerTrust } from "./scoring/sellerTrustScore";
 import { calculatePriceFairness } from "./scoring/priceFairnessScore";
-import { getCachedAnalysis, setCachedAnalysis, setCachedAnalysisBatch, readCacheStore, getCachedAnalysisFromStore } from "./analysisCache";
+import { setCachedAnalysis, setCachedAnalysisBatch } from "./analysisCache";
 
 // Helper for safe average
 function average(nums: Array<number | null | undefined>) {
@@ -92,23 +92,6 @@ function parseAIAnalysis(listing: any, analysis: string, context?: string | null
 }
 
 export async function analyzeItemWithAI(merged: any, context?: string | null) {
-  const cached = merged.id && merged.source
-    ? getCachedAnalysis(merged.source, merged.id)
-    : null;
-
-  if (cached) {
-    return {
-      aiScore: cached.aiScore,
-      aiScores: cached.aiScores,
-      overview: cached.overview,
-      highlights: cached.highlights,
-      debugInfo: buildEbayDebugInfo(merged),
-      rawAnalysis: "",
-      marketContext: context ?? undefined,
-      systemPrompt: EBAY_BATCH_SYSTEM_PROMPT,
-    };
-  }
-
   const analysis = await analyzeListingWithImages(merged, context);
   const result = {
     ...parseAIAnalysis(merged, analysis, context),
@@ -132,39 +115,13 @@ export async function analyzeItemsWithAI(items: any[], context?: string | null, 
   if (items.length === 0) return [];
 
   // Read store once — avoids N synchronous disk reads for N items
-  const store = readCacheStore();
   const resultMap = new Map<number, any>();
-  const uncachedIndices: number[] = [];
+  const analyzeIndices = items.map((_, i) => i);
 
-  for (let i = 0; i < items.length; i++) {
-    const item = items[i];
-    const cached = item.id && item.source
-      ? getCachedAnalysisFromStore(store, item.source, item.id)
-      : null;
-
-    if (cached) {
-      console.log(`[analysisCache] HIT  ${item.source}-${item.id}`);
-      resultMap.set(i, {
-        ...item,
-        aiScore: cached.aiScore,
-        aiScores: cached.aiScores,
-        overview: cached.overview,
-        highlights: cached.highlights,
-        debugInfo: buildEbayDebugInfo(item),
-        rawAnalysis: "",
-        systemPrompt: systemPrompt ?? EBAY_BATCH_SYSTEM_PROMPT,
-      });
-    } else {
-      uncachedIndices.push(i);
-    }
-  }
-
-  console.log(`[analysisCache] ${items.length - uncachedIndices.length}/${items.length} hits, ${uncachedIndices.length} going to Groq`);
-
-  // Score uncached items in batches of 8, one read+write per chunk
+  // Score items in batches of 8, one cache write per chunk.
   const BATCH_SIZE = 8;
-  for (let start = 0; start < uncachedIndices.length; start += BATCH_SIZE) {
-    const batchIndices = uncachedIndices.slice(start, start + BATCH_SIZE);
+  for (let start = 0; start < analyzeIndices.length; start += BATCH_SIZE) {
+    const batchIndices = analyzeIndices.slice(start, start + BATCH_SIZE);
     const chunk = batchIndices.map((i) => items[i]);
     const rawStrings = await batchAnalyzeListingsWithImages(chunk, context, systemPrompt);
 

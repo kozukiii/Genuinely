@@ -7,11 +7,13 @@ type TokenCache = {
   expires_at: number; // unix seconds
 };
 
-const CACHE_PATH = path.join(process.env.DATA_DIR ?? path.join(process.cwd(), "data"), "ebay_token.json");
+const EBAY_DEFAULT_SCOPE = "https://api.ebay.com/oauth/api_scope";
+const DATA_DIR = process.env.DATA_DIR ?? path.join(process.cwd(), "data");
+const CACHE_PATH = path.join(DATA_DIR, "ebay_token.json");
 const REFRESH_EARLY_SECONDS = 120; // refresh 2 min before expiry
 
-let inMemory: TokenCache | null = null;
-let refreshPromise: Promise<string> | null = null;
+const inMemory = new Map<string, TokenCache>();
+const refreshPromises = new Map<string, Promise<string>>();
 
 function nowSec() {
   return Math.floor(Date.now() / 1000);
@@ -21,22 +23,44 @@ function isValid(t: TokenCache | null) {
   return !!t?.access_token && !!t?.expires_at && t.expires_at - REFRESH_EARLY_SECONDS > nowSec();
 }
 
-function readCache(): TokenCache | null {
+function normalizeScopes(scopes: string | string[] = EBAY_DEFAULT_SCOPE) {
+  const list = Array.isArray(scopes) ? scopes : scopes.split(/\s+/);
+  const unique = Array.from(new Set(list.map((s) => s.trim()).filter(Boolean)));
+  return unique.length ? unique.sort() : [EBAY_DEFAULT_SCOPE];
+}
+
+function scopeKey(scopes: string | string[] = EBAY_DEFAULT_SCOPE) {
+  return normalizeScopes(scopes).join(" ");
+}
+
+function cachePathForScope(key: string) {
+  if (key === EBAY_DEFAULT_SCOPE) return CACHE_PATH;
+
+  const suffix = Buffer.from(key)
+    .toString("base64")
+    .replace(/[^a-zA-Z0-9]/g, "_");
+
+  return path.join(DATA_DIR, `ebay_token_${suffix}.json`);
+}
+
+function readCache(key: string): TokenCache | null {
   try {
-    if (!fs.existsSync(CACHE_PATH)) return null;
-    const raw = fs.readFileSync(CACHE_PATH, "utf8");
+    const cachePath = cachePathForScope(key);
+    if (!fs.existsSync(cachePath)) return null;
+    const raw = fs.readFileSync(cachePath, "utf8");
     return JSON.parse(raw) as TokenCache;
   } catch {
     return null;
   }
 }
 
-function writeCache(t: TokenCache) {
-  fs.mkdirSync(path.dirname(CACHE_PATH), { recursive: true });
-  fs.writeFileSync(CACHE_PATH, JSON.stringify(t, null, 2), "utf8");
+function writeCache(key: string, t: TokenCache) {
+  const cachePath = cachePathForScope(key);
+  fs.mkdirSync(path.dirname(cachePath), { recursive: true });
+  fs.writeFileSync(cachePath, JSON.stringify(t, null, 2), "utf8");
 }
 
-async function fetchNewToken(): Promise<TokenCache> {
+async function fetchNewToken(key: string): Promise<TokenCache> {
   // Use YOUR EXISTING env names so you don't change .env
   const clientId = process.env.EBAY_APP_ID;     // your App ID
   const clientSecret = process.env.EBAY_CERT_ID; // your Cert ID
@@ -55,7 +79,7 @@ async function fetchNewToken(): Promise<TokenCache> {
 
   const body = new URLSearchParams();
   body.set("grant_type", "client_credentials");
-  body.set("scope", "https://api.ebay.com/oauth/api_scope");
+  body.set("scope", key);
 
   const res = await fetch(tokenUrl, {
     method: "POST",
@@ -82,29 +106,34 @@ async function fetchNewToken(): Promise<TokenCache> {
   };
 }
 
-export async function getEbayToken(): Promise<string> {
+export async function getEbayToken(scopes: string | string[] = EBAY_DEFAULT_SCOPE): Promise<string> {
+  const key = scopeKey(scopes);
+
   // 1) memory
-  if (isValid(inMemory)) return inMemory!.access_token;
+  const cachedMemory = inMemory.get(key) ?? null;
+  if (isValid(cachedMemory)) return cachedMemory!.access_token;
 
   // 2) disk cache
-  const cached = readCache();
+  const cached = readCache(key);
   if (isValid(cached)) {
-    inMemory = cached;
+    inMemory.set(key, cached!);
     return cached!.access_token;
   }
 
   // 3) refresh (dedupe concurrent refresh calls)
-  if (!refreshPromise) {
-    refreshPromise = (async () => {
-      const fresh = await fetchNewToken();
-      inMemory = fresh;
-      writeCache(fresh);
+  if (!refreshPromises.has(key)) {
+    const refreshPromise = (async () => {
+      const fresh = await fetchNewToken(key);
+      inMemory.set(key, fresh);
+      writeCache(key, fresh);
       return fresh.access_token;
     })().finally(() => {
-      refreshPromise = null;
+      refreshPromises.delete(key);
     });
+
+    refreshPromises.set(key, refreshPromise);
   }
 
-  return refreshPromise;
+  return refreshPromises.get(key)!;
 }
 

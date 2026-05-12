@@ -13,7 +13,7 @@ export interface AnalysisCacheEntry {
   highlights?: { label: string; positive: boolean }[];
 }
 
-type AnalysisCacheStore = Record<string, AnalysisCacheEntry>;
+export type AnalysisCacheStore = Record<string, AnalysisCacheEntry>;
 
 function readStore(): AnalysisCacheStore {
   try {

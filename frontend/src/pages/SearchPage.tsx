@@ -39,6 +39,7 @@ const SEARCH_TIMESTAMP_KEY = "search:ts";
 const SEARCH_PAGE_KEY = "search:page";
 const SEARCH_FILTERS_KEY = "search:filters";
 const SEARCH_PENDING_KEY = "search:pending";
+const USE_PRICECHARTING_DEBUG_PREFIX = "USE_PRICECHARTING:";
 
 const DEFAULT_FILTERS: FilterState = {
   minPrice: "",
@@ -107,6 +108,29 @@ async function fetchFromApi(
   return data as Listing[];
 }
 
+function appendUsePriceChartingDebugInfo(listing: Listing, usePriceCharting: boolean): Listing {
+  const withoutExistingFlag = (listing.debugInfo ?? "").replace(
+    /\n*\s*USE_PRICECHARTING:\s*(true|false)\s*$/i,
+    ""
+  );
+
+  return {
+    ...listing,
+    debugInfo: `${withoutExistingFlag}${withoutExistingFlag ? "\n\n" : ""}${USE_PRICECHARTING_DEBUG_PREFIX} ${usePriceCharting}`,
+  };
+}
+
+function stripQueryCategoryDebugInfo(listing: Listing): Listing {
+  const cleanedDebugInfo = (listing.debugInfo ?? "").replace(
+    /\n*\s*QUERY CATEGORY:\s*(pokemon|other)\s*$/i,
+    ""
+  );
+  return {
+    ...listing,
+    ...(cleanedDebugInfo ? { debugInfo: cleanedDebugInfo } : { debugInfo: undefined }),
+  };
+}
+
 // ── Analysis pipeline ────────────────────────────────────────────────────────
 // Groups listings by product via context LLM, then batch-analyzes each group
 // in parallel. Calls setListings incrementally as each group resolves.
@@ -116,7 +140,61 @@ async function runAnalysisPipeline(
   setListings: React.Dispatch<React.SetStateAction<Listing[]>>,
   signal: AbortSignal,
 ) {
-  async function retryUnscoredListings(scored: Listing[]): Promise<Listing[]> {
+  let itemsToAnalyze = items;
+
+  try {
+    const cacheRes = await fetch(`${API_BASE}/api/search/cache-lookup`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ listings: items }),
+      signal,
+    });
+    if (cacheRes.ok) {
+      const cacheData = await cacheRes.json();
+      const cachedRows: Array<{ index: number; listing: Listing }> = Array.isArray(cacheData.cached)
+        ? cacheData.cached
+        : [];
+
+      if (cachedRows.length > 0) {
+        const cachedIndexes = new Set(cachedRows.map((row) => row.index));
+        const cachedListings = cachedRows.map((row) => stripQueryCategoryDebugInfo(row.listing));
+
+        for (const listing of cachedListings) publishAnalysisResult(listing);
+
+        setListings((prev) => {
+          const updated = [...prev];
+          for (const cached of cachedListings) {
+            const idx = updated.findIndex((l) => l.id === cached.id && l.source === cached.source);
+            if (idx !== -1) updated[idx] = { ...updated[idx], ...cached, analysisPending: false };
+          }
+          return updated;
+        });
+
+        try {
+          const raw = sessionStorage.getItem(SEARCH_LISTINGS_KEY);
+          if (raw) {
+            const stored: Listing[] = JSON.parse(raw);
+            if (Array.isArray(stored)) {
+              for (const cached of cachedListings) {
+                const idx = stored.findIndex((l) => l.id === cached.id && l.source === cached.source);
+                if (idx !== -1) stored[idx] = { ...stored[idx], ...cached, analysisPending: undefined };
+              }
+              sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(stored));
+            }
+          }
+        } catch { /* ignore sessionStorage errors */ }
+
+        itemsToAnalyze = items.filter((_, index) => !cachedIndexes.has(index));
+      }
+    }
+  } catch (err: unknown) {
+    if ((err as { name?: string })?.name === "AbortError") return;
+    console.error("[analysis] cache lookup failed:", err);
+  }
+
+  if (itemsToAnalyze.length === 0) return;
+
+  async function retryUnscoredListings(scored: Listing[], usePriceCharting: boolean): Promise<Listing[]> {
     const unresolved = scored.filter((l) => l.aiScore == null);
     if (unresolved.length === 0) return scored;
 
@@ -132,7 +210,10 @@ async function runAnalysisPipeline(
           });
           if (!res.ok) return;
           const retried = await res.json() as Listing;
-          repaired.set(`${retried.source}:${retried.id}`, retried);
+          repaired.set(
+            `${retried.source}:${retried.id}`,
+            appendUsePriceChartingDebugInfo(retried, usePriceCharting)
+          );
         } catch {
           // keep original unresolved listing
         }
@@ -153,14 +234,18 @@ async function runAnalysisPipeline(
     systemPrompt?: string;
     priceLow?: number | null;
     priceHigh?: number | null;
+    priceSource?: string | null;
+    priceChartingUrl?: string | null;
+    tcgPlayerUrl?: string | null;
     estimatedShippingPrice?: number | null;
+    usePriceCharting?: boolean;
   }>;
 
   try {
     const ctxRes = await fetch(`${API_BASE}/api/search/context`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query, listings: items }),
+      body: JSON.stringify({ query, listings: itemsToAnalyze }),
       signal,
     });
     if (!ctxRes.ok) throw new Error(`context HTTP ${ctxRes.status}`);
@@ -170,12 +255,12 @@ async function runAnalysisPipeline(
     if ((err as { name?: string })?.name === "AbortError") return;
     console.error("[analysis] context call failed:", err);
     // Fallback: one group with no context
-    groups = [{ canonicalName: query, specificity: "broad", indices: items.map((_, i) => i), context: null }];
+    groups = [{ canonicalName: query, specificity: "broad", indices: itemsToAnalyze.map((_, i) => i), context: null }];
   }
 
   // 2. Analyze each group in parallel — update state as each one resolves
   const coveredIndices = new Set(groups.flatMap((g) => g.indices));
-  const orphanIndices = items.map((_, i) => i).filter((i) => !coveredIndices.has(i));
+  const orphanIndices = itemsToAnalyze.map((_, i) => i).filter((i) => !coveredIndices.has(i));
   if (orphanIndices.length > 0) {
     // LLM omitted these indices from all groups — append a catch-all group with no context
     groups = [...groups, { canonicalName: "", specificity: "broad", indices: orphanIndices, context: null }];
@@ -184,7 +269,7 @@ async function runAnalysisPipeline(
   await Promise.all(
     groups.map(async (group) => {
       const groupListings = group.indices
-        .map((i) => items[i])
+        .map((i) => itemsToAnalyze[i])
         .filter(Boolean);
 
       if (groupListings.length === 0) return;
@@ -202,19 +287,32 @@ async function runAnalysisPipeline(
         const res = await fetch(`${API_BASE}/api/search/batch-analyze`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ listings: patchedListings, systemPrompt: group.systemPrompt, priceLow: group.priceLow ?? null, priceHigh: group.priceHigh ?? null }),
+          body: JSON.stringify({
+            listings: patchedListings,
+            systemPrompt: group.systemPrompt,
+            priceLow: group.priceLow ?? null,
+            priceHigh: group.priceHigh ?? null,
+            priceSource: group.priceSource ?? null,
+            priceChartingUrl: group.priceChartingUrl ?? null,
+            tcgPlayerUrl: group.tcgPlayerUrl ?? null,
+          }),
           signal,
         });
         if (!res.ok) throw new Error(`batch-analyze HTTP ${res.status}`);
         const scored: Listing[] = await res.json();
-        const stabilized = await retryUnscoredListings(scored);
+        const stabilized = (await retryUnscoredListings(scored, group.usePriceCharting === true)).map((listing) =>
+          appendUsePriceChartingDebugInfo(listing, group.usePriceCharting === true)
+        );
 
         if (signal.aborted) return;
 
-        // Attach price range from the context group onto every scored listing
+        // Attach price range and source from the context group onto every scored listing
         const priceRange: Partial<Listing> = {};
-        if (group.priceLow  != null) priceRange.priceLow  = group.priceLow;
-        if (group.priceHigh != null) priceRange.priceHigh = group.priceHigh;
+        if (group.priceLow         != null) priceRange.priceLow         = group.priceLow;
+        if (group.priceHigh        != null) priceRange.priceHigh        = group.priceHigh;
+        if (group.priceSource      != null) priceRange.priceSource      = group.priceSource;
+        if (group.priceChartingUrl != null) priceRange.priceChartingUrl = group.priceChartingUrl;
+        if (group.tcgPlayerUrl     != null) priceRange.tcgPlayerUrl     = group.tcgPlayerUrl;
 
         // Persist to sessionStorage directly — this runs even if SearchPage is
         // unmounted (e.g. user navigated to a listing while analysis was running).
@@ -225,7 +323,10 @@ async function runAnalysisPipeline(
             if (Array.isArray(stored)) {
               for (const s of stabilized) {
                 const idx = stored.findIndex((l) => l.id === s.id && l.source === s.source);
-                if (idx !== -1) stored[idx] = { ...s, ...priceRange, analysisPending: undefined };
+                if (idx !== -1) stored[idx] = {
+                  ...stripQueryCategoryDebugInfo({ ...s, ...priceRange } as Listing),
+                  analysisPending: undefined,
+                };
               }
               sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(stored));
             }
@@ -400,7 +501,10 @@ export default function SearchPage() {
             overview: saved.overview,
             priceLow: saved.priceLow,
             priceHigh: saved.priceHigh,
-            debugInfo: saved.debugInfo,
+            priceSource: saved.priceSource,
+            priceChartingUrl: saved.priceChartingUrl,
+            tcgPlayerUrl: saved.tcgPlayerUrl,
+            debugInfo: stripQueryCategoryDebugInfo(saved).debugInfo,
             rawAnalysis: saved.rawAnalysis,
             marketContext: saved.marketContext,
             systemPrompt: saved.systemPrompt,
@@ -475,7 +579,7 @@ export default function SearchPage() {
         setHasMore(items.length >= fetchSize);
 
         sessionStorage.setItem(SEARCH_QUERY_KEY, q);
-        sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(items));
+        sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(items.map(stripQueryCategoryDebugInfo)));
         sessionStorage.setItem(SEARCH_TIMESTAMP_KEY, Date.now().toString());
         sessionStorage.setItem(SEARCH_PAGE_KEY, "1");
 
@@ -522,7 +626,7 @@ export default function SearchPage() {
         const targetPage = Math.min(nextPage, newTotalPages);
         setPage(targetPage);
         sessionStorage.setItem(SEARCH_PAGE_KEY, String(targetPage));
-        sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(combined));
+        sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(combined.map(stripQueryCategoryDebugInfo)));
 
         startAnalysis(queryRef.current, newItems.slice(0, PAGE_SIZE));
       } catch (err) {
@@ -587,7 +691,7 @@ export default function SearchPage() {
       if (savedQuery) { setInitialQuery(savedQuery); setCurrentQuery(savedQuery); }
       if (savedPage) setPage(Number(savedPage) || 1);
       if (savedRaw) {
-        const parsed = JSON.parse(savedRaw) as Listing[];
+        const parsed = (JSON.parse(savedRaw) as Listing[]).map(stripQueryCategoryDebugInfo);
         if (Array.isArray(parsed)) {
           setListings(parsed);
           // Re-subscribe to analysis results for items that had no score when we
@@ -643,7 +747,9 @@ export default function SearchPage() {
 
   // Persist scored listings to the search cache as they arrive
   useEffect(() => {
-    const scored = listings.filter((l) => l.aiScore != null && !l.analysisPending);
+    const scored = listings
+      .filter((l) => l.aiScore != null && !l.analysisPending)
+      .map(stripQueryCategoryDebugInfo);
     if (scored.length > 0) addToSearchCache(scored);
   }, [listings]);
 

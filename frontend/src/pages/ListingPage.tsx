@@ -50,6 +50,16 @@ function sanitizeVisibleText(value?: string | null) {
   return normalized;
 }
 
+function extractUsePriceChartingDebugLine(value?: string | null) {
+  if (!value) return null;
+  const match = value.match(/USE_PRICECHARTING:\s*(true|false)/i);
+  return match ? `USE_PRICECHARTING: ${match[1].toLowerCase()}` : null;
+}
+
+function usesPriceChartingDebugFlag(value?: string | null) {
+  return /USE_PRICECHARTING:\s*true/i.test(value ?? "");
+}
+
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 const SEARCH_LISTINGS_KEY = "search:listings";
 
@@ -436,7 +446,14 @@ export default function ListingPage() {
         throw new Error(body?.error ?? `HTTP ${res.status}`);
       }
       const data = await res.json();
-      const enriched: Listing = { ...listing, ...data, analyzedAt: undefined };
+      const usePriceChartingDebugLine = extractUsePriceChartingDebugLine(listing.debugInfo);
+      const mergedDebugInfo = [data.debugInfo, usePriceChartingDebugLine].filter(Boolean).join("\n\n");
+      const enriched: Listing = {
+        ...listing,
+        ...data,
+        ...(mergedDebugInfo ? { debugInfo: mergedDebugInfo } : {}),
+        analyzedAt: undefined,
+      };
       const withTs = { ...enriched, analyzedAt: data.analyzedAt ?? new Date().toISOString() };
       targetScoreRef.current = data.aiScore ?? 0;
       setAnalysisResult(withTs);
@@ -551,6 +568,11 @@ export default function ListingPage() {
   const currentImage = getHighResImage(images[safeIndex] ?? "", listing.source);
 
   const ai          = analysisResult ?? listing;
+  const priceChartingUrl = ai.priceChartingUrl ?? null;
+  const tcgPlayerUrl = ai.tcgPlayerUrl ?? null;
+  const showPriceSourceLinks =
+    (ai.priceSource === "PRICECHARTING/TCGPLAYER" || usesPriceChartingDebugFlag(ai.debugInfo))
+    && (priceChartingUrl !== null || tcgPlayerUrl !== null);
   const targetScore = ai.aiScore ?? 0;
   const fillProgress = targetScore > 0
     ? Math.min(fillValue / targetScore, 1)
@@ -715,20 +737,22 @@ export default function ListingPage() {
                   return (
                     <div
                       className={`demo-score-bar-wrap${analysisPhase !== "done" ? " demo-score-bar-wrap--pending" : ""}`}
-                      style={{ marginTop: "30px" }}
+                      style={{ marginTop: "6px" }}
                     >
                       {(() => {
                         const done = analysisPhase === "done" && listing.price != null && ai.priceLow != null && ai.priceHigh != null;
                         const badge = done ? getPriceBadge(listing.price!, ai.priceLow!, ai.priceHigh!) : null;
                         return (
-                          <div
-                            className="demo-score-bar-title"
-                            style={badge ? { color: badge.color, background: badge.bg, borderColor: `${badge.color}48` } : undefined}
-                          >
-                            {badge?.label === "GREAT PRICE" && <StarSparkles />}
-                            {badge?.label === "GOOD PRICE" && <GoodStarSparkles />}
-                            {badge?.label === "FAIR PRICE" && <FairStarSparkles />}
-                            {badge ? badge.label : "Price Data"}
+                          <div style={{ display: "flex", flexDirection: "column", gap: "6px", alignItems: "flex-start" }}>
+                            <div
+                              className="demo-score-bar-title"
+                              style={badge ? { color: badge.color, background: badge.bg, borderColor: `${badge.color}48` } : undefined}
+                            >
+                              {badge?.label === "GREAT PRICE" && <StarSparkles />}
+                              {badge?.label === "GOOD PRICE" && <GoodStarSparkles />}
+                              {badge?.label === "FAIR PRICE" && <FairStarSparkles />}
+                              {badge ? badge.label : "Price Data"}
+                            </div>
                           </div>
                         );
                       })()}
@@ -750,6 +774,45 @@ export default function ListingPage() {
                           <span className="demo-score-label-end" style={{ left: `${highPct}%` }}>High · ${ai.priceHigh}</span>
                         </div>
                       </div>
+                      {showPriceSourceLinks && (priceChartingUrl || tcgPlayerUrl) && (
+                        <div className="market-price-sources">
+                          <span className="market-price-sources__label">Sources</span>
+                          <div className="market-price-links">
+                            {priceChartingUrl && (
+                              <a
+                                className="price-source-chip"
+                                href={priceChartingUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                title="View on PriceCharting"
+                              >
+                                <img
+                                  src="https://www.google.com/s2/favicons?domain=pricecharting.com&sz=32"
+                                  alt=""
+                                  className="price-source-chip__icon"
+                                />
+                                <span>PriceCharting</span>
+                              </a>
+                            )}
+                            {tcgPlayerUrl && (
+                              <a
+                                className="price-source-chip"
+                                href={tcgPlayerUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                title="View on TCGPlayer"
+                              >
+                                <img
+                                  src="https://www.google.com/s2/favicons?domain=tcgplayer.com&sz=32"
+                                  alt=""
+                                  className="price-source-chip__icon"
+                                />
+                                <span>TCGPlayer</span>
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   );
                 })()}

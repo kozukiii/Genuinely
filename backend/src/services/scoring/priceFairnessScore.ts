@@ -34,7 +34,7 @@ function extractPrices(text: string): number[] {
  * Filters outliers so a graded/premium price mention doesn't skew the range
  * for a raw/ungraded listing.
  */
-function extractPriceRange(context: string): [number, number] | null {
+export function extractPriceRange(context: string): [number, number] | null {
   const prices = extractPrices(context);
   if (prices.length < 2) return null;
 

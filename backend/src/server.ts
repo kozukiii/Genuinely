@@ -5,6 +5,7 @@ import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import passport from "passport";
+import helmet from "helmet";
 import { rateLimit } from "express-rate-limit";
 import searchRoutes from "./routes/searchRoutes";
 import imageProxyRoutes from "./routes/imageProxyRoutes";
@@ -19,6 +20,11 @@ app.disable("x-powered-by");
 app.set("trust proxy", 1); // Render sits behind a load balancer that sets X-Forwarded-For
 
 const allowedOrigins = (process.env.ALLOWED_ORIGIN ?? "http://localhost:5173").split(",").map(s => s.trim());
+const trustedCsrfOrigins = new Set([
+  ...allowedOrigins,
+  ...(process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : []),
+].filter(Boolean));
+
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin || allowedOrigins.includes(origin)) callback(null, true);
@@ -26,6 +32,37 @@ app.use(cors({
   },
   credentials: true,
 }));
+
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+}));
+
+app.use((req, res, next) => {
+  if (["GET", "HEAD", "OPTIONS"].includes(req.method)) {
+    next();
+    return;
+  }
+
+  const source = req.headers.origin ?? req.headers.referer;
+  const sourceValue = Array.isArray(source) ? source[0] : source;
+
+  if (!sourceValue && process.env.NODE_ENV !== "production") {
+    next();
+    return;
+  }
+
+  try {
+    const sourceOrigin = sourceValue ? new URL(sourceValue).origin : "";
+    if (trustedCsrfOrigins.has(sourceOrigin)) {
+      next();
+      return;
+    }
+  } catch {
+    // Fall through to rejection.
+  }
+
+  res.status(403).json({ error: "Untrusted request origin" });
+});
 
 const limiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute

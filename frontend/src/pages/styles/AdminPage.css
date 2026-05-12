@@ -131,6 +131,141 @@
   background: #1e2a1e;
 }
 
+.admin-back-link {
+  display: inline-flex;
+  margin-bottom: 1rem;
+  color: #999;
+  font-size: 0.85rem;
+  text-decoration: none;
+}
+
+.admin-back-link:hover {
+  color: #fff;
+}
+
+.admin-tool-panel {
+  background: #151515;
+  border: 1px solid #2a2a2a;
+  border-radius: 8px;
+  padding: 1.25rem;
+}
+
+.admin-search-form {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.admin-field-label {
+  color: #aaa;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.admin-search-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.75rem;
+}
+
+.admin-text-input {
+  min-width: 0;
+  height: 44px;
+  border: 1px solid #333;
+  border-radius: 8px;
+  background: #0f0f0f;
+  color: #fff;
+  font: inherit;
+  padding: 0 0.9rem;
+}
+
+.admin-text-input:focus {
+  border-color: #3dff8f;
+  outline: none;
+}
+
+.admin-primary-button {
+  height: 44px;
+  border: 0;
+  border-radius: 8px;
+  background: #3dff8f;
+  color: #08140c;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  padding: 0 1rem;
+  white-space: nowrap;
+}
+
+.admin-primary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.admin-result-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.admin-price-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.admin-price-stat {
+  border: 1px solid #2a2a2a;
+  border-radius: 8px;
+  background: #1a1a1a;
+  padding: 0.9rem;
+}
+
+.admin-price-label,
+.admin-sold-meta {
+  color: #777;
+  font-size: 0.75rem;
+}
+
+.admin-price-value {
+  display: block;
+  margin-top: 0.3rem;
+  color: #fff;
+  font-size: 1.2rem;
+  font-weight: 700;
+}
+
+.admin-sold-list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.admin-sold-row {
+  display: grid;
+  gap: 0.25rem;
+  border: 1px solid #242424;
+  border-radius: 8px;
+  background: #141414;
+  color: inherit;
+  padding: 0.85rem;
+  text-decoration: none;
+}
+
+.admin-sold-row:hover {
+  border-color: #3dff8f;
+}
+
+.admin-sold-title {
+  color: #eee;
+  font-size: 0.9rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
 .admin-forbidden,
 .admin-error,
 .admin-empty {
@@ -139,3 +274,161 @@
 }
 
 .admin-error { color: #ff5555; }
+
+.admin-debug-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.admin-debug-table th {
+  text-align: left;
+  color: #777;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid #2a2a2a;
+}
+
+.admin-debug-table td {
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid #1e1e1e;
+  color: #ddd;
+  vertical-align: top;
+}
+
+.admin-debug-table td:first-child {
+  width: 74px;
+}
+
+.admin-debug-table td:nth-child(2) {
+  width: 50%;
+}
+
+.admin-debug-table td:last-child {
+  color: #555;
+}
+
+.admin-debug-loading {
+  color: #555;
+}
+
+.admin-debug-thumb {
+  display: block;
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+  border: 1px solid #2a2a2a;
+  border-radius: 6px;
+  background: #111;
+}
+
+.admin-debug-found,
+.admin-debug-notfound {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.admin-debug-queries {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.admin-debug-ximilar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin-bottom: 0.25rem;
+}
+
+.admin-debug-lines {
+  margin-top: 0.35rem;
+  color: #aaa;
+  font-size: 0.75rem;
+}
+
+.admin-debug-lines summary {
+  cursor: pointer;
+  color: #777;
+}
+
+.admin-debug-lines pre {
+  max-width: 420px;
+  max-height: 180px;
+  overflow: auto;
+  margin: 0.35rem 0 0;
+  padding: 0.5rem;
+  border: 1px solid #2a2a2a;
+  border-radius: 6px;
+  background: #0f0f0f;
+  color: #aaa;
+  white-space: pre-wrap;
+}
+
+.admin-debug-check {
+  color: #3dff8f;
+  font-weight: 700;
+  text-decoration: none;
+  flex-shrink: 0;
+}
+
+.admin-debug-check:hover {
+  text-decoration: underline;
+}
+
+.admin-debug-grade {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #f0c040;
+  margin-left: 6px;
+}
+
+.admin-debug-x {
+  color: #ff5555;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.admin-debug-query {
+  color: #888;
+  font-size: 0.8rem;
+}
+
+.admin-debug-query--link {
+  color: #888;
+  text-decoration: none;
+}
+
+.admin-debug-query--link:hover {
+  color: #ccc;
+  text-decoration: underline;
+}
+
+.admin-debug-query--matched {
+  color: #fff;
+  font-weight: 600;
+}
+
+.admin-debug-query--dim {
+  color: #444;
+}
+
+.admin-debug-table tr:last-child td {
+  border-bottom: none;
+}
+
+@media (max-width: 720px) {
+  .admin-search-row,
+  .admin-price-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-result-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

@@ -7,6 +7,10 @@ import type { Listing } from "../types/listing";
 const EBAY_SEARCH = "https://api.ebay.com/buy/browse/v1/item_summary/search";
 const EBAY_ITEM = "https://api.ebay.com/buy/browse/v1/item";
 const EBAY_RATE_LIMITS = "https://api.ebay.com/developer/analytics/v1_beta/rate_limit/";
+const EBAY_DEFAULT_SCOPE = "https://api.ebay.com/oauth/api_scope";
+const EBAY_MARKETPLACE_INSIGHTS_SCOPE =
+  process.env.EBAY_MARKETPLACE_INSIGHTS_SCOPE ??
+  "https://api.ebay.com/oauth/api_scope/buy.marketplace.insights";
 
 /**
  * We keep Listing as the public contract, but we preserve extra metadata
@@ -65,6 +69,34 @@ function formatItemLocation(loc: any): string | undefined {
   const parts = [city, state, country].filter(Boolean).map(String);
   return parts.length ? parts.join(", ") : undefined;
 }
+
+function getEbayApiRoot() {
+  const env = (process.env.EBAY_ENVIRONMENT || "production").toLowerCase();
+  return env === "sandbox" ? "https://api.sandbox.ebay.com" : "https://api.ebay.com";
+}
+
+function extractSoldPrice(item: any): number {
+  return (
+    toNumberPrice(item?.price) ||
+    toNumberPrice(item?.soldPrice) ||
+    toNumberPrice(item?.itemPrice) ||
+    toNumberPrice(item?.currentBidPrice) ||
+    toNumberPrice(item?.lastSoldPrice) ||
+    0
+  );
+}
+
+function extractSoldCurrency(item: any): string {
+  return (
+    toStringCurrency(item?.price) ||
+    toStringCurrency(item?.soldPrice) ||
+    toStringCurrency(item?.itemPrice) ||
+    toStringCurrency(item?.currentBidPrice) ||
+    toStringCurrency(item?.lastSoldPrice) ||
+    "USD"
+  );
+}
+
 
 function extractConditionDescriptor(item: any): string | undefined {
   // eBay sometimes has conditionDescriptor or conditionDescriptors array
@@ -409,3 +441,4 @@ export async function getEbayRateLimits() {
 
   return res.json();
 }
+

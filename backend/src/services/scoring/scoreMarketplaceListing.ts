@@ -1,6 +1,7 @@
 import { analyzeMarketplaceListingWithImages, batchAnalyzeMarketplaceListingsWithImages, MARKETPLACE_BATCH_SYSTEM_PROMPT } from "../../ai/marketplaceOverview";
 import { extractStructuredAnalysis } from "../../utils/extractStructuredAnalysis";
 import { calculatePriceFairness, isAcceptsOffersPrice } from "./priceFairnessScore";
+import { setCachedAnalysis, setCachedAnalysisBatch } from "../analysisCache";
 
 function average(nums: Array<number | null | undefined>) {
   const valid = nums.filter((n): n is number => typeof n === "number" && !isNaN(n));
@@ -63,7 +64,7 @@ export async function scoreMarketplaceListing(listing: any, context?: string | n
 
   const aiScore = average(scoreValues);
 
-  return {
+  const result = {
     ...listing,
     acceptsOffers,
     aiScore,
@@ -75,6 +76,17 @@ export async function scoreMarketplaceListing(listing: any, context?: string | n
     marketContext: context ?? undefined,
     systemPrompt: MARKETPLACE_BATCH_SYSTEM_PROMPT,
   };
+
+  if (listing.id && listing.source) {
+    setCachedAnalysis(listing.source, listing.id, {
+      aiScore: result.aiScore,
+      aiScores: result.aiScores,
+      overview: result.overview,
+      highlights: result.highlights,
+    });
+  }
+
+  return result;
 }
 
 function parseMarketplaceAnalysis(listing: any, analysis: string, context?: string | null, priceLow?: number | null, priceHigh?: number | null) {
@@ -120,9 +132,35 @@ function parseMarketplaceAnalysis(listing: any, analysis: string, context?: stri
 
 export async function scoreMarketplaceListings(listings: any[], context?: string | null, systemPrompt?: string | null, priceLow?: number | null, priceHigh?: number | null) {
   if (listings.length === 0) return [];
+
+  const resultMap = new Map<number, any>();
   const rawStrings = await batchAnalyzeMarketplaceListingsWithImages(listings, context, systemPrompt);
-  return listings.map((listing, i) => ({
-    ...parseMarketplaceAnalysis(listing, rawStrings[i], context, priceLow, priceHigh),
-    systemPrompt: systemPrompt ?? MARKETPLACE_BATCH_SYSTEM_PROMPT,
-  }));
+  const toCache: Parameters<typeof setCachedAnalysisBatch>[0] = [];
+
+  for (let i = 0; i < listings.length; i++) {
+    const listing = listings[i];
+    const parsed = parseMarketplaceAnalysis(listing, rawStrings[i], context, priceLow, priceHigh);
+    const result = {
+      ...parsed,
+      systemPrompt: systemPrompt ?? MARKETPLACE_BATCH_SYSTEM_PROMPT,
+    };
+
+    resultMap.set(i, result);
+    if (listing.id && listing.source) {
+      toCache.push({
+        source: listing.source,
+        id: listing.id,
+        result: {
+          aiScore: result.aiScore,
+          aiScores: result.aiScores,
+          overview: result.overview,
+          highlights: result.highlights,
+        },
+      });
+    }
+  }
+
+  setCachedAnalysisBatch(toCache);
+
+  return listings.map((_, i) => resultMap.get(i) ?? listings[i]);
 }

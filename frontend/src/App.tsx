@@ -13,6 +13,8 @@ import ListingPage from "./pages/ListingPage";
 import ListingCardDemo from "./pages/ListingCardDemo";
 import SearchPageDemo from "./pages/SearchPageDemo";
 import AdminPage from "./pages/AdminPage";
+import EbaySoldPricesPage from "./pages/EbaySoldPricesPage";
+import PriceChartingDebugPage from "./pages/PriceChartingDebugPage";
 
 import "./pages/styles/HomePage.css";
 
@@ -40,6 +42,8 @@ function AppRoutes() {
       <Route path="/listingcard-demo" element={<ListingCardDemo />} />
       <Route path="/search-demo" element={<SearchPageDemo />} />
       <Route path="/admin" element={<AdminPage />} />
+      <Route path="/admin/ebay-sold-prices" element={<EbaySoldPricesPage />} />
+      <Route path="/admin/pricecharting-debug" element={<PriceChartingDebugPage />} />
     </Routes>
   );
 }

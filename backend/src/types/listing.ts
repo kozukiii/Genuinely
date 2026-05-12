@@ -75,6 +75,9 @@ export interface Listing {
   // Market price range from context analysis
   priceLow?: number;
   priceHigh?: number;
+  priceSource?: string;
+  priceChartingUrl?: string;
+  tcgPlayerUrl?: string;
 
   // At-a-glance highlights (positive/negative quick facts)
   highlights?: { label: string; positive: boolean }[];

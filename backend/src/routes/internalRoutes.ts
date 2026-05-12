@@ -1,6 +1,8 @@
 import { Router } from "express";
 import { requireAuth, requireAdmin } from "../middleware/auth";
+import { fetchPriceChartingData, findPriceChartingMatch } from "../priceSources/priceCharting";
 import { getUsageSummary } from "../services/usageLogger";
+import { searchEbayNormalized } from "../services/ebayService";
 
 const router = Router();
 
@@ -146,6 +148,65 @@ router.get("/usage", async (_req, res) => {
   const groq = fetchGroqUsage();
 
   res.json({ providers: [serper, groq, proxycheap] });
+});
+
+router.get("/ebay/sold-prices", async (req, res) => {
+  const query = typeof req.query.query === "string" ? req.query.query.trim() : "";
+  const limitParam = typeof req.query.limit === "string" ? Number(req.query.limit) : 50;
+  const marketplaceId = typeof req.query.marketplaceId === "string" && req.query.marketplaceId.trim()
+    ? req.query.marketplaceId.trim()
+    : "EBAY_US";
+
+  if (!query) {
+    return res.status(400).json({ error: "Missing query parameter" });
+  }
+
+  try {
+    const data = await fetchPriceChartingData(query, limitParam, marketplaceId);
+    return res.json(data);
+  } catch (err: any) {
+    console.error("eBay sold prices error:", err);
+    const message = err?.message ?? "Failed to fetch eBay sold prices";
+    return res.status(500).json({ error: message });
+  }
+});
+
+router.get("/pricecharting/match-title", async (req, res) => {
+  const title = typeof req.query.title === "string" ? req.query.title.trim() : "";
+  if (!title) return res.status(400).json({ error: "Missing title parameter" });
+
+  try {
+    console.log(`[pricecharting-debug] match-title title="${title}"`);
+    const result = await findPriceChartingMatch(title);
+    console.log(`[pricecharting-debug] result found=${result.found} candidates=${result.attemptedQueries.length}`);
+    result.debugLines?.forEach((line) => console.log(`[pricecharting-debug] ${line}`));
+    return res.json(result);
+  } catch (err: any) {
+    const message = err?.message ?? "Match failed";
+    console.error("[pricecharting-debug] match-title error:", message);
+    return res.status(500).json({ error: message, debugLines: [message] });
+  }
+});
+
+router.get("/ebay/listing-titles", async (req, res) => {
+  const query = typeof req.query.query === "string" ? req.query.query.trim() : "";
+  const limit = typeof req.query.limit === "string" ? Math.min(Number(req.query.limit) || 50, 100) : 50;
+
+  if (!query) return res.status(400).json({ error: "Missing query parameter" });
+
+  try {
+    const listings = await searchEbayNormalized(query, limit);
+    console.log(`[pricecharting-debug] ebay/listing-titles query="${query}" returned=${listings.length}`);
+    return res.json({
+      titles: listings.map((listing) => ({
+        id: listing.id,
+        title: listing.title,
+        imageUrl: listing.images[0] ?? null,
+      })),
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message ?? "Failed to fetch eBay listings" });
+  }
 });
 
 export default router;

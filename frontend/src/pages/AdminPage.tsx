@@ -96,6 +96,14 @@ export default function AdminPage() {
             <span className="admin-card-name">Search Page Demo</span>
             <span className="admin-card-note">16 mixed listings, all scored 100</span>
           </Link>
+          <Link to="/admin/ebay-sold-prices" className="admin-card admin-card--link">
+            <span className="admin-card-name">PriceCharting Market Price Lookup</span>
+            <span className="admin-card-note">Current market range by search term</span>
+          </Link>
+          <Link to="/admin/pricecharting-debug" className="admin-card admin-card--link">
+            <span className="admin-card-name">PriceCharting Debug</span>
+            <span className="admin-card-note">Debug PriceCharting queries</span>
+          </Link>
         </div>
       </section>
 

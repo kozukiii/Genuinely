@@ -2,6 +2,8 @@ import OpenAI from "openai";
 import fetch from "node-fetch";
 import dotenv from "dotenv";
 import { logUsage } from "../services/usageLogger";
+import { findPriceChartingMatch } from "../priceSources/priceCharting";
+import { extractPriceRange } from "../services/scoring/priceFairnessScore";
 
 dotenv.config({ quiet: true });
 
@@ -22,6 +24,10 @@ export interface ProductGroup {
   priceLow: number | null;
   priceHigh: number | null;
   estimatedShippingPrice: number | null;
+  usePriceCharting: boolean;
+  priceSource: string | null;
+  priceChartingUrl: string | null;
+  tcgPlayerUrl: string | null;
 }
 
 interface RawGroup {
@@ -321,6 +327,7 @@ OUTPUT FORMAT — use exactly this structure, nothing else:
 
 PRICE_LOW: <integer USD, e.g. 450, or null>
 PRICE_HIGH: <integer USD, e.g. 700, or null>
+USE_PRICECHARTING: <true or false>
 ---
 <the full expert system prompt starts here>
 
@@ -372,6 +379,7 @@ RULES:
 - Draw on your own product knowledge where search data is thin
 - Everything after --- is plain prose and lists — no JSON, no markdown headers, no code blocks
 - PRICE_LOW and PRICE_HIGH are plain integers, e.g. 450, or the word null
+- USE_PRICECHARTING must be true for video games and TCG cards. Use false for everything else.
 `.trim();
 
 function parsePriceValue(raw: string): number | null {
@@ -381,10 +389,11 @@ function parsePriceValue(raw: string): number | null {
   return isNaN(v) ? null : v;
 }
 
-function parseEngineeredOutput(raw: string): { systemPrompt: string | null; priceLow: number | null; priceHigh: number | null } {
+function parseEngineeredOutput(raw: string): { systemPrompt: string | null; priceLow: number | null; priceHigh: number | null; usePriceCharting: boolean } {
   const lines = raw.split("\n");
   let priceLow: number | null = null;
   let priceHigh: number | null = null;
+  let usePriceCharting = false;
   let dividerIdx = -1;
 
   for (let i = 0; i < lines.length; i++) {
@@ -395,6 +404,9 @@ function parseEngineeredOutput(raw: string): { systemPrompt: string | null; pric
       priceLow = parsePriceValue(line.slice(line.indexOf(":") + 1).trim());
     } else if (upper.startsWith("PRICE_HIGH:")) {
       priceHigh = parsePriceValue(line.slice(line.indexOf(":") + 1).trim());
+    } else if (upper.startsWith("USE_PRICECHARTING:")) {
+      const value = line.slice(line.indexOf(":") + 1).trim().toLowerCase();
+      usePriceCharting = value === "true";
     } else if (line === "---") {
       dividerIdx = i;
       break;
@@ -414,13 +426,13 @@ function parseEngineeredOutput(raw: string): { systemPrompt: string | null; pric
       lines.slice(0, Math.min(dividerIdx >= 0 ? dividerIdx : 5, 5)).join("\n"));
   }
 
-  return { systemPrompt, priceLow, priceHigh };
+  return { systemPrompt, priceLow, priceHigh, usePriceCharting };
 }
 
 async function engineerPrompt(
   canonicalName: string,
   marketData: string,
-): Promise<{ systemPrompt: string | null; priceLow: number | null; priceHigh: number | null }> {
+): Promise<{ systemPrompt: string | null; priceLow: number | null; priceHigh: number | null; usePriceCharting: boolean }> {
   try {
     console.log(`[engineerPrompt] → "${canonicalName}" (market data: ${marketData.length} chars)`);
     const response = await groq.chat.completions.create({
@@ -435,11 +447,11 @@ async function engineerPrompt(
     logUsage("groq", "llama-3.1-8b-instant", response.usage);
 
     const result = parseEngineeredOutput((response.choices[0].message.content ?? "").trim());
-    console.log(`[engineerPrompt] ✓ "${canonicalName}" — priceLow=${result.priceLow} priceHigh=${result.priceHigh} systemPrompt=${result.systemPrompt ? result.systemPrompt.length + " chars" : "null"}`);
+    console.log(`[engineerPrompt] ✓ "${canonicalName}" — priceLow=${result.priceLow} priceHigh=${result.priceHigh} usePriceCharting=${result.usePriceCharting} systemPrompt=${result.systemPrompt ? result.systemPrompt.length + " chars" : "null"}`);
     return result;
   } catch (err) {
     console.error(`[listingContext] Prompt engineering failed for "${canonicalName}":`, err);
-    return { systemPrompt: null, priceLow: null, priceHigh: null };
+    return { systemPrompt: null, priceLow: null, priceHigh: null, usePriceCharting: false };
   }
 }
 
@@ -577,15 +589,101 @@ export async function groupAndContextualize(
             priceLow: null,
             priceHigh: null,
             estimatedShippingPrice,
+            usePriceCharting: false,
+            priceSource: null,
+            priceChartingUrl: null,
+            tcgPlayerUrl: null,
           };
         }
 
-        const { systemPrompt, priceLow: groqPriceLow, priceHigh: groqPriceHigh } = await engineerPrompt(group.canonicalName, marketData);
+        const {
+          systemPrompt: rawSystemPrompt,
+          priceLow: groqPriceLow,
+          priceHigh: groqPriceHigh,
+          usePriceCharting,
+        } = await engineerPrompt(group.canonicalName, marketData);
 
-        // Serper is primary; Groq extraction is fallback for when snippets had no clear dollar amounts
-        const priceLow = serperPrices.priceLow ?? groqPriceLow;
-        const priceHigh = serperPrices.priceHigh ?? groqPriceHigh;
-        console.log(`[group] "${group.canonicalName}" — priceLow=${priceLow} priceHigh=${priceHigh} (serper: ${serperPrices.priceLow}/${serperPrices.priceHigh}, groq: ${groqPriceLow}/${groqPriceHigh})`);
+        let systemPrompt = rawSystemPrompt;
+        let priceLow = serperPrices.priceLow ?? groqPriceLow;
+        let priceHigh = serperPrices.priceHigh ?? groqPriceHigh;
+        let priceSource: string | null = priceLow != null || priceHigh != null ? "SERPER" : null;
+        let priceChartingUrl: string | null = null;
+        let tcgPlayerUrl: string | null = null;
+
+        if (usePriceCharting) {
+          try {
+            const pcTitle = titles[group.indices[0]] ?? group.canonicalName;
+            const pcMatch = await findPriceChartingMatch(pcTitle);
+            if (pcMatch.found && pcMatch.url) {
+              priceChartingUrl = pcMatch.url;
+              const isGraded = pcMatch.grade != null;
+
+              if (!isGraded) tcgPlayerUrl = pcMatch.tcgPlayerUrl ?? null;
+
+              let hasPrices = false;
+              if (isGraded) {
+                // priceLow = 75% of the way from TCGPlayer raw toward graded price
+                // priceHigh = graded price
+                const gradedPrice = pcMatch.gradedPrice ?? pcMatch.price;
+                const rawPrice = pcMatch.tcgPlayerPrice;
+                if (gradedPrice != null) {
+                  priceHigh = gradedPrice;
+                  priceLow = rawPrice != null
+                    ? Math.round((rawPrice + 0.75 * (gradedPrice - rawPrice)) * 100) / 100
+                    : gradedPrice;
+                  hasPrices = true;
+                }
+              } else {
+                // priceLow = PriceCharting loose, priceHigh = TCGPlayer market price.
+                // Both are authoritative sources — don't let Serper override them.
+                if (pcMatch.price != null && pcMatch.tcgPlayerPrice != null) {
+                  priceLow = Math.min(pcMatch.price, pcMatch.tcgPlayerPrice);
+                  priceHigh = Math.max(pcMatch.price, pcMatch.tcgPlayerPrice);
+                  hasPrices = true;
+                } else if (pcMatch.price != null) {
+                  // TCGPlayer unavailable — PC price is the only anchor, keep Serper range
+                  priceLow = pcMatch.price;
+                  // priceHigh stays from Serper/Groq (already set above)
+                  hasPrices = priceHigh != null;
+                }
+              }
+
+              if (hasPrices) {
+                priceSource = isGraded ? "PRICECHARTING_GRADED" : "PRICECHARTING/TCGPLAYER";
+
+                if (systemPrompt) {
+                  let pcLabel: string;
+                  if (isGraded) {
+                    const gradePrice = (pcMatch.gradedPrice ?? pcMatch.price)!;
+                    pcLabel = `Grade ${pcMatch.grade} graded market price $${gradePrice.toFixed(2)}`;
+                  } else if (pcMatch.price != null && pcMatch.tcgPlayerPrice != null) {
+                    pcLabel = `PriceCharting loose $${pcMatch.price.toFixed(2)}, TCGPlayer $${pcMatch.tcgPlayerPrice.toFixed(2)}`;
+                  } else if (pcMatch.price != null) {
+                    pcLabel = `PriceCharting loose $${pcMatch.price.toFixed(2)}`;
+                  } else {
+                    pcLabel = `$${priceLow!.toFixed(2)}–$${priceHigh!.toFixed(2)}`;
+                  }
+                  systemPrompt = `AUTHORITATIVE PRICE DATA: The verified market price for this card is ${pcLabel} (source: PriceCharting). Use this — not any Serper-derived estimate below — as the sole basis for priceFairness scoring.\n\n${systemPrompt}`;
+                }
+              }
+            }
+          } catch (err) {
+            console.error(`[listingContext] PriceCharting lookup failed for "${group.canonicalName}":`, err);
+          }
+        }
+
+        // Last resort: parse dollar amounts out of the system prompt — same text
+        // calculatePriceFairness uses internally, so the chart matches the score.
+        if ((priceLow == null || priceHigh == null) && systemPrompt) {
+          const extracted = extractPriceRange(systemPrompt);
+          if (extracted) {
+            if (priceLow == null)  priceLow  = extracted[0];
+            if (priceHigh == null) priceHigh = extracted[1];
+            if (priceSource == null) priceSource = "CONTEXT";
+          }
+        }
+
+        console.log(`[group] "${group.canonicalName}" — priceLow=${priceLow} priceHigh=${priceHigh} usePriceCharting=${usePriceCharting} source=${priceSource} (serper: ${serperPrices.priceLow}/${serperPrices.priceHigh}, groq: ${groqPriceLow}/${groqPriceHigh})`);
 
         return {
           canonicalName: group.canonicalName,
@@ -595,6 +693,10 @@ export async function groupAndContextualize(
           priceLow,
           priceHigh,
           estimatedShippingPrice,
+          usePriceCharting,
+          priceSource,
+          priceChartingUrl,
+          tcgPlayerUrl,
         };
       }),
     );

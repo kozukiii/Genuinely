@@ -5,7 +5,8 @@ import { groupAndContextualize } from "../ai/listingContext";
 import { getEbayItemByNumericId } from "../services/ebayService";
 import { getMarketplaceListingByGraphqlForAnalysis, getMarketplaceListingBySearchForAnalysis } from "../services/marketplaceService";
 import { getLocationFromIp, extractClientIp } from "../utils/geoIp";
-import { deleteCachedAnalysis } from "../services/analysisCache";
+import { deleteCachedAnalysis, readCacheStore } from "../services/analysisCache";
+import { applyCachedAnalysis, applyCachedAnalysisFromStore } from "../services/cachedAnalysisResult";
 
 const router = Router();
 
@@ -66,6 +67,9 @@ async function enrichMarketplaceListing(listing: any): Promise<any> {
 }
 
 async function scoreSingleListingWithContext(listing: any) {
+  const cached = applyCachedAnalysis(listing);
+  if (cached) return cached;
+
   const enriched = await enrichMarketplaceListing(listing);
 
   const title =
@@ -92,6 +96,9 @@ async function scoreSingleListingWithContext(listing: any) {
     ...result,
     ...(group?.priceLow  != null ? { priceLow:  group.priceLow  } : {}),
     ...(group?.priceHigh != null ? { priceHigh: group.priceHigh } : {}),
+    ...(group?.priceSource ? { priceSource: group.priceSource } : {}),
+    ...(group?.priceChartingUrl ? { priceChartingUrl: group.priceChartingUrl } : {}),
+    ...(group?.tcgPlayerUrl ? { tcgPlayerUrl: group.tcgPlayerUrl } : {}),
   };
 }
 
@@ -196,11 +203,31 @@ router.post("/context", async (req, res) => {
   }
 });
 
+// POST /api/search/cache-lookup
+// Lets the client skip expensive context generation for listings already scored
+// in the backend analysis cache.
+router.post("/cache-lookup", async (req, res) => {
+  const { listings } = req.body;
+  if (!Array.isArray(listings)) {
+    return res.status(400).json({ error: "listings must be an array" });
+  }
+
+  const store = readCacheStore();
+  const cached = listings
+    .map((listing: any, index: number) => {
+      const result = applyCachedAnalysisFromStore(store, listing);
+      return result ? { index, listing: result } : null;
+    })
+    .filter(Boolean);
+
+  return res.json({ cached });
+});
+
 // POST /api/search/batch-analyze
 // Accepts { listings, systemPrompt } — scores a batch with a pre-generated product-expert prompt.
 // systemPrompt replaces the static system prompt for this group of listings.
 router.post("/batch-analyze", async (req, res) => {
-  const { listings, systemPrompt, priceLow, priceHigh } = req.body;
+  const { listings, systemPrompt, priceLow, priceHigh, priceSource, priceChartingUrl, tcgPlayerUrl } = req.body;
   if (!Array.isArray(listings)) {
     return res.status(400).json({ error: "listings must be an array" });
   }
@@ -214,9 +241,14 @@ router.post("/batch-analyze", async (req, res) => {
     const pricePatch: Record<string, number> = {};
     if (priceLow  != null) pricePatch.priceLow  = priceLow;
     if (priceHigh != null) pricePatch.priceHigh = priceHigh;
+    const metaPatch = {
+      ...(priceSource     ? { priceSource }     : {}),
+      ...(priceChartingUrl ? { priceChartingUrl } : {}),
+      ...(tcgPlayerUrl    ? { tcgPlayerUrl }    : {}),
+    };
     const result = Object.keys(pricePatch).length > 0
-      ? scored.map((item: any) => ({ ...item, ...pricePatch }))
-      : scored;
+      ? scored.map((item: any) => ({ ...item, ...pricePatch, ...metaPatch }))
+      : (Object.keys(metaPatch).length > 0 ? scored.map((item: any) => ({ ...item, ...metaPatch })) : scored);
 
     return res.json(result);
   } catch (err: any) {

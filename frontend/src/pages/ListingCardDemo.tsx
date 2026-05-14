@@ -243,6 +243,7 @@ function AnimatedRing({
 export default function ListingCardDemo() {
   const [imageIndex,    setImageIndex]    = useState(0);
   const [saved,         setSaved]         = useState(false);
+  const [scamOverlay,   setScamOverlay]   = useState(false);
   const [analysisPhase, setAnalysisPhase] = useState<AnalysisPhase>("idle");
   const [analysisScore, setAnalysisScore] = useState<number | null>(null);
   const [compressProgress, setCompressProgress] = useState(0);
@@ -375,12 +376,39 @@ export default function ListingCardDemo() {
 
           {/* Image panel */}
           <div className="page-image">
-            <div className="image-frame">
+            <div className="image-frame" style={{ position: "relative" }}>
               <img
                 src={currentImage || "/placeholder.jpg"}
                 alt={demoListing.title}
                 onError={(e) => (e.currentTarget.src = "/placeholder.jpg")}
               />
+              {scamOverlay && (
+                <div style={{
+                  position: "absolute", inset: 0,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  background: "rgba(0,0,0,0.38)",
+                  borderRadius: "inherit",
+                  pointerEvents: "none",
+                }}>
+                  <span style={{
+                    color: "#ef4444",
+                    fontSize: "2rem",
+                    fontWeight: 900,
+                    letterSpacing: "0.14em",
+                    textTransform: "uppercase",
+                    transform: "rotate(-30deg)",
+                    border: "3px solid #ef4444",
+                    padding: "6px 18px",
+                    borderRadius: "3px",
+                    opacity: 0.92,
+                    textShadow: "0 0 16px rgba(239,68,68,0.65)",
+                    whiteSpace: "nowrap",
+                    userSelect: "none",
+                  }}>
+                    SCAM LIKELY
+                  </span>
+                </div>
+              )}
             </div>
             {images.length > 1 && (
               <div className="image-nav">
@@ -614,6 +642,27 @@ export default function ListingCardDemo() {
                   </button>
                 );
               })}
+              <button
+                type="button"
+                onClick={() => setScamOverlay((v) => !v)}
+                style={{
+                  marginTop: "6px",
+                  fontSize: "0.6rem",
+                  fontWeight: 700,
+                  letterSpacing: "0.06em",
+                  padding: "5px 10px",
+                  borderRadius: "999px",
+                  border: `1px solid ${scamOverlay ? "rgba(239,68,68,0.8)" : "rgba(239,68,68,0.35)"}`,
+                  background: scamOverlay ? "rgba(239,68,68,0.18)" : "rgba(0,0,0,0.5)",
+                  color: scamOverlay ? "#ef4444" : "rgba(239,68,68,0.55)",
+                  cursor: "pointer",
+                  transition: "all 120ms ease",
+                  backdropFilter: "blur(6px)",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {scamOverlay ? "Hide Scam" : "Scam Overlay"}
+              </button>
             </div>
           );
         })()}

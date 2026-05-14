@@ -633,6 +633,11 @@ export default function ListingPage() {
               {enrichLoading && listing.source === "marketplace" && (
                 <span className="image-loading-badge">Loading gallery{"\u2026"}</span>
               )}
+              {!listing.acceptsOffers && listing.aiScores?.priceFairness === 0 && listing.aiScores?.sellerTrust === 0 && (
+                <div className="scam-overlay">
+                  <span className="scam-overlay-text">SCAM LIKELY</span>
+                </div>
+              )}
             </div>
 
             {images.length > 1 && (
@@ -732,7 +737,7 @@ export default function ListingPage() {
                 )}
                 {showRing && ai.priceLow != null && ai.priceHigh != null && (() => {
                   const { lowPct, midPct, highPct, fillPct } = buildPriceBarProps(
-                    ai.priceLow, ai.priceHigh, listing.price
+                    ai.priceLow, ai.priceHigh, listing.acceptsOffers ? null : listing.price
                   );
                   return (
                     <div
@@ -740,8 +745,12 @@ export default function ListingPage() {
                       style={{ marginTop: "6px" }}
                     >
                       {(() => {
-                        const done = analysisPhase === "done" && listing.price != null && ai.priceLow != null && ai.priceHigh != null;
-                        const badge = done ? getPriceBadge(listing.price!, ai.priceLow!, ai.priceHigh!) : null;
+                        const done = analysisPhase === "done" && ai.priceLow != null && ai.priceHigh != null;
+                        const badge = done && !listing.acceptsOffers && listing.price != null
+                          ? getPriceBadge(listing.price, ai.priceLow!, ai.priceHigh!)
+                          : done
+                            ? { label: "No price to analyze", color: "#6b7280", bg: "rgba(107,114,128,0.08)" }
+                            : null;
                         return (
                           <div style={{ display: "flex", flexDirection: "column", gap: "6px", alignItems: "flex-start" }}>
                             <div

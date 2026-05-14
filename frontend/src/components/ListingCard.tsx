@@ -186,6 +186,11 @@ export default function ListingCard({ data }: { data: Listing }) {
               onError={(e) => (e.currentTarget.src = PLACEHOLDER_IMAGE)}
               loading="lazy"
             />
+            {!data.acceptsOffers && data.aiScores?.priceFairness === 0 && data.aiScores?.sellerTrust === 0 && (
+              <div className="scam-overlay">
+                <span className="scam-overlay-text">SCAM LIKELY</span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -233,12 +238,14 @@ export default function ListingCard({ data }: { data: Listing }) {
         <div className="price-rating">
           <div className="left-side">
             {data.price != null && data.priceLow != null && data.priceHigh != null && (() => {
-              const badge = getPriceBadge(data.price, data.priceLow, data.priceHigh);
+              const badge = data.acceptsOffers
+                ? { label: "No price to analyze", color: "#6b7280", borderColor: "#6b728055" }
+                : getPriceBadge(data.price, data.priceLow, data.priceHigh);
               return (
                 <span className="listing-price-badge" style={{ color: badge.color, borderColor: `${badge.color}55`, position: "relative", overflow: "visible" }}>
-                  {badge.label === "GREAT PRICE" && <StarSparkles />}
-                  {badge.label === "GOOD PRICE" && <GoodStarSparkles />}
-                  {badge.label === "FAIR PRICE" && <FairStarSparkles />}
+                  {!data.acceptsOffers && badge.label === "GREAT PRICE" && <StarSparkles />}
+                  {!data.acceptsOffers && badge.label === "GOOD PRICE" && <GoodStarSparkles />}
+                  {!data.acceptsOffers && badge.label === "FAIR PRICE" && <FairStarSparkles />}
                   {badge.label}
                 </span>
               );

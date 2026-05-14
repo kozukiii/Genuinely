@@ -132,6 +132,35 @@
   filter: saturate(1.1) contrast(1.06);
 }
 
+.scam-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.38);
+  pointer-events: none;
+  z-index: 5;
+}
+
+.scam-overlay-text {
+  color: #ef4444;
+  font-size: 1.1rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  transform: rotate(-30deg);
+  border: 2.5px solid #ef4444;
+  padding: 4px 12px;
+  border-radius: 3px;
+  opacity: 0.92;
+  text-shadow: 0 0 12px rgba(239, 68, 68, 0.6);
+  background: rgba(0, 0, 0, 0.55);
+  box-shadow: 0 0 18px rgba(0, 0, 0, 0.7);
+  white-space: nowrap;
+  user-select: none;
+}
+
 /* =========================
    Title / Price / Meta
    ========================= */

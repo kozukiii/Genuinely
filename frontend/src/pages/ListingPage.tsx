@@ -730,7 +730,7 @@ export default function ListingPage() {
                 )}
               </div>
 
-              <div className="ring-price-row">
+              <div className="ring-price-row" style={{ position: "relative", left: "-40px" }}>
                 {/* Price bar — or invisible spacer so the ring stays in the same position */}
                 {showRing && (ai.priceLow == null || ai.priceHigh == null) && (
                   <div aria-hidden="true" style={{ width: "220px", marginTop: "30px", flexShrink: 0 }} />

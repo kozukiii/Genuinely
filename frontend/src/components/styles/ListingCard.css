@@ -483,22 +483,21 @@
   position: relative;
 }
 
-/* Ring absolutely positioned below the heart */
-.listing-title-row {
-  position: relative;
-}
-
 .listing-card .card-badges {
-  position: absolute;
-  right: 8px;
-  top: calc(46px + 1.6rem); /* heart height + gap */
-  z-index: 20;
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-start;
   pointer-events: none;
 }
 
 .listing-card .badge-ring .rating-ring {
   pointer-events: none;
   filter: drop-shadow(0 16px 20px rgba(0, 0, 0, 0.65));
+}
+
+.left-side {
+  flex: 1;
+  min-width: 0;
 }
 
 
@@ -617,6 +616,11 @@
   .listing-card {
     padding: 0.5rem;
     border-radius: 12px;
+  }
+
+  .listing-card .card-badges svg {
+    width: 52px !important;
+    height: 52px !important;
   }
 
   .listing-title {

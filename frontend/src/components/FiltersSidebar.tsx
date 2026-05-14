@@ -28,10 +28,11 @@ interface Props {
   filters: FilterState;
   onChange: (next: FilterState) => void;
   onSortChange: (sortBy: string) => void;
+  onDraftChange?: (draft: FilterState) => void;
   mobileOpen?: boolean;
 }
 
-export default function FiltersSidebar({ filters, onChange, onSortChange, mobileOpen = false }: Props) {
+export default function FiltersSidebar({ filters, onChange, onSortChange, onDraftChange, mobileOpen = false }: Props) {
   const [collapsed, setCollapsed] = useState(false);
   const [draft, setDraft] = useState<FilterState>(filters);
 
@@ -39,6 +40,11 @@ export default function FiltersSidebar({ filters, onChange, onSortChange, mobile
   useEffect(() => {
     setDraft(filters);
   }, [filters]);
+
+  // Notify parent of draft changes so search can pick them up without requiring Apply
+  useEffect(() => {
+    onDraftChange?.(draft);
+  }, [draft, onDraftChange]);
 
   function setDraftField<K extends keyof FilterState>(key: K, value: FilterState[K]) {
     setDraft((prev) => ({ ...prev, [key]: value }));

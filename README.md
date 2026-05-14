@@ -17,6 +17,7 @@ Genuinely searches multiple marketplaces simultaneously, scores every listing wi
   - Location risk (pickup vs. shipping logistics)
   - Description quality (detail and accuracy)
 - **Market context** -- pulls comparable listings to build real price ranges before scoring
+- **Per-category price sources** -- continually expanding source integrations let category-specific data override generic web estimates when a better source exists
 - **Trending shortcuts** -- one-click searches for PS5, Nintendo Switch, Air Jordan 1, and more
 - **Filters** -- price range, condition, free shipping, location
 - **Save listings** -- synced to your account via SQLite, falls back to LocalStorage
@@ -37,6 +38,7 @@ Genuinely searches multiple marketplaces simultaneously, scores every listing wi
 | AI/LLM | Groq API (OpenAI-compatible endpoint) |
 | Marketplaces | eBay Browse API v1, Facebook Marketplace GraphQL |
 | Search fallback | Serper API |
+| Category price sources | PriceCharting, TCGPlayer data exposed through PriceCharting item pages |
 | Geocoding | OpenStreetMap Nominatim |
 | Deployment | Vercel (frontend), Render (backend) |
 | Analytics | Vercel Analytics + Speed Insights |
@@ -166,6 +168,24 @@ Every listing goes through a two-stage pipeline:
 2. **LLM analysis** -- Groq scores the listing across all six dimensions given the market context. Price fairness uses a deterministic percentile algorithm so scores are consistent and don't drift with model temperature.
 
 Results are cached in memory to avoid redundant LLM calls on repeated searches.
+
+---
+
+## Per-Category Price Sources
+
+Genuinely's pricing layer is being updated continually so each category can use the best available market source instead of relying only on broad search snippets. The current implemented path is for video games and trading cards, where the prompt-engineering step can set `USE_PRICECHARTING: true` and route that product group through PriceCharting before scoring.
+
+For those groups, the backend:
+
+1. Groups listings by canonical product name in `backend/src/ai/listingContext.ts`.
+2. Uses Serper/Groq to build the product-specific scoring prompt and decide which source should be used. (eg. pricecharting.com)
+3. Calls `findPriceChartingMatch(...)` in `backend/src/priceSources/priceCharting.ts`.
+4. Tries PriceCharting direct URLs first, then falls back to PriceCharting search queries.
+5. Reads PriceCharting's item page HTML for the loose, complete, new, and graded price cells.
+6. Reads the TCGPlayer row from that same PriceCharting HTML and extracts both the TCGPlayer market price and destination URL.
+7. Sends `priceLow`, `priceHigh`, `priceSource`, `priceChartingUrl`, and `tcgPlayerUrl` back through the search analysis routes so the listing page can show the source links next to the price bar.
+
+TCGPlayer is integrated this way because its data is already exposed inside PriceCharting's item page HTML. While testing PriceCharting pages, I noticed a `TCGPlayer` source row and TCGPlayer product links in the markup, so the implementation parses that row instead of adding a separate TCGPlayer API path. For raw cards, the authoritative range is built from PriceCharting loose price plus TCGPlayer market price. For graded cards, PriceCharting's grade-specific price becomes the high anchor, with the raw TCGPlayer value used as the lower reference when available.
 
 ---
 

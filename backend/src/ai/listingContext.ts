@@ -508,15 +508,24 @@ export async function groupAndContextualize(
   // Step 1: group by identical product (8b-instant, one call)
   const rawGroups = await groupListings(titles, query);
 
-  // Steps 2+3: per group — Serper ×2 (+ optional weight search) then 8b engineers the expert prompt
-  // Run in chunks of 2 to avoid Serper rate limits (each group fires 2–3 concurrent requests)
-  const SERPER_CONCURRENCY = 2;
-  const groups: ProductGroup[] = [];
+  // Steps 2+3: per group — Serper ×2 (+ optional weight search) then 8b engineers the expert prompt.
+  // All groups start concurrently; a semaphore caps how many groups can be in the Serper phase at once
+  // (each group fires 2–3 parallel calls, so 2 concurrent groups ≈ 4–6 simultaneous Serper requests).
+  // Groq fires immediately when a group's own Serper results land — it never waits on other groups.
+  const MAX_CONCURRENT_SERPER_GROUPS = 2;
+  let serperGroupSlots = MAX_CONCURRENT_SERPER_GROUPS;
+  const serperGroupQueue: (() => void)[] = [];
+  function acquireSerperGroup(): Promise<void> {
+    if (serperGroupSlots > 0) { serperGroupSlots--; return Promise.resolve(); }
+    return new Promise(resolve => serperGroupQueue.push(resolve));
+  }
+  function releaseSerperGroup() {
+    const next = serperGroupQueue.shift();
+    if (next) { next(); } else { serperGroupSlots++; }
+  }
 
-  for (let i = 0; i < rawGroups.length; i += SERPER_CONCURRENCY) {
-    const chunk = rawGroups.slice(i, i + SERPER_CONCURRENCY);
-    const chunkResults = await Promise.all(
-      chunk.map(async (group): Promise<ProductGroup> => {
+  const groups: ProductGroup[] = await Promise.all(
+    rawGroups.map(async (group): Promise<ProductGroup> => {
         const needsWeightLookup =
           serperApiKey &&
           hasCalculatedShipping &&
@@ -527,17 +536,23 @@ export async function groupAndContextualize(
           console.log(`[group] "${group.canonicalName}" — skipping price search (no reliable market data)`);
         }
 
-        const [priceJson, inspectJson, weightJson] = await Promise.all([
-          serperApiKey && !skipPriceSearch
-            ? serperSearch(serperApiKey, `${group.serperQuery} used resale price sold 2025 2026`, 8).catch(() => null)
-            : Promise.resolve(null),
-          serperApiKey
-            ? serperSearch(serperApiKey, `${group.canonicalName} used buying guide inspect condition accessories what to look for`, 8).catch(() => null)
-            : Promise.resolve(null),
-          needsWeightLookup
-            ? serperSearch(serperApiKey!, `${group.canonicalName} shipping weight`, 5).catch(() => null)
-            : Promise.resolve(null),
-        ]);
+        await acquireSerperGroup();
+        let [priceJson, inspectJson, weightJson]: [any, any, any] = [null, null, null];
+        try {
+          [priceJson, inspectJson, weightJson] = await Promise.all([
+            serperApiKey && !skipPriceSearch
+              ? serperSearch(serperApiKey, `${group.serperQuery} used resale price sold 2025 2026`, 8).catch(() => null)
+              : Promise.resolve(null),
+            serperApiKey
+              ? serperSearch(serperApiKey, `${group.canonicalName} used buying guide inspect condition accessories what to look for`, 8).catch(() => null)
+              : Promise.resolve(null),
+            needsWeightLookup
+              ? serperSearch(serperApiKey!, `${group.canonicalName} shipping weight`, 5).catch(() => null)
+              : Promise.resolve(null),
+          ]);
+        } finally {
+          releaseSerperGroup();
+        }
 
         // Extract price range directly from Serper results — primary source
         const serperPrices = priceJson ? extractPricesFromSerper(priceJson) : { priceLow: null, priceHigh: null };
@@ -699,9 +714,7 @@ export async function groupAndContextualize(
           tcgPlayerUrl,
         };
       }),
-    );
-    groups.push(...chunkResults);
-  }
+  );
 
   return groups;
 }

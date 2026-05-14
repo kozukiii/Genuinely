@@ -429,6 +429,7 @@ export default function SearchPage() {
   const [linkModalOpen, setLinkModalOpen] = useState(false);
   const [savedVersion, setSavedVersion] = useState(0);
   const [hydrated, setHydrated] = useState(false);
+  const [activeHighlightFilters, setActiveHighlightFilters] = useState<string[]>([]);
 
   useEffect(() => {
     const update = () => setSavedVersion((v) => v + 1);
@@ -466,6 +467,8 @@ export default function SearchPage() {
   queryRef.current = currentQuery;
   const filtersRef = useRef(filters);
   filtersRef.current = filters;
+  // Tracks the sidebar's uncommitted draft so search uses it without requiring Apply first
+  const draftFiltersRef = useRef<FilterState>(filters);
   const listingsRef = useRef(listings);
   listingsRef.current = listings;
 
@@ -529,24 +532,68 @@ export default function SearchPage() {
     [listings, filters]
   );
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  // Badges that appear on 2+ listings — used as quick-filter chips
+  const availableHighlightBadges = useMemo(() => {
+    const countMap = new Map<string, { label: string; positive: boolean; count: number }>();
+    for (const listing of listings) {
+      if (!Array.isArray(listing.highlights)) continue;
+      const seen = new Set<string>();
+      for (const h of listing.highlights) {
+        const key = `${h.label}||${h.positive}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const entry = countMap.get(key);
+        if (entry) entry.count++;
+        else countMap.set(key, { label: h.label, positive: h.positive, count: 1 });
+      }
+    }
+    return Array.from(countMap.values())
+      .filter((b) => b.count >= 2 && b.positive)
+      .sort((a, b) => b.count - a.count);
+  }, [listings]);
+
+  const displayListings = useMemo(() => {
+    if (activeHighlightFilters.length === 0) return filtered;
+    return filtered.filter((listing) => {
+      if (!Array.isArray(listing.highlights)) return false;
+      return activeHighlightFilters.every((filterKey) => {
+        const sep = filterKey.lastIndexOf("||");
+        const label = filterKey.slice(0, sep);
+        const positive = filterKey.slice(sep + 2) === "true";
+        return listing.highlights!.some((h) => h.label === label && h.positive === positive);
+      });
+    });
+  }, [filtered, activeHighlightFilters]);
+
+  const toggleHighlightFilter = useCallback((key: string) => {
+    setActiveHighlightFilters((prev) =>
+      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
+    );
+    setPage(1);
+  }, []);
+
+  const totalPages = Math.max(1, Math.ceil(displayListings.length / PAGE_SIZE));
   const canGoPrev = page > 1;
   const canGoNext = page < totalPages || hasMore;
 
   const pageItems = useMemo(() => {
-    const slice = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).slice();
+    const slice = displayListings.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).slice();
     const sortBy = filters.sortBy;
     if (sortBy === "price_asc") slice.sort((a, b) => (a.price ?? 0) - (b.price ?? 0));
     else if (sortBy === "price_desc") slice.sort((a, b) => (b.price ?? 0) - (a.price ?? 0));
     else if (sortBy === "ai_score") slice.sort((a, b) => (b.aiScore ?? -1) - (a.aiScore ?? -1));
     return slice;
-  }, [filtered, page, filters.sortBy]);
+  }, [displayListings, page, filters.sortBy]);
 
   // ── Initial search (new query) ──────────────────────────────────────────
   const handleSearch = useCallback(
-    async (query: string, activeFilters: FilterState = filtersRef.current) => {
+    async (query: string, activeFilters: FilterState = draftFiltersRef.current) => {
       const q = query.trim();
       if (!q) return;
+
+      // Commit whatever filters were active (draft or explicit) so sidebar stays in sync
+      setFilters(activeFilters);
+      sessionStorage.setItem(SEARCH_FILTERS_KEY, JSON.stringify(activeFilters));
 
       // Cancel any in-flight analysis from a previous search
       abortAllAnalysis();
@@ -562,6 +609,7 @@ export default function SearchPage() {
       setError(null);
       setCurrentQuery(q);
       setPage(1);
+      setActiveHighlightFilters([]);
 
       const parsedLimit = activeFilters.limit !== "" ? Math.max(1, parseInt(activeFilters.limit, 10)) : undefined;
       const fetchSize = parsedLimit ?? PRELOAD_SIZE;
@@ -669,8 +717,6 @@ export default function SearchPage() {
 
   // ── Re-fetch when filters are applied ───────────────────────────────────
   const handleFilterApply = useCallback(async (next: FilterState) => {
-    setFilters(next);
-    sessionStorage.setItem(SEARCH_FILTERS_KEY, JSON.stringify(next));
     const q = queryRef.current;
     if (!q) return;
     await handleSearch(q, next);
@@ -783,7 +829,7 @@ export default function SearchPage() {
 
         {listings.length > 0 && (
           <span className="results-count">
-            {filtered.length}{hasMore ? "+" : ""} result{filtered.length !== 1 ? "s" : ""}
+            {displayListings.length}{hasMore ? "+" : ""} result{displayListings.length !== 1 ? "s" : ""}
           </span>
         )}
       </div>
@@ -795,6 +841,7 @@ export default function SearchPage() {
           filters={filters}
           onChange={handleFilterApply}
           onSortChange={(sortBy) => setFilters((f) => ({ ...f, sortBy }))}
+          onDraftChange={(d) => { draftFiltersRef.current = d; }}
           mobileOpen={mobileFiltersOpen}
         />
 
@@ -835,6 +882,26 @@ export default function SearchPage() {
                   </div>
                 </>
               )}
+            </div>
+          )}
+
+          {availableHighlightBadges.length > 0 && (
+            <div className="highlight-filter-chips">
+              <span className="highlight-filter-title">Refine Results</span>
+              {availableHighlightBadges.map((badge) => {
+                const key = `${badge.label}||${badge.positive}`;
+                const isActive = activeHighlightFilters.includes(key);
+                return (
+                  <button
+                    key={key}
+                    className={`highlight-filter-chip highlight-filter-chip--${badge.positive ? "pos" : "neg"}${isActive ? " highlight-filter-chip--active" : ""}`}
+                    onClick={() => toggleHighlightFilter(key)}
+                  >
+                    {badge.positive ? "+ " : "− "}{badge.label}
+                    {isActive && <span className="highlight-filter-chip-x">×</span>}
+                  </button>
+                );
+              })}
             </div>
           )}
 

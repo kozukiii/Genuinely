@@ -336,7 +336,7 @@ function gradeToConfig(grade: number): { fragment: string; priceId: string } | n
   return null;
 }
 
-type CardInfo = { cardName: string; number: number; setName: string };
+type CardInfo = { cardName: string; number: string; setName: string };
 
 function normalizePCQuery(raw: string): string | null {
   const cleaned = raw.trim().replace(/\s+/g, " ");
@@ -351,18 +351,6 @@ function buildSetQuery(input: string, cardQuery: string): string | null {
   return normalizePCQuery(`${cardQuery} ${setName}`);
 }
 
-function expandSearchPadding(query: string, setTotal: string | null): string[] {
-  const numMatch = query.match(/#0*(\d+)(?:\/\d+)?/);
-  if (!numMatch) return [query];
-  const n = Number(numMatch[1]);
-  const plain = `#${n}`;
-  const padded = `#${String(n).padStart(3, "0")}`;
-  const base = query.replace(/#0*(\d+)(?:\/\d+)?/, plain);
-  const basePad = query.replace(/#0*(\d+)(?:\/\d+)?/, padded);
-  const withTotal = setTotal ? query.replace(/#0*(\d+)(?:\/\d+)?/, `${plain}/${setTotal}`) : null;
-  const withTotalPad = setTotal ? query.replace(/#0*(\d+)(?:\/\d+)?/, `${padded}/${setTotal}`) : null;
-  return [base, basePad, withTotal, withTotalPad].filter((v): v is string => !!v);
-}
 
 function buildFallbackDebugQuery(input: string): string | null {
   const numberMatch = input.match(/\b(\d{1,4})\s*(?:\/|(?:SM|SV|SWSH|XY|BW|DP|HGSS)[-\s]?P?\b)/i);
@@ -410,17 +398,22 @@ function slugifyPC(text: string, ampersand: "and" | "drop" = "and"): string {
     .replace(/^-|-$/g, "");
 }
 
-function buildDirectUrlVariants(cardName: string, n: number, setName: string): string[] {
-  const numPlain = String(n);
-  const numPad2 = String(n).padStart(2, "0");
-  const numPad3 = String(n).padStart(3, "0");
+function buildDirectUrlVariants(cardName: string, numStr: string, setName: string): string[] {
+  const isPromo = /[a-z]/i.test(numStr);
+  const numSlug = slugifyPC(numStr);
+  const numVariants = isPromo
+    ? [numSlug]
+    : (() => {
+        const n = parseInt(numStr, 10);
+        return [...new Set([String(n), String(n).padStart(2, "0"), String(n).padStart(3, "0")])];
+      })();
+
   const setSlugAnd = `pokemon-${slugifyPC(setName, "and")}`;
   const setSlugDrop = `pokemon-${slugifyPC(setName, "drop")}`;
   const cardSlug = slugifyPC(cardName);
   const cardSlugNoSuffix = slugifyPC(cardName.replace(/\s+(?:ex|gx|v|vmax|vstar)$/i, "").trim());
 
   const setVariants = [...new Set([setSlugAnd, setSlugDrop])];
-  const numVariants = [...new Set([numPlain, numPad2, numPad3])];
   const cardVariants = [...new Set([cardSlug, cardSlugNoSuffix])];
 
   const urls: string[] = [];
@@ -474,7 +467,7 @@ function buildDirectUrlsFromTitle(input: string): string[] {
   const setName = extractSetName(input, cardName);
   if (!setName) return [];
 
-  return buildDirectUrlVariants(cardName, n, setName);
+  return buildDirectUrlVariants(cardName, String(n), setName);
 }
 
 async function extractCardInfoWithGroq(input: string): Promise<CardInfo[]> {
@@ -488,12 +481,12 @@ async function extractCardInfoWithGroq(input: string): Promise<CardInfo[]> {
           role: "system",
           content: `You are a Pokemon card data extractor. From the eBay listing title, extract:
 - cardName: Pokemon name only. Include suffix (ex, GX, V, VMAX, VSTAR) only when it follows the Pokemon name. Never include set name, rarity, or condition.
-- number: Card number as an integer, no leading zeros. "023/131" → 23, "125/165" → 125.
-- setName: The Pokemon TCG set name. It may appear before OR after the number. e.g. "Prismatic Evolutions", "Obsidian Flames", "Surging Sparks", "Twilight Masquerade".
+- number: The full card identifier as a string. For regular cards strip leading zeros: "023/131" → "23", "125/165" → "125". For promos preserve the full code: "286/SM-P" → "SM286", "SWSH241" → "SWSH241", "SV-P 058" → "SV58". Never include the set total (drop the /165 part).
+- setName: The Pokemon TCG set name. For promos use the promo series name e.g. "Sun & Moon Black Star Promos", "Sword & Shield Black Star Promos", "Scarlet & Violet Black Star Promos". For regular sets e.g. "Prismatic Evolutions", "Obsidian Flames", "Surging Sparks".
 
 Return up to 3 candidates. If you're confident, return 1. If the set name or card name is ambiguous, return multiple interpretations. Every candidate MUST have all three fields.
 
-Respond ONLY as JSON: {"candidates":[{"cardName":"Vaporeon EX","number":23,"setName":"Prismatic Evolutions"}]}`,
+Respond ONLY as JSON: {"candidates":[{"cardName":"Vaporeon EX","number":"23","setName":"Prismatic Evolutions"}]}`,
         },
         { role: "user", content: input },
       ],
@@ -508,9 +501,9 @@ Respond ONLY as JSON: {"candidates":[{"cardName":"Vaporeon EX","number":23,"setN
 
     return candidates.filter((c): c is CardInfo =>
       typeof (c as any)?.cardName === "string" &&
-      typeof (c as any)?.number === "number" &&
+      (typeof (c as any)?.number === "string" || typeof (c as any)?.number === "number") &&
       typeof (c as any)?.setName === "string"
-    ).map((c) => ({ cardName: c.cardName, number: Math.round(c.number), setName: c.setName }));
+    ).map((c) => ({ cardName: c.cardName, number: String((c as any).number), setName: c.setName }));
   } catch {
     return [];
   }
@@ -596,7 +589,7 @@ export async function findPriceChartingMatch(rawTitle: string): Promise<PriceCha
   debugLines.push(`Groq URLs: ${groqUrls.join(", ") || "none"}`);
   debugLines.push(`Regex URLs: ${regexUrls.join(", ") || "none"}`);
 
-  const directUrls = [...new Set([...groqUrls, ...regexUrls])];
+  const directUrls = groqUrls.slice(0, 2); // only Groq-derived; regexUrls kept but unused for now
   debugLines.push(`Direct URLs (${directUrls.length}): ${directUrls.join(", ") || "none"}`);
 
   for (const url of directUrls) {
@@ -618,22 +611,13 @@ export async function findPriceChartingMatch(rawTitle: string): Promise<PriceCha
   debugLines.push("Direct URLs exhausted — waiting 2s before search fallback");
   await new Promise((resolve) => setTimeout(resolve, 2000));
 
-  const fallback = buildFallbackDebugQuery(cleanTitle);
-  const setQuery = fallback ? buildSetQuery(cleanTitle, fallback) : null;
+  // const fallback = buildFallbackDebugQuery(cleanTitle); // unused for now
+  // const setQuery = fallback ? buildSetQuery(cleanTitle, fallback) : null; // unused for now
   const groqSearchQueries = groqCandidates.map((c) =>
     normalizePCQuery(`${c.cardName} #${c.number} ${c.setName}`)
   ).filter((q): q is string => !!q);
 
-  const setTotalMatch = cleanTitle.match(/\b\d+\/(\d+)\b/);
-  const setTotal = setTotalMatch?.[1] ?? null;
-
-  const searchCandidates = [...groqSearchQueries, fallback, setQuery, cleanTitle]
-    .filter((q): q is string => !!q)
-    .map(normalizePCQuery)
-    .filter((q): q is string => !!q)
-    .filter((q, i, all) => all.indexOf(q) === i)
-    .flatMap((q) => expandSearchPadding(q, setTotal))
-    .filter((q, i, all) => all.indexOf(q) === i);
+  const searchCandidates = groqSearchQueries.slice(0, 2); // only Groq search queries; fallback/setQuery/cleanTitle kept but unused for now
 
   debugLines.push(`Search candidates (${searchCandidates.length}): ${searchCandidates.join(", ") || "none"}`);
 

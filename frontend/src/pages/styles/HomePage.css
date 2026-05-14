@@ -1113,6 +1113,78 @@ h6 {
 }
 
 /* =========================
+   Highlight filter chips
+   ========================= */
+.home-page .highlight-filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 0.75rem 1rem;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 12px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.25);
+  margin: 0 0.5rem;
+}
+
+.home-page .highlight-filter-title {
+  width: 100%;
+  text-align: center;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.35);
+  margin-bottom: 0.25rem;
+}
+
+.home-page .highlight-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 999px;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background 0.15s, border-color 0.15s;
+  background: none;
+}
+
+.home-page .highlight-filter-chip--pos {
+  background: rgba(61, 255, 143, 0.06);
+  border-color: rgba(61, 255, 143, 0.22);
+  color: #3dff8f;
+}
+
+.home-page .highlight-filter-chip--neg {
+  background: rgba(239, 68, 68, 0.06);
+  border-color: rgba(239, 68, 68, 0.22);
+  color: #f87171;
+}
+
+.home-page .highlight-filter-chip--pos:hover,
+.home-page .highlight-filter-chip--pos.highlight-filter-chip--active {
+  background: rgba(61, 255, 143, 0.18);
+  border-color: rgba(61, 255, 143, 0.55);
+}
+
+.home-page .highlight-filter-chip--neg:hover,
+.home-page .highlight-filter-chip--neg.highlight-filter-chip--active {
+  background: rgba(239, 68, 68, 0.18);
+  border-color: rgba(239, 68, 68, 0.55);
+}
+
+.home-page .highlight-filter-chip-x {
+  font-size: 0.85rem;
+  line-height: 1;
+  opacity: 0.75;
+}
+
+/* =========================
    Page navigation
    ========================= */
 .home-page .page-nav {

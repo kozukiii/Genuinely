@@ -18,7 +18,7 @@ const DEFAULT_FILTERS: FilterState = {
   condition: "any",
   sources: { ebay: true, marketplace: true },
   freeShippingOnly: false,
-  sortBy: "default",
+  sortBy: "ai_score",
   limit: "",
   zip: "",
   marketplaceRadius: "",
@@ -33,18 +33,11 @@ interface Props {
 }
 
 export default function FiltersSidebar({ filters, onChange, onSortChange, onDraftChange, mobileOpen = false }: Props) {
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => localStorage.getItem("filters:collapsed") === "1");
   const [draft, setDraft] = useState<FilterState>(filters);
 
-  // Keep draft in sync if parent resets filters externally
-  useEffect(() => {
-    setDraft(filters);
-  }, [filters]);
-
-  // Notify parent of draft changes so search can pick them up without requiring Apply
-  useEffect(() => {
-    onDraftChange?.(draft);
-  }, [draft, onDraftChange]);
+  useEffect(() => { setDraft(filters); }, [filters]);
+  useEffect(() => { onDraftChange?.(draft); }, [draft, onDraftChange]);
 
   function setDraftField<K extends keyof FilterState>(key: K, value: FilterState[K]) {
     setDraft((prev) => ({ ...prev, [key]: value }));
@@ -54,20 +47,11 @@ export default function FiltersSidebar({ filters, onChange, onSortChange, onDraf
     setDraft((prev) => ({ ...prev, sources: { ...prev.sources, [key]: value } }));
   }
 
-  function handleApply() {
-    onChange(draft);
-  }
-
-  function handleReset() {
-    setDraft(DEFAULT_FILTERS);
-    onChange(DEFAULT_FILTERS);
-  }
-
   return (
     <aside className={`filters-sidebar${collapsed ? " collapsed" : ""}${mobileOpen ? " mobile-open" : ""}`}>
       <button
         className="sidebar-toggle"
-        onClick={() => setCollapsed((c) => !c)}
+        onClick={() => setCollapsed((c) => { const next = !c; localStorage.setItem("filters:collapsed", next ? "1" : "0"); return next; })}
         title={collapsed ? "Show filters" : "Hide filters"}
       >
         {collapsed ? "Filters" : "◀"}
@@ -77,14 +61,9 @@ export default function FiltersSidebar({ filters, onChange, onSortChange, onDraf
         <div className="sidebar-inner">
           <h2 className="filters-title">Filters</h2>
 
-          {/* Sort — immediate, no re-fetch */}
           <div className="filter-group">
             <label className="filter-label">Sort by</label>
-            <select
-              className="filter-select"
-              value={filters.sortBy}
-              onChange={(e) => onSortChange(e.target.value)}
-            >
+            <select className="filter-select" value={filters.sortBy} onChange={(e) => onSortChange(e.target.value)}>
               <option value="default">Best Match</option>
               <option value="price_asc">Price: Low → High</option>
               <option value="price_desc">Price: High → Low</option>
@@ -92,86 +71,43 @@ export default function FiltersSidebar({ filters, onChange, onSortChange, onDraf
             </select>
           </div>
 
-          {/* Price range */}
           <div className="filter-group">
             <label className="filter-label">Price range</label>
             <div className="filter-price-row">
-              <input
-                className="filter-input"
-                type="number"
-                placeholder="Min"
-                min={0}
-                value={draft.minPrice}
-                onChange={(e) => setDraftField("minPrice", e.target.value)}
-              />
+              <input className="filter-input" type="number" placeholder="Min" min={0} value={draft.minPrice}
+                onChange={(e) => setDraftField("minPrice", e.target.value)} />
               <span className="filter-price-sep">–</span>
-              <input
-                className="filter-input"
-                type="number"
-                placeholder="Max"
-                min={0}
-                value={draft.maxPrice}
-                onChange={(e) => setDraftField("maxPrice", e.target.value)}
-              />
+              <input className="filter-input" type="number" placeholder="Max" min={0} value={draft.maxPrice}
+                onChange={(e) => setDraftField("maxPrice", e.target.value)} />
             </div>
           </div>
 
-          {/* Sources */}
           <div className="filter-group">
             <label className="filter-label">Sources</label>
             <label className="filter-check">
-              <input
-                type="checkbox"
-                checked={draft.sources.ebay}
-                onChange={(e) => setDraftSource("ebay", e.target.checked)}
-              />
-              eBay
+              <input type="checkbox" checked={draft.sources.ebay} onChange={(e) => setDraftSource("ebay", e.target.checked)} /> eBay
             </label>
             <label className="filter-check">
-              <input
-                type="checkbox"
-                checked={draft.sources.marketplace}
-                onChange={(e) => setDraftSource("marketplace", e.target.checked)}
-              />
-              Marketplace
+              <input type="checkbox" checked={draft.sources.marketplace} onChange={(e) => setDraftSource("marketplace", e.target.checked)} /> Marketplace
             </label>
           </div>
 
-          {/* Free shipping */}
           <div className="filter-group">
             <label className="filter-check">
-              <input
-                type="checkbox"
-                checked={draft.freeShippingOnly}
-                onChange={(e) => setDraftField("freeShippingOnly", e.target.checked)}
-              />
-              Free shipping only
+              <input type="checkbox" checked={draft.freeShippingOnly} onChange={(e) => setDraftField("freeShippingOnly", e.target.checked)} /> Free shipping only
             </label>
           </div>
 
-          {/* Zip — overrides GeoIP for both eBay and Marketplace */}
           <div className="filter-group">
             <label className="filter-label">Zip code</label>
-            <input
-              className="filter-input"
-              type="text"
-              inputMode="numeric"
-              maxLength={10}
-              placeholder="Auto-detected"
-              value={draft.zip}
-              onChange={(e) => setDraftField("zip", e.target.value.replace(/[^0-9]/g, ""))}
-            />
+            <input className="filter-input" type="text" inputMode="numeric" maxLength={10} placeholder="Auto-detected"
+              value={draft.zip} onChange={(e) => setDraftField("zip", e.target.value.replace(/[^0-9]/g, ""))} />
           </div>
 
-          {/* Marketplace radius */}
           {draft.sources.marketplace && (
             <div className="filter-group filter-group--marketplace">
               <label className="filter-label">Marketplace radius</label>
-              <select
-                className="filter-select"
-                value={draft.marketplaceRadius}
-                onChange={(e) => setDraftField("marketplaceRadius", e.target.value)}
-              >
+              <select className="filter-select" value={draft.marketplaceRadius} onChange={(e) => setDraftField("marketplaceRadius", e.target.value)}>
                 <option value="">Default (10 mi)</option>
                 <option value="10">10 mi</option>
                 <option value="20">20 mi</option>
@@ -182,26 +118,14 @@ export default function FiltersSidebar({ filters, onChange, onSortChange, onDraf
             </div>
           )}
 
-          {/* Result limit */}
           <div className="filter-group">
             <label className="filter-label">Max results</label>
-            <input
-              className="filter-input"
-              type="number"
-              placeholder="Default"
-              min={1}
-              value={draft.limit}
-              onChange={(e) => setDraftField("limit", e.target.value)}
-            />
+            <input className="filter-input" type="number" placeholder="Default" min={1}
+              value={draft.limit} onChange={(e) => setDraftField("limit", e.target.value)} />
           </div>
 
-          <button className="filter-apply" onClick={handleApply}>
-            Update Results
-          </button>
-
-          <button className="filter-reset" onClick={handleReset}>
-            Reset
-          </button>
+          <button className="filter-apply" onClick={() => onChange(draft)}>Update Results</button>
+          <button className="filter-reset" onClick={() => { setDraft(DEFAULT_FILTERS); onChange(DEFAULT_FILTERS); }}>Reset</button>
         </div>
       )}
     </aside>

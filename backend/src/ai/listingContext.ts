@@ -627,9 +627,33 @@ export async function groupAndContextualize(
 
         if (usePriceCharting) {
           try {
-            const pcTitle = titles[group.indices[0]] ?? group.canonicalName;
-            const pcMatch = await findPriceChartingMatch(pcTitle);
-            if (pcMatch.found && pcMatch.url) {
+            const groupTitles = group.indices.map(i => titles[i] ?? "").filter(Boolean);
+            const titlesToTry = groupTitles.length > 0 ? groupTitles : [group.canonicalName];
+
+            let pcMatchResult: Awaited<ReturnType<typeof findPriceChartingMatch>> | null = null;
+            let foundCardNumber: string | null = null;
+
+            for (const pcTitle of titlesToTry) {
+              // Same card number as an already-matched URL — skip the round-trip.
+              if (foundCardNumber && new RegExp(`\\b${foundCardNumber}\\b`).test(pcTitle)) {
+                console.log(`[listingContext] PC: skipping "${pcTitle.slice(0, 60)}" — card ${foundCardNumber} already matched`);
+                continue;
+              }
+              // Have a match and the current title is a different card — stop here.
+              if (pcMatchResult) break;
+
+              const attempt = await findPriceChartingMatch(pcTitle);
+              if (attempt.found && attempt.url) {
+                pcMatchResult = attempt;
+                // Extract the last numeric segment from the URL slug (e.g. charizard-ex-223 → "223")
+                const urlPath = attempt.url.split(/[?#]/)[0];
+                const numMatches = [...urlPath.matchAll(/-(\d{1,4})/g)];
+                foundCardNumber = numMatches.length > 0 ? numMatches[numMatches.length - 1][1] : null;
+              }
+            }
+
+            const pcMatch = pcMatchResult;
+            if (pcMatch && pcMatch.found && pcMatch.url) {
               priceChartingUrl = pcMatch.url;
               const isGraded = pcMatch.grade != null;
 

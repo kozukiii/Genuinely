@@ -1,0 +1,50 @@
+.lb-wrap {
+  padding: 6px 0 2px;
+  opacity: 1;
+  transition: opacity 0.5s ease;
+}
+
+.lb-wrap--fading {
+  opacity: 0;
+}
+
+.lb-track {
+  position: relative;
+  height: 2px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.lb-fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(
+    90deg,
+    #4da6ff 0%,
+    #39ff9d 25%,
+    #4da6ff 50%,
+    #39ff9d 75%,
+    #4da6ff 100%
+  );
+  background-size: 400px 100%;
+  background-repeat: repeat-x;
+  animation: lb-flow 3s linear infinite;
+}
+
+@keyframes lb-flow {
+  from { background-position: 0 center; }
+  to   { background-position: -200px center; }
+}
+
+.lb-label {
+  display: block;
+  margin-top: 5px;
+  font-size: 11px;
+  color: #6b7280;
+  letter-spacing: 0.01em;
+  text-align: center;
+}

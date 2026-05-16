@@ -7,6 +7,8 @@ import ListingCard from "../components/ListingCard";
 import SkeletonCard from "../components/SkeletonCard";
 import FiltersSidebar, { type FilterState } from "../components/FiltersSidebar";
 import type { Listing } from "../types/Listing";
+import LoadingBar, { type PipelineStatus } from "../components/LoadingBar";
+import RefineResultsSidebar from "../components/RefineResultsSidebar";
 import "./styles/HomePage.css";
 import { addToSearchCache } from "../utils/searchCache";
 import {
@@ -38,6 +40,7 @@ const SEARCH_LISTINGS_KEY = "search:listings";
 const SEARCH_TIMESTAMP_KEY = "search:ts";
 const SEARCH_PAGE_KEY = "search:page";
 const SEARCH_FILTERS_KEY = "search:filters";
+const SEARCH_PIPELINE_KEY = "search:pipeline";
 const SEARCH_PENDING_KEY = "search:pending";
 const USE_PRICECHARTING_DEBUG_PREFIX = "USE_PRICECHARTING:";
 
@@ -47,7 +50,7 @@ const DEFAULT_FILTERS: FilterState = {
   condition: "any",
   sources: { ebay: true, marketplace: true },
   freeShippingOnly: false,
-  sortBy: "default",
+  sortBy: "ai_score",
   limit: "",
   zip: "",
   marketplaceRadius: "",
@@ -139,6 +142,7 @@ async function runAnalysisPipeline(
   items: Listing[],
   setListings: React.Dispatch<React.SetStateAction<Listing[]>>,
   signal: AbortSignal,
+  onStatus?: (s: import("../components/LoadingBar").PipelineStatus) => void,
 ) {
   let itemsToAnalyze = items;
 
@@ -192,7 +196,12 @@ async function runAnalysisPipeline(
     console.error("[analysis] cache lookup failed:", err);
   }
 
-  if (itemsToAnalyze.length === 0) return;
+  if (itemsToAnalyze.length === 0) {
+    onStatus?.({ phase: "done", listingsScored: items.length });
+    return;
+  }
+
+  onStatus?.({ phase: "context" });
 
   async function retryUnscoredListings(scored: Listing[], usePriceCharting: boolean): Promise<Listing[]> {
     const unresolved = scored.filter((l) => l.aiScore == null);
@@ -265,6 +274,10 @@ async function runAnalysisPipeline(
     // LLM omitted these indices from all groups — append a catch-all group with no context
     groups = [...groups, { canonicalName: "", specificity: "broad", indices: orphanIndices, context: null }];
   }
+
+  let groupsDone = 0;
+  const groupsTotal = groups.length;
+  onStatus?.({ phase: "scoring", groupsDone, groupsTotal });
 
   await Promise.all(
     groups.map(async (group) => {
@@ -348,9 +361,13 @@ async function runAnalysisPipeline(
           }
           return updated;
         });
+        groupsDone++;
+        onStatus?.({ phase: "scoring", groupsDone, groupsTotal });
       } catch (err: unknown) {
         if ((err as { name?: string })?.name === "AbortError") return;
         console.error(`[analysis] batch-analyze failed for group "${group.canonicalName}":`, err);
+        groupsDone++;
+        onStatus?.({ phase: "scoring", groupsDone, groupsTotal });
 
         // Clear pending in sessionStorage directly (same reason as above)
         try {
@@ -384,6 +401,8 @@ async function runAnalysisPipeline(
       }
     }),
   );
+
+  onStatus?.({ phase: "done", listingsScored: items.length });
 }
 
 function applyFilters(listings: Listing[], filters: FilterState): Listing[] {
@@ -430,12 +449,32 @@ export default function SearchPage() {
   const [savedVersion, setSavedVersion] = useState(0);
   const [hydrated, setHydrated] = useState(false);
   const [activeHighlightFilters, setActiveHighlightFilters] = useState<string[]>([]);
+  const [refineOpen, setRefineOpen] = useState(false);
+  const [refineExiting, setRefineExiting] = useState(false);
+
+  function closeRefine() {
+    setRefineExiting(true);
+    setTimeout(() => { setRefineOpen(false); setRefineExiting(false); }, 280);
+  }
+  const [pipelineStatus, setPipelineStatus] = useState<PipelineStatus>({ phase: "idle" });
 
   useEffect(() => {
     const update = () => setSavedVersion((v) => v + 1);
     window.addEventListener("saved:listings:changed", update);
     return () => window.removeEventListener("saved:listings:changed", update);
   }, []);
+
+  // Persist filters any time they change (covers sort-only changes that don't trigger handleSearch)
+  useEffect(() => {
+    if (!hydrated) return;
+    sessionStorage.setItem(SEARCH_FILTERS_KEY, JSON.stringify(filters));
+  }, [filters, hydrated]);
+
+  // Persist pipeline status so the loading bar survives navigation
+  useEffect(() => {
+    if (!hydrated) return;
+    sessionStorage.setItem(SEARCH_PIPELINE_KEY, JSON.stringify(pipelineStatus));
+  }, [pipelineStatus, hydrated]);
 
   // Merge search cache + recently viewed + saved, dedupe, shuffle
   const shelfItems = useMemo(() => {
@@ -471,6 +510,8 @@ export default function SearchPage() {
   const draftFiltersRef = useRef<FilterState>(filters);
   const listingsRef = useRef(listings);
   listingsRef.current = listings;
+
+  const pipelineStartRef = useRef<number | null>(null);
 
   // All active analysis controllers — all cancelled on new search/filter
   const analysisControllersRef = useRef<AbortController[]>([]);
@@ -522,7 +563,17 @@ export default function SearchPage() {
 
     const ctrl = new AbortController();
     analysisControllersRef.current.push(ctrl);
-    runAnalysisPipeline(query, toAnalyze, setListings, ctrl.signal).finally(() => {
+    const onStatus = (s: import("../components/LoadingBar").PipelineStatus) => {
+      if (s.phase === "done") {
+        const elapsedSeconds = pipelineStartRef.current != null
+          ? parseFloat(((Date.now() - pipelineStartRef.current) / 1000).toFixed(1))
+          : undefined;
+        setPipelineStatus({ ...s, elapsedSeconds });
+      } else {
+        setPipelineStatus(s);
+      }
+    };
+    runAnalysisPipeline(query, toAnalyze, setListings, ctrl.signal, onStatus).finally(() => {
       analysisControllersRef.current = analysisControllersRef.current.filter((c) => c !== ctrl);
     });
   }
@@ -597,6 +648,8 @@ export default function SearchPage() {
 
       // Cancel any in-flight analysis from a previous search
       abortAllAnalysis();
+      pipelineStartRef.current = Date.now();
+      setPipelineStatus({ phase: "fetching" });
       sessionStorage.removeItem(SEARCH_PENDING_KEY);
 
       if (listingsRef.current.length > 0) {
@@ -765,6 +818,11 @@ export default function SearchPage() {
         const parsed = JSON.parse(savedFilters) as FilterState;
         if (parsed && typeof parsed === "object") setFilters(parsed);
       }
+      const savedPipeline = sessionStorage.getItem(SEARCH_PIPELINE_KEY);
+      if (savedPipeline) {
+        const parsed = JSON.parse(savedPipeline) as PipelineStatus;
+        if (parsed && typeof parsed === "object") setPipelineStatus(parsed);
+      }
     } catch { /* ignore sessionStorage parse errors */ }
   }
 
@@ -885,8 +943,10 @@ export default function SearchPage() {
             </div>
           )}
 
-          {availableHighlightBadges.length > 0 && (
-            <div className="highlight-filter-chips">
+          <LoadingBar status={pipelineStatus} />
+
+          {refineOpen && availableHighlightBadges.length > 0 && (
+            <div className={`highlight-filter-chips${refineExiting ? " highlight-filter-chips--exiting" : " highlight-filter-chips--open"}`}>
               <span className="highlight-filter-title">Refine Results</span>
               {availableHighlightBadges.map((badge) => {
                 const key = `${badge.label}||${badge.positive}`;
@@ -902,6 +962,13 @@ export default function SearchPage() {
                   </button>
                 );
               })}
+              <button
+                className="sidebar-toggle refine-collapse-btn"
+                onClick={closeRefine}
+                title="Hide refine options"
+              >
+                ▶
+              </button>
             </div>
           )}
 
@@ -958,6 +1025,12 @@ export default function SearchPage() {
             </div>
           )}
         </div>
+
+        <RefineResultsSidebar
+          badges={availableHighlightBadges}
+          open={refineOpen || refineExiting}
+          onToggle={() => setRefineOpen((o) => !o)}
+        />
       </div>
 
     </div>

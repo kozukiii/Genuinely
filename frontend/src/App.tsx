@@ -15,6 +15,7 @@ import SearchPageDemo from "./pages/SearchPageDemo";
 import AdminPage from "./pages/AdminPage";
 import EbaySoldPricesPage from "./pages/EbaySoldPricesPage";
 import PriceChartingDebugPage from "./pages/PriceChartingDebugPage";
+import SerperSourceMatchDemoPage from "./pages/SerperSourceMatchDemoPage";
 
 import "./pages/styles/HomePage.css";
 
@@ -44,6 +45,7 @@ function AppRoutes() {
       <Route path="/admin" element={<AdminPage />} />
       <Route path="/admin/ebay-sold-prices" element={<EbaySoldPricesPage />} />
       <Route path="/admin/pricecharting-debug" element={<PriceChartingDebugPage />} />
+      <Route path="/admin/serper-source-match" element={<SerperSourceMatchDemoPage />} />
     </Routes>
   );
 }

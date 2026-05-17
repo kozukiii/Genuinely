@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { requireAuth, requireAdmin } from "../middleware/auth";
-import { fetchPriceChartingData, findPriceChartingMatch } from "../priceSources/priceCharting";
+import { fetchPriceChartingData, findPriceChartingMatch, scrapePriceChartingUrl } from "../priceSources/priceCharting";
 import { getUsageSummary } from "../services/usageLogger";
 import { searchEbayNormalized } from "../services/ebayService";
 
@@ -206,6 +206,104 @@ router.get("/ebay/listing-titles", async (req, res) => {
     });
   } catch (err: any) {
     return res.status(500).json({ error: err?.message ?? "Failed to fetch eBay listings" });
+  }
+});
+
+router.get("/serper/source-match", async (req, res) => {
+  const title = typeof req.query.title === "string" ? req.query.title.trim() : "";
+  if (!title) return res.status(400).json({ error: "Missing title parameter" });
+
+  const apiKey = process.env.SERPER_API_KEY;
+  if (!apiKey) return res.status(500).json({ error: "SERPER_API_KEY not configured", debugLines: ["SERPER_API_KEY not set"] });
+
+  const debugLines: string[] = [];
+
+  // Strip non-ASCII and punctuation noise before searching
+  const cleanTitle = title
+    .replace(/[^\x20-\x7E]/g, " ")   // drop non-ASCII (emojis, fancy quotes, etc.)
+    .replace(/[^a-zA-Z0-9\s'\/#+.]/g, " ")  // keep letters, numbers, card-number chars
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
+  try {
+    debugLines.push(`Serper search (cleaned): "${cleanTitle}" (original: "${title}"`);
+    const serperRes = await fetch("https://google.serper.dev/search", {
+      method: "POST",
+      headers: { "X-API-KEY": apiKey, "Content-Type": "application/json" },
+      body: JSON.stringify({ q: cleanTitle, num: 10 }),
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!serperRes.ok) throw new Error(`Serper HTTP ${serperRes.status}`);
+
+    const serperData = await serperRes.json() as { organic?: { title?: string; link?: string; snippet?: string }[] };
+    const organic = serperData.organic ?? [];
+    debugLines.push(`Got ${organic.length} organic results`);
+    organic.forEach((r, i) => debugLines.push(`  [${i}] ${r.link ?? "(no link)"}`));
+
+    const pcResult = organic.find((r) => r.link && /pricecharting\.com\/game\//i.test(r.link));
+    if (!pcResult?.link) {
+      debugLines.push("No PriceCharting /game/ link found in Serper results");
+      return res.json({ found: false, debugLines });
+    }
+
+    debugLines.push(`Found PC link: ${pcResult.link}`);
+    const scraped = await scrapePriceChartingUrl(pcResult.link, title);
+    debugLines.push(`Scraped title: ${scraped.title}`);
+    debugLines.push(`Grade detected: ${scraped.grade ?? "none"}`);
+    debugLines.push(`Prices — loose: ${scraped.loosePrice}, complete: ${scraped.completePrice}, new: ${scraped.newPrice}, graded: ${scraped.gradedPrice}, tcgplayer: ${scraped.tcgPlayerPrice}`);
+    debugLines.push(`Graded sales found: ${scraped.gradedSalePrices.length} — [${scraped.gradedSalePrices.join(", ")}]`);
+    debugLines.push(`Graded sales range: low=${scraped.gradedSaleLow}, high=${scraped.gradedSaleHigh}`);
+
+    // Compute chart bounds
+    let chartLow: number | null = null;
+    let chartHigh: number | null = null;
+    if (scraped.grade !== null) {
+      // Graded card — use only PriceCharting graded sale data, never mix in TCGPlayer
+      if (scraped.gradedSaleLow !== null && scraped.gradedSaleHigh !== null) {
+        chartLow = scraped.gradedSaleLow;
+        chartHigh = scraped.gradedSaleHigh;
+      } else if (scraped.gradedPrice !== null) {
+        // No individual sales found — use the aggregate graded price for both ends
+        chartLow = scraped.gradedPrice;
+        chartHigh = scraped.gradedPrice;
+      }
+    } else {
+      // Non-graded: low = min(loose, tcgplayer), high = max(loose, tcgplayer)
+      const candidates = [scraped.loosePrice, scraped.tcgPlayerPrice].filter((v): v is number => v !== null);
+      if (candidates.length >= 2) {
+        chartLow = Math.min(...candidates);
+        chartHigh = Math.max(...candidates);
+      } else if (candidates.length === 1) {
+        chartLow = candidates[0];
+        chartHigh = candidates[0];
+      }
+    }
+    debugLines.push(`Chart bounds: low=${chartLow}, high=${chartHigh}`);
+
+    return res.json({
+      found: true,
+      pcUrl: scraped.url,
+      serperTitle: pcResult.title ?? null,
+      serperSnippet: pcResult.snippet ?? null,
+      scrapedTitle: scraped.title,
+      grade: scraped.grade,
+      loosePrice: scraped.loosePrice,
+      completePrice: scraped.completePrice,
+      newPrice: scraped.newPrice,
+      gradedPrice: scraped.gradedPrice,
+      gradedSaleLow: scraped.gradedSaleLow,
+      gradedSaleHigh: scraped.gradedSaleHigh,
+      tcgPlayerPrice: scraped.tcgPlayerPrice,
+      tcgPlayerUrl: scraped.tcgPlayerUrl,
+      chartLow,
+      chartHigh,
+      debugLines,
+    });
+  } catch (err: any) {
+    const message = err?.message ?? "Match failed";
+    debugLines.push(`Error: ${message}`);
+    console.error("[serper-source-match] error:", message);
+    return res.status(500).json({ error: message, debugLines });
   }
 });
 

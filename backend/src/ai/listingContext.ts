@@ -2,8 +2,9 @@ import OpenAI from "openai";
 import fetch from "node-fetch";
 import dotenv from "dotenv";
 import { logUsage } from "../services/usageLogger";
-import { findPriceChartingMatch } from "../priceSources/priceCharting";
+import { scrapePriceChartingUrl } from "../priceSources/priceCharting";
 import { extractPriceRange } from "../services/scoring/priceFairnessScore";
+import type { PriceSource } from "../priceSources/priceSources";
 
 dotenv.config({ quiet: true });
 
@@ -23,8 +24,7 @@ export interface ProductGroup {
   systemPrompt: string | null;
   priceLow: number | null;
   priceHigh: number | null;
-  estimatedShippingPrice: number | null;
-  usePriceCharting: boolean;
+  source: PriceSource | null;
   priceSource: string | null;
   priceChartingUrl: string | null;
   tcgPlayerUrl: string | null;
@@ -35,6 +35,7 @@ interface RawGroup {
   indices: number[];
   serperQuery: string;
   hasReliableMarketData: boolean;
+  source: PriceSource;
 }
 
 // ─── Serper ───────────────────────────────────────────────────────────────────
@@ -259,16 +260,42 @@ SERPER QUERY RULES:
 MARKET DATA RULE:
 Set "hasReliableMarketData" to false if the product has no standardized resale market — e.g. custom-made items, handmade art, bespoke/one-of-a-kind pieces, heavily modified items, or anything where price is entirely subjective and no consistent sold-price data exists online. Set it to true for anything with a real secondhand market: electronics, phones, golf clubs, sneakers, trading cards, games, instruments, bikes, etc.
 
+SOURCE RULE:
+Set "source" to "pricecharting" for trading cards (Pokémon, Magic: The Gathering, Yu-Gi-Oh, sports cards, any collectible card). Set "source" to "serper" for everything else (electronics, golf clubs, sneakers, instruments, etc.).
+
 Return ONLY a JSON array (no markdown, no backticks, no extra text):
 [
   {
     "canonicalName": "exact product name with key specs",
     "indices": [0, 3],
     "serperQuery": "targeted used resale price search query",
-    "hasReliableMarketData": true
+    "hasReliableMarketData": true,
+    "source": "serper"
   }
 ]
 `.trim();
+
+async function isCardQuery(query: string): Promise<boolean> {
+  try {
+    const response = await groq.chat.completions.create({
+      model: "llama-3.1-8b-instant",
+      messages: [
+        { role: "system", content: "Reply with only 'yes' or 'no'." },
+        { role: "user", content: `Is this search query for a trading card (Pokémon, Magic: The Gathering, Yu-Gi-Oh, sports cards, or any collectible card)?\n\nQuery: "${query}"` },
+      ],
+      max_tokens: 5,
+      temperature: 0,
+    });
+    logUsage("groq", "llama-3.1-8b-instant", response.usage);
+    const answer = (response.choices[0].message.content ?? "").trim().toLowerCase();
+    const isCard = answer.startsWith("yes");
+    console.log(`[isCardQuery] "${query}" → ${isCard ? "pricecharting" : "serper"} (raw: "${answer}")`);
+    return isCard;
+  } catch (err) {
+    console.error("[isCardQuery] failed:", err);
+    return false;
+  }
+}
 
 async function groupListings(titles: string[], query: string): Promise<RawGroup[]> {
   if (titles.length === 0) return [];
@@ -300,19 +327,21 @@ async function groupListings(titles: string[], query: string): Promise<RawGroup[
         canonicalName: g.canonicalName,
         indices: (g.indices as any[]).filter((i) => typeof i === "number"),
         serperQuery: g.serperQuery,
-        hasReliableMarketData: g.hasReliableMarketData !== false, // default true
+        hasReliableMarketData: g.hasReliableMarketData !== false,
+        source: g.source === "pricecharting" ? "pricecharting" : "serper",
       }));
 
     console.log("[groupListings] groups:", groups.map(g => ({
       canonicalName: g.canonicalName,
       indices: g.indices,
       serperQuery: g.serperQuery,
+      source: g.source,
     })));
 
     return groups;
   } catch (err) {
     console.error("[listingContext] Grouping failed, falling back to single group:", err);
-    return [{ canonicalName: query, indices: titles.map((_, i) => i), serperQuery: `${query} used resale price`, hasReliableMarketData: true }];
+    return [{ canonicalName: query, indices: titles.map((_, i) => i), serperQuery: `${query} used resale price`, hasReliableMarketData: true, source: "serper" }];
   }
 }
 
@@ -327,7 +356,6 @@ OUTPUT FORMAT — use exactly this structure, nothing else:
 
 PRICE_LOW: <integer USD, e.g. 450, or null>
 PRICE_HIGH: <integer USD, e.g. 700, or null>
-USE_PRICECHARTING: <true or false>
 ---
 <the full expert system prompt starts here>
 
@@ -379,7 +407,6 @@ RULES:
 - Draw on your own product knowledge where search data is thin
 - Everything after --- is plain prose and lists — no JSON, no markdown headers, no code blocks
 - PRICE_LOW and PRICE_HIGH are plain integers, e.g. 450, or the word null
-- USE_PRICECHARTING must be true for video games and TCG cards. Use false for everything else.
 `.trim();
 
 function parsePriceValue(raw: string): number | null {
@@ -389,24 +416,19 @@ function parsePriceValue(raw: string): number | null {
   return isNaN(v) ? null : v;
 }
 
-function parseEngineeredOutput(raw: string): { systemPrompt: string | null; priceLow: number | null; priceHigh: number | null; usePriceCharting: boolean } {
+function parseEngineeredOutput(raw: string): { systemPrompt: string | null; priceLow: number | null; priceHigh: number | null } {
   const lines = raw.split("\n");
   let priceLow: number | null = null;
   let priceHigh: number | null = null;
-  let usePriceCharting = false;
   let dividerIdx = -1;
 
   for (let i = 0; i < lines.length; i++) {
-    // Strip markdown bold markers (**PRICE_LOW:** or __PRICE_LOW:__) that LLMs sometimes add
     const line = lines[i].trim().replace(/^\*{1,2}|^\_{1,2}|\*{1,2}$|\_{1,2}$/g, "").trim();
     const upper = line.toUpperCase();
     if (upper.startsWith("PRICE_LOW:")) {
       priceLow = parsePriceValue(line.slice(line.indexOf(":") + 1).trim());
     } else if (upper.startsWith("PRICE_HIGH:")) {
       priceHigh = parsePriceValue(line.slice(line.indexOf(":") + 1).trim());
-    } else if (upper.startsWith("USE_PRICECHARTING:")) {
-      const value = line.slice(line.indexOf(":") + 1).trim().toLowerCase();
-      usePriceCharting = value === "true";
     } else if (line === "---") {
       dividerIdx = i;
       break;
@@ -426,13 +448,13 @@ function parseEngineeredOutput(raw: string): { systemPrompt: string | null; pric
       lines.slice(0, Math.min(dividerIdx >= 0 ? dividerIdx : 5, 5)).join("\n"));
   }
 
-  return { systemPrompt, priceLow, priceHigh, usePriceCharting };
+  return { systemPrompt, priceLow, priceHigh };
 }
 
 async function engineerPrompt(
   canonicalName: string,
   marketData: string,
-): Promise<{ systemPrompt: string | null; priceLow: number | null; priceHigh: number | null; usePriceCharting: boolean }> {
+): Promise<{ systemPrompt: string | null; priceLow: number | null; priceHigh: number | null }> {
   try {
     console.log(`[engineerPrompt] → "${canonicalName}" (market data: ${marketData.length} chars)`);
     const response = await groq.chat.completions.create({
@@ -447,51 +469,12 @@ async function engineerPrompt(
     logUsage("groq", "llama-3.1-8b-instant", response.usage);
 
     const result = parseEngineeredOutput((response.choices[0].message.content ?? "").trim());
-    console.log(`[engineerPrompt] ✓ "${canonicalName}" — priceLow=${result.priceLow} priceHigh=${result.priceHigh} usePriceCharting=${result.usePriceCharting} systemPrompt=${result.systemPrompt ? result.systemPrompt.length + " chars" : "null"}`);
+    console.log(`[engineerPrompt] ✓ "${canonicalName}" — priceLow=${result.priceLow} priceHigh=${result.priceHigh} systemPrompt=${result.systemPrompt ? result.systemPrompt.length + " chars" : "null"}`);
     return result;
   } catch (err) {
     console.error(`[listingContext] Prompt engineering failed for "${canonicalName}":`, err);
-    return { systemPrompt: null, priceLow: null, priceHigh: null, usePriceCharting: false };
+    return { systemPrompt: null, priceLow: null, priceHigh: null };
   }
-}
-
-// ─── Shipping weight estimation ──────────────────────────────────────────────
-
-
-function parseWeightLbs(text: string): number | null {
-  // Ordered by specificity — prefer "shipping weight" matches first
-  const patterns: [RegExp, (v: number) => number][] = [
-    [/shipping\s+weight[:\s]+(\d+(?:\.\d+)?)\s*(?:lbs?|pounds?)/i, v => v],
-    [/(?:package|item|product)\s+weight[:\s]+(\d+(?:\.\d+)?)\s*(?:lbs?|pounds?)/i, v => v],
-    [/(\d+(?:\.\d+)?)\s*(?:lbs?|pounds?)/i, v => v],
-    [/shipping\s+weight[:\s]+(\d+(?:\.\d+)?)\s*(?:oz|ounces?)/i, v => v / 16],
-    [/(\d+(?:\.\d+)?)\s*(?:oz|ounces?)/i, v => v / 16],
-    [/(\d+(?:\.\d+)?)\s*(?:kg|kilograms?)/i, v => v * 2.205],
-    [/(\d+(?:\.\d+)?)\s*g\b/i, v => v / 453.6],
-  ];
-
-  for (const [pattern, convert] of patterns) {
-    const match = text.match(pattern);
-    if (match) {
-      const val = parseFloat(match[1]);
-      if (Number.isFinite(val) && val > 0) return convert(val);
-    }
-  }
-  return null;
-}
-
-// US domestic average (UPS Ground zones 4–6 blend). Rounded to nearest $10.
-function estimateShippingFromWeight(lbs: number): number {
-  let raw: number;
-  if (lbs <= 0.5) raw = 8;
-  else if (lbs <= 1)  raw = 9;
-  else if (lbs <= 2)  raw = 11;
-  else if (lbs <= 3)  raw = 13;
-  else if (lbs <= 5)  raw = 16;
-  else if (lbs <= 10) raw = 22;
-  else if (lbs <= 20) raw = 32;
-  else raw = 45;
-  return Math.round(raw / 10) * 10;
 }
 
 // ─── Main export ──────────────────────────────────────────────────────────────
@@ -499,19 +482,23 @@ function estimateShippingFromWeight(lbs: number): number {
 export async function groupAndContextualize(
   titles: string[],
   query: string,
-  hasCalculatedShipping?: boolean[],
 ): Promise<ProductGroup[]> {
   if (titles.length === 0) return [];
 
   const serperApiKey = process.env.SERPER_API_KEY;
 
-  // Step 1: group by identical product (8b-instant, one call)
-  const rawGroups = await groupListings(titles, query);
+  // Step 1: group by identical product + detect card query (two parallel 8b calls)
+  const [rawGroups, isCard] = await Promise.all([
+    groupListings(titles, query),
+    isCardQuery(query),
+  ]);
 
-  // Steps 2+3: per group — Serper ×2 (+ optional weight search) then 8b engineers the expert prompt.
-  // All groups start concurrently; a semaphore caps how many groups can be in the Serper phase at once
-  // (each group fires 2–3 parallel calls, so 2 concurrent groups ≈ 4–6 simultaneous Serper requests).
-  // Groq fires immediately when a group's own Serper results land — it never waits on other groups.
+  if (isCard) {
+    for (const g of rawGroups) g.source = "pricecharting";
+  }
+
+  // Steps 2+3: per group — Serper fetches then 8b engineers the expert prompt.
+  // Semaphore caps concurrent groups in the Serper phase.
   const MAX_CONCURRENT_SERPER_GROUPS = 2;
   let serperGroupSlots = MAX_CONCURRENT_SERPER_GROUPS;
   const serperGroupQueue: (() => void)[] = [];
@@ -526,218 +513,183 @@ export async function groupAndContextualize(
 
   const groups: ProductGroup[] = await Promise.all(
     rawGroups.map(async (group): Promise<ProductGroup> => {
-        const needsWeightLookup =
-          serperApiKey &&
-          hasCalculatedShipping &&
-          group.indices.some(idx => hasCalculatedShipping[idx]);
+      const isPriceCharting = group.source === "pricecharting";
+      const skipPriceSearch = !group.hasReliableMarketData;
+      console.log(`[group] "${group.canonicalName}" → source=${group.source} indices=[${group.indices.join(",")}]`);
 
-        const skipPriceSearch = !group.hasReliableMarketData;
-        if (skipPriceSearch) {
-          console.log(`[group] "${group.canonicalName}" — skipping price search (no reliable market data)`);
-        }
+      await acquireSerperGroup();
 
-        await acquireSerperGroup();
-        let [priceJson, inspectJson, weightJson]: [any, any, any] = [null, null, null];
-        try {
-          [priceJson, inspectJson, weightJson] = await Promise.all([
+      let priceLow: number | null = null;
+      let priceHigh: number | null = null;
+      let priceSource: string | null = null;
+      let priceChartingUrl: string | null = null;
+      let tcgPlayerUrl: string | null = null;
+      let marketData: string | null = null;
+
+      try {
+        if (isPriceCharting) {
+          // ── PriceCharting path: one Serper search to find the PC link ──────────
+          const firstTitle = titles[group.indices[0]] ?? group.canonicalName;
+          const CONDITION_RE = /\b(near\s+mint|lightly\s+played|moderately\s+played|heavily\s+played|mint|nm-?m?|excellent|exc|very\s+good|damaged|unplayed|played|like\s+new|brand\s+new|poor|fair|good|used|sealed|nm|lp|mp|hp|dm|dmg)\b/gi;
+          const cleanQuery = firstTitle
+            .replace(CONDITION_RE, " ")
+            .replace(/[^\x20-\x7E]/g, " ")
+            .replace(/[^a-zA-Z0-9\s'\/#+.]/g, " ")
+            .replace(/\s{2,}/g, " ")
+            .trim();
+
+          const serperJson = serperApiKey
+            ? await serperSearch(serperApiKey, cleanQuery, 10).catch(() => null)
+            : null;
+
+          const organic: { title?: string; link?: string; snippet?: string }[] = serperJson?.organic ?? [];
+          const pcResult = organic.find((r) => r.link && /pricecharting\.com\/game\//i.test(r.link));
+
+          if (pcResult?.link) {
+            try {
+              const scraped = await scrapePriceChartingUrl(pcResult.link, firstTitle);
+              priceChartingUrl = scraped.url;
+              tcgPlayerUrl = scraped.tcgPlayerUrl;
+
+              if (scraped.grade !== null) {
+                // Graded: use actual sale range from completed-auctions section
+                if (scraped.gradedSaleLow !== null && scraped.gradedSaleHigh !== null) {
+                  priceLow = scraped.gradedSaleLow;
+                  priceHigh = scraped.gradedSaleHigh;
+                } else if (scraped.gradedPrice !== null) {
+                  priceLow = scraped.gradedPrice;
+                  priceHigh = scraped.gradedPrice;
+                }
+                priceSource = "PRICECHARTING_GRADED";
+              } else {
+                // Ungraded: pair loosePrice with the best available second price.
+                // Priority: tcgPlayerPrice → completePrice → newPrice
+                const secondPrice = scraped.tcgPlayerPrice ?? scraped.completePrice ?? scraped.newPrice ?? null;
+                const firstPrice = scraped.loosePrice;
+                if (firstPrice !== null && secondPrice !== null) {
+                  priceLow = Math.min(firstPrice, secondPrice);
+                  priceHigh = Math.max(firstPrice, secondPrice);
+                  priceSource = scraped.tcgPlayerPrice !== null ? "PRICECHARTING/TCGPLAYER" : "PRICECHARTING";
+                } else if (firstPrice !== null || secondPrice !== null) {
+                  priceLow = priceHigh = firstPrice ?? secondPrice;
+                  priceSource = "PRICECHARTING";
+                }
+              }
+
+              // Build brief market context from PC data for the system prompt
+              const pcLines: string[] = [`PriceCharting data for "${group.canonicalName}":`];
+              if (scraped.grade !== null) {
+                if (scraped.gradedSaleLow !== null && scraped.gradedSaleHigh !== null)
+                  pcLines.push(`- Grade ${scraped.grade} sale range: $${scraped.gradedSaleLow.toFixed(2)} – $${scraped.gradedSaleHigh.toFixed(2)}`);
+                else if (scraped.gradedPrice !== null)
+                  pcLines.push(`- Grade ${scraped.grade} market price: $${scraped.gradedPrice.toFixed(2)}`);
+              } else {
+                if (scraped.loosePrice !== null) pcLines.push(`- Loose/raw price: $${scraped.loosePrice.toFixed(2)}`);
+                if (scraped.tcgPlayerPrice !== null) pcLines.push(`- TCGPlayer price: $${scraped.tcgPlayerPrice.toFixed(2)}`);
+              }
+              marketData = pcLines.join("\n");
+            } catch (err) {
+              console.error(`[listingContext] PC scrape failed for "${group.canonicalName}":`, err);
+            }
+          }
+
+        } else {
+          // ── Serper path: price + inspection searches ──────────────────────────
+          const [priceJson, inspectJson] = await Promise.all([
             serperApiKey && !skipPriceSearch
               ? serperSearch(serperApiKey, `${group.serperQuery} used resale price sold 2025 2026`, 8).catch(() => null)
               : Promise.resolve(null),
             serperApiKey
               ? serperSearch(serperApiKey, `${group.canonicalName} used buying guide inspect condition accessories what to look for`, 8).catch(() => null)
               : Promise.resolve(null),
-            needsWeightLookup
-              ? serperSearch(serperApiKey!, `${group.canonicalName} shipping weight`, 5).catch(() => null)
-              : Promise.resolve(null),
           ]);
-        } finally {
-          releaseSerperGroup();
-        }
 
-        // Extract price range directly from Serper results — primary source
-        const serperPrices = priceJson ? extractPricesFromSerper(priceJson) : { priceLow: null, priceHigh: null };
+          const serperPrices = priceJson ? extractPricesFromSerper(priceJson) : { priceLow: null, priceHigh: null };
+          priceLow = serperPrices.priceLow;
+          priceHigh = serperPrices.priceHigh;
+          if (priceLow != null || priceHigh != null) priceSource = "SERPER";
 
-        // Build unified market data string
-        const parts: string[] = [];
-
-        if (priceJson) {
-          const ab = priceJson?.answerBox;
-          if (ab?.answer) parts.push(`Price summary: ${ab.answer}`);
-          else if (ab?.snippet) parts.push(`Price summary: ${ab.snippet}`);
-          if (priceJson?.knowledgeGraph?.description) parts.push(`Product overview: ${priceJson.knowledgeGraph.description}`);
-          const rows = extractOrganic(priceJson, 8);
-          if (rows.length) parts.push(`Pricing data:\n${rows.map((s: string, i: number) => `${i + 1}. ${s}`).join("\n")}`);
-        }
-
-        if (inspectJson) {
-          const ab = inspectJson?.answerBox;
-          if (ab?.answer || ab?.snippet) parts.push(`Buying guide summary: ${ab.answer ?? ab.snippet}`);
-          const rows = extractOrganic(inspectJson, 8);
-          if (rows.length) parts.push(`Condition & inspection data:\n${rows.map((s: string, i: number) => `${i + 1}. ${s}`).join("\n")}`);
-        }
-
-        const marketData = parts.length > 0 ? parts.join("\n\n") : null;
-
-        // Resolve estimated shipping price from weight search
-        let estimatedShippingPrice: number | null = null;
-        if (weightJson) {
-          const answerText = [weightJson?.answerBox?.answer, weightJson?.answerBox?.snippet]
-            .filter(Boolean).join(" ");
-          const snippetText = extractOrganic(weightJson, 5).join(" ");
-          const weightLbs = parseWeightLbs(`${answerText} ${snippetText}`);
-          if (weightLbs !== null) {
-            const shippingLbs = Math.max(weightLbs, 0.5) + (weightLbs < 0.5 ? 0.5 : 0);
-            estimatedShippingPrice = estimateShippingFromWeight(shippingLbs);
+          const parts: string[] = [];
+          if (priceJson) {
+            const ab = priceJson?.answerBox;
+            if (ab?.answer) parts.push(`Price summary: ${ab.answer}`);
+            else if (ab?.snippet) parts.push(`Price summary: ${ab.snippet}`);
+            if (priceJson?.knowledgeGraph?.description) parts.push(`Product overview: ${priceJson.knowledgeGraph.description}`);
+            const rows = extractOrganic(priceJson, 8);
+            if (rows.length) parts.push(`Pricing data:\n${rows.map((s: string, i: number) => `${i + 1}. ${s}`).join("\n")}`);
           }
-        }
-        // Fallback: weight parse failed but this group has calculated-shipping listings — use a generic estimate
-        if (estimatedShippingPrice === null && needsWeightLookup) {
-          estimatedShippingPrice = estimateShippingFromWeight(1);
-        }
-
-        if (!marketData) {
-          return {
-            canonicalName: group.canonicalName,
-            specificity: "specific",
-            indices: group.indices,
-            systemPrompt: null,
-            priceLow: null,
-            priceHigh: null,
-            estimatedShippingPrice,
-            usePriceCharting: false,
-            priceSource: null,
-            priceChartingUrl: null,
-            tcgPlayerUrl: null,
-          };
-        }
-
-        const {
-          systemPrompt: rawSystemPrompt,
-          priceLow: groqPriceLow,
-          priceHigh: groqPriceHigh,
-          usePriceCharting,
-        } = await engineerPrompt(group.canonicalName, marketData);
-
-        let systemPrompt = rawSystemPrompt;
-        let priceLow = serperPrices.priceLow ?? groqPriceLow;
-        let priceHigh = serperPrices.priceHigh ?? groqPriceHigh;
-        let priceSource: string | null = priceLow != null || priceHigh != null ? "SERPER" : null;
-        let priceChartingUrl: string | null = null;
-        let tcgPlayerUrl: string | null = null;
-
-        if (usePriceCharting) {
-          try {
-            const groupTitles = group.indices.map(i => titles[i] ?? "").filter(Boolean);
-            const titlesToTry = groupTitles.length > 0 ? groupTitles : [group.canonicalName];
-
-            let pcMatchResult: Awaited<ReturnType<typeof findPriceChartingMatch>> | null = null;
-            let foundCardNumber: string | null = null;
-
-            for (const pcTitle of titlesToTry) {
-              // Same card number as an already-matched URL — skip the round-trip.
-              if (foundCardNumber && new RegExp(`\\b${foundCardNumber}\\b`).test(pcTitle)) {
-                console.log(`[listingContext] PC: skipping "${pcTitle.slice(0, 60)}" — card ${foundCardNumber} already matched`);
-                continue;
-              }
-              // Have a match and the current title is a different card — stop here.
-              if (pcMatchResult) break;
-
-              const attempt = await findPriceChartingMatch(pcTitle);
-              if (attempt.found && attempt.url) {
-                pcMatchResult = attempt;
-                // Extract the last numeric segment from the URL slug (e.g. charizard-ex-223 → "223")
-                const urlPath = attempt.url.split(/[?#]/)[0];
-                const numMatches = [...urlPath.matchAll(/-(\d{1,4})/g)];
-                foundCardNumber = numMatches.length > 0 ? numMatches[numMatches.length - 1][1] : null;
-              }
-            }
-
-            const pcMatch = pcMatchResult;
-            if (pcMatch && pcMatch.found && pcMatch.url) {
-              priceChartingUrl = pcMatch.url;
-              const isGraded = pcMatch.grade != null;
-
-              if (!isGraded) tcgPlayerUrl = pcMatch.tcgPlayerUrl ?? null;
-
-              let hasPrices = false;
-              if (isGraded) {
-                // priceLow = 75% of the way from TCGPlayer raw toward graded price
-                // priceHigh = graded price
-                const gradedPrice = pcMatch.gradedPrice ?? pcMatch.price;
-                const rawPrice = pcMatch.tcgPlayerPrice;
-                if (gradedPrice != null) {
-                  priceHigh = gradedPrice;
-                  priceLow = rawPrice != null
-                    ? Math.round((rawPrice + 0.75 * (gradedPrice - rawPrice)) * 100) / 100
-                    : gradedPrice;
-                  hasPrices = true;
-                }
-              } else {
-                // priceLow = PriceCharting loose, priceHigh = TCGPlayer market price.
-                // Both are authoritative sources — don't let Serper override them.
-                if (pcMatch.price != null && pcMatch.tcgPlayerPrice != null) {
-                  priceLow = Math.min(pcMatch.price, pcMatch.tcgPlayerPrice);
-                  priceHigh = Math.max(pcMatch.price, pcMatch.tcgPlayerPrice);
-                  hasPrices = true;
-                } else if (pcMatch.price != null) {
-                  // TCGPlayer unavailable — PC price is the only anchor, keep Serper range
-                  priceLow = pcMatch.price;
-                  // priceHigh stays from Serper/Groq (already set above)
-                  hasPrices = priceHigh != null;
-                }
-              }
-
-              if (hasPrices) {
-                priceSource = isGraded ? "PRICECHARTING_GRADED" : "PRICECHARTING/TCGPLAYER";
-
-                if (systemPrompt) {
-                  let pcLabel: string;
-                  if (isGraded) {
-                    const gradePrice = (pcMatch.gradedPrice ?? pcMatch.price)!;
-                    pcLabel = `Grade ${pcMatch.grade} graded market price $${gradePrice.toFixed(2)}`;
-                  } else if (pcMatch.price != null && pcMatch.tcgPlayerPrice != null) {
-                    pcLabel = `PriceCharting loose $${pcMatch.price.toFixed(2)}, TCGPlayer $${pcMatch.tcgPlayerPrice.toFixed(2)}`;
-                  } else if (pcMatch.price != null) {
-                    pcLabel = `PriceCharting loose $${pcMatch.price.toFixed(2)}`;
-                  } else {
-                    pcLabel = `$${priceLow!.toFixed(2)}–$${priceHigh!.toFixed(2)}`;
-                  }
-                  systemPrompt = `AUTHORITATIVE PRICE DATA: The verified market price for this card is ${pcLabel} (source: PriceCharting). Use this — not any Serper-derived estimate below — as the sole basis for priceFairness scoring.\n\n${systemPrompt}`;
-                }
-              }
-            }
-          } catch (err) {
-            console.error(`[listingContext] PriceCharting lookup failed for "${group.canonicalName}":`, err);
+          if (inspectJson) {
+            const ab = inspectJson?.answerBox;
+            if (ab?.answer || ab?.snippet) parts.push(`Buying guide summary: ${ab.answer ?? ab.snippet}`);
+            const rows = extractOrganic(inspectJson, 8);
+            if (rows.length) parts.push(`Condition & inspection data:\n${rows.map((s: string, i: number) => `${i + 1}. ${s}`).join("\n")}`);
           }
+          marketData = parts.length > 0 ? parts.join("\n\n") : null;
         }
+      } finally {
+        releaseSerperGroup();
+      }
 
-        // Last resort: parse dollar amounts out of the system prompt — same text
-        // calculatePriceFairness uses internally, so the chart matches the score.
-        if ((priceLow == null || priceHigh == null) && systemPrompt) {
-          const extracted = extractPriceRange(systemPrompt);
-          if (extracted) {
-            if (priceLow == null)  priceLow  = extracted[0];
-            if (priceHigh == null) priceHigh = extracted[1];
-            if (priceSource == null) priceSource = "CONTEXT";
-          }
-        }
-
-        console.log(`[group] "${group.canonicalName}" — priceLow=${priceLow} priceHigh=${priceHigh} usePriceCharting=${usePriceCharting} source=${priceSource} (serper: ${serperPrices.priceLow}/${serperPrices.priceHigh}, groq: ${groqPriceLow}/${groqPriceHigh})`);
-
+      if (!marketData) {
+        console.log(`[group] "${group.canonicalName}" — no market data, source=${group.source}`);
         return {
           canonicalName: group.canonicalName,
           specificity: "specific",
           indices: group.indices,
-          systemPrompt,
+          systemPrompt: null,
           priceLow,
           priceHigh,
-          estimatedShippingPrice,
-          usePriceCharting,
+          source: group.source,
           priceSource,
           priceChartingUrl,
           tcgPlayerUrl,
         };
-      }),
+      }
+
+      const { systemPrompt: rawSystemPrompt, priceLow: groqPriceLow, priceHigh: groqPriceHigh } =
+        await engineerPrompt(group.canonicalName, marketData);
+
+      let systemPrompt = rawSystemPrompt;
+
+      // For serper groups, prefer Serper prices over Groq-extracted ones
+      if (!isPriceCharting) {
+        priceLow = priceLow ?? groqPriceLow;
+        priceHigh = priceHigh ?? groqPriceHigh;
+      }
+
+      // Prepend authoritative PC price label to system prompt
+      if (isPriceCharting && priceChartingUrl && systemPrompt && priceLow != null && priceHigh != null) {
+        const pcLabel = priceLow === priceHigh
+          ? `$${priceLow.toFixed(2)}`
+          : `$${priceLow.toFixed(2)}–$${priceHigh.toFixed(2)}`;
+        systemPrompt = `AUTHORITATIVE PRICE DATA: The verified market price for this card is ${pcLabel} (source: PriceCharting). Use this as the sole basis for priceFairness scoring.\n\n${systemPrompt}`;
+      }
+
+      // Last resort: parse dollar amounts out of the system prompt
+      if ((priceLow == null || priceHigh == null) && systemPrompt) {
+        const extracted = extractPriceRange(systemPrompt);
+        if (extracted) {
+          if (priceLow == null)  priceLow  = extracted[0];
+          if (priceHigh == null) priceHigh = extracted[1];
+          if (priceSource == null) priceSource = "CONTEXT";
+        }
+      }
+
+      console.log(`[group] "${group.canonicalName}" — source=${group.source} priceLow=${priceLow} priceHigh=${priceHigh} priceSource=${priceSource}`);
+
+      return {
+        canonicalName: group.canonicalName,
+        specificity: "specific",
+        indices: group.indices,
+        systemPrompt,
+        priceLow,
+        priceHigh,
+        source: group.source,
+        priceSource,
+        priceChartingUrl,
+        tcgPlayerUrl,
+      };
+    }),
   );
 
   return groups;

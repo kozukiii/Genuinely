@@ -308,6 +308,80 @@ Respond only as JSON in this exact shape:
   }
 }
 
+export type ScrapedPriceChartingItem = {
+  url: string;
+  title: string;
+  grade: number | null;
+  loosePrice: number | null;
+  completePrice: number | null;
+  newPrice: number | null;
+  gradedPrice: number | null;
+  gradedSalePrices: number[];
+  gradedSaleLow: number | null;
+  gradedSaleHigh: number | null;
+  tcgPlayerPrice: number | null;
+  tcgPlayerUrl: string | null;
+};
+
+export async function scrapePriceChartingUrl(itemUrl: string, rawTitle?: string): Promise<ScrapedPriceChartingItem> {
+  const rawGrade = rawTitle ? extractGrade(rawTitle) : null;
+  const gradeConfig = rawGrade !== null ? gradeToConfig(rawGrade) : null;
+  const grade = gradeConfig !== null ? rawGrade : null; // ignore grades < 7 (no PC config)
+
+  const res = await fetchPC(itemUrl);
+  if (!res.ok) throw new Error(`PriceCharting fetch failed: HTTP ${res.status}`);
+  const html = await res.text();
+  const $item = load(html);
+
+  const title =
+    $item("h1").first().text().trim() ||
+    $item("title").first().text().trim() ||
+    itemUrl;
+
+  const loosePrice = parsePriceCell($item("#used_price").first().text());
+  const completePrice = parsePriceCell($item("#complete_price").first().text());
+  const newPrice = parsePriceCell($item("#new_price").first().text());
+  const gradedPrice = gradeConfig ? parsePriceCell($item(gradeConfig.priceId).first().text()) : null;
+
+  // Scrape individual sale prices from the graded completed-auctions section.
+  // Each sale row has id="ebay-XXXX". The accepted price is the first span.js-price
+  // inside td.numeric:not(.listed-price) — this skips the "listed price" shown for
+  // best-offer sales where two js-price spans appear.
+  let gradedSalePrices: number[] = [];
+  let gradedSaleLow: number | null = null;
+  let gradedSaleHigh: number | null = null;
+  if (gradeConfig) {
+    const $section = $item(`.${gradeConfig.fragment}`);
+    $section.find("tr[id^='ebay-']").each((_, row) => {
+      const priceSpan = $item(row).find("td.numeric:not(.listed-price) span.js-price").first();
+      const price = parsePriceCell(priceSpan.text().trim());
+      if (price !== null && price >= 0.5) gradedSalePrices.push(price);
+    });
+    if (gradedSalePrices.length > 0) {
+      gradedSaleLow = Math.min(...gradedSalePrices);
+      gradedSaleHigh = Math.max(...gradedSalePrices);
+    }
+  }
+
+  const tcgPlayerRow = $item("tr[data-source-name='TCGPlayer']").first().length
+    ? $item("tr[data-source-name='TCGPlayer']").first()
+    : $item("tr").filter((_, row) => $item(row).text().includes("TCGPlayer")).first();
+  const tcgPlayerPrice = parsePriceCell(tcgPlayerRow.text());
+  const rawTcgHrefs = [
+    ...tcgPlayerRow.find("a[data-affiliate='TCGPlayer']").map((_, link) => $item(link).attr("href") ?? "").get(),
+    ...tcgPlayerRow.find("a").map((_, link) => $item(link).attr("href") ?? "").get(),
+    ...$item("a").map((_, link) => $item(link).attr("href") ?? "").get(),
+  ].filter((href) => /tcgplayer/i.test(href));
+  const tcgPlayerUrl =
+    rawTcgHrefs.map(normalizeTcgPlayerUrl).find((url): url is string => !!url)
+    ?? buildTcgPlayerUrlFromId($item.text())
+    ?? null;
+
+  const finalUrl = gradeConfig ? `${itemUrl}#${gradeConfig.fragment}` : itemUrl;
+
+  return { url: finalUrl, title, grade, loosePrice, completePrice, newPrice, gradedPrice, gradedSalePrices, gradedSaleLow, gradedSaleHigh, tcgPlayerPrice, tcgPlayerUrl };
+}
+
 export type PriceChartingMatchResult = {
   attemptedQueries: string[];
   matchedQuery: string | null;

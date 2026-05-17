@@ -82,13 +82,9 @@ async function scoreSingleListingWithContext(listing: any) {
     return result;
   }
 
-  const groups = await groupAndContextualize([title], title, [!!enriched.shippingCalculated]);
+  const groups = await groupAndContextualize([title], title);
   const group = groups[0] ?? null;
-
-  // Apply estimated shipping before scoring so the AI has a number to judge
-  const toScore = group?.estimatedShippingPrice != null && enriched.shippingCalculated
-    ? { ...enriched, shippingPrice: group.estimatedShippingPrice, shippingEstimated: true, shippingCalculated: undefined }
-    : enriched;
+  const toScore = enriched;
 
   const [result] = await scoreListings([toScore], null, group?.systemPrompt ?? null, group?.priceLow ?? null, group?.priceHigh ?? null);
 
@@ -194,8 +190,7 @@ router.post("/context", async (req, res) => {
 
   try {
     const titles: string[] = listings.map((l: any) => (typeof l.title === "string" ? l.title : ""));
-    const shippingFlags: boolean[] = listings.map((l: any) => !!l.shippingCalculated);
-    const groups = await groupAndContextualize(titles, query, shippingFlags);
+    const groups = await groupAndContextualize(titles, query);
     return res.json({ groups });
   } catch (err: any) {
     console.error("context error:", err);

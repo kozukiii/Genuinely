@@ -42,7 +42,6 @@ const SEARCH_PAGE_KEY = "search:page";
 const SEARCH_FILTERS_KEY = "search:filters";
 const SEARCH_PIPELINE_KEY = "search:pipeline";
 const SEARCH_PENDING_KEY = "search:pending";
-const USE_PRICECHARTING_DEBUG_PREFIX = "USE_PRICECHARTING:";
 
 const DEFAULT_FILTERS: FilterState = {
   minPrice: "",
@@ -111,17 +110,6 @@ async function fetchFromApi(
   return data as Listing[];
 }
 
-function appendUsePriceChartingDebugInfo(listing: Listing, usePriceCharting: boolean): Listing {
-  const withoutExistingFlag = (listing.debugInfo ?? "").replace(
-    /\n*\s*USE_PRICECHARTING:\s*(true|false)\s*$/i,
-    ""
-  );
-
-  return {
-    ...listing,
-    debugInfo: `${withoutExistingFlag}${withoutExistingFlag ? "\n\n" : ""}${USE_PRICECHARTING_DEBUG_PREFIX} ${usePriceCharting}`,
-  };
-}
 
 function stripQueryCategoryDebugInfo(listing: Listing): Listing {
   const cleanedDebugInfo = (listing.debugInfo ?? "").replace(
@@ -203,7 +191,7 @@ async function runAnalysisPipeline(
 
   onStatus?.({ phase: "context" });
 
-  async function retryUnscoredListings(scored: Listing[], usePriceCharting: boolean): Promise<Listing[]> {
+  async function retryUnscoredListings(scored: Listing[]): Promise<Listing[]> {
     const unresolved = scored.filter((l) => l.aiScore == null);
     if (unresolved.length === 0) return scored;
 
@@ -219,10 +207,7 @@ async function runAnalysisPipeline(
           });
           if (!res.ok) return;
           const retried = await res.json() as Listing;
-          repaired.set(
-            `${retried.source}:${retried.id}`,
-            appendUsePriceChartingDebugInfo(retried, usePriceCharting)
-          );
+          repaired.set(`${retried.source}:${retried.id}`, retried);
         } catch {
           // keep original unresolved listing
         }
@@ -246,8 +231,6 @@ async function runAnalysisPipeline(
     priceSource?: string | null;
     priceChartingUrl?: string | null;
     tcgPlayerUrl?: string | null;
-    estimatedShippingPrice?: number | null;
-    usePriceCharting?: boolean;
   }>;
 
   try {
@@ -288,20 +271,11 @@ async function runAnalysisPipeline(
       if (groupListings.length === 0) return;
 
       try {
-        // Patch estimated shipping onto calculated-shipping listings before scoring
-        const patchedListings = group.estimatedShippingPrice != null
-          ? groupListings.map((l: Listing) =>
-              l.shippingCalculated
-                ? { ...l, shippingPrice: group.estimatedShippingPrice, shippingEstimated: true, shippingCalculated: undefined }
-                : l
-            )
-          : groupListings;
-
         const res = await fetch(`${API_BASE}/api/search/batch-analyze`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            listings: patchedListings,
+            listings: groupListings,
             systemPrompt: group.systemPrompt,
             priceLow: group.priceLow ?? null,
             priceHigh: group.priceHigh ?? null,
@@ -313,9 +287,7 @@ async function runAnalysisPipeline(
         });
         if (!res.ok) throw new Error(`batch-analyze HTTP ${res.status}`);
         const scored: Listing[] = await res.json();
-        const stabilized = (await retryUnscoredListings(scored, group.usePriceCharting === true)).map((listing) =>
-          appendUsePriceChartingDebugInfo(listing, group.usePriceCharting === true)
-        );
+        const stabilized = await retryUnscoredListings(scored);
 
         if (signal.aborted) return;
 

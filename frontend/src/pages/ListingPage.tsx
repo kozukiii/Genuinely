@@ -50,12 +50,6 @@ function sanitizeVisibleText(value?: string | null) {
   return normalized;
 }
 
-function extractUsePriceChartingDebugLine(value?: string | null) {
-  if (!value) return null;
-  const match = value.match(/USE_PRICECHARTING:\s*(true|false)/i);
-  return match ? `USE_PRICECHARTING: ${match[1].toLowerCase()}` : null;
-}
-
 function usesPriceChartingDebugFlag(value?: string | null) {
   return /USE_PRICECHARTING:\s*true/i.test(value ?? "");
 }
@@ -446,12 +440,9 @@ export default function ListingPage() {
         throw new Error(body?.error ?? `HTTP ${res.status}`);
       }
       const data = await res.json();
-      const usePriceChartingDebugLine = extractUsePriceChartingDebugLine(listing.debugInfo);
-      const mergedDebugInfo = [data.debugInfo, usePriceChartingDebugLine].filter(Boolean).join("\n\n");
       const enriched: Listing = {
         ...listing,
         ...data,
-        ...(mergedDebugInfo ? { debugInfo: mergedDebugInfo } : {}),
         analyzedAt: undefined,
       };
       const withTs = { ...enriched, analyzedAt: data.analyzedAt ?? new Date().toISOString() };
@@ -571,7 +562,7 @@ export default function ListingPage() {
   const priceChartingUrl = ai.priceChartingUrl ?? null;
   const tcgPlayerUrl = ai.tcgPlayerUrl ?? null;
   const showPriceSourceLinks =
-    (ai.priceSource === "PRICECHARTING/TCGPLAYER" || usesPriceChartingDebugFlag(ai.debugInfo))
+    (ai.priceSource?.startsWith("PRICECHARTING") || usesPriceChartingDebugFlag(ai.debugInfo))
     && (priceChartingUrl !== null || tcgPlayerUrl !== null);
   const targetScore = ai.aiScore ?? 0;
   const fillProgress = targetScore > 0

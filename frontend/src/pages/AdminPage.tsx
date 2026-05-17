@@ -104,6 +104,10 @@ export default function AdminPage() {
             <span className="admin-card-name">PriceCharting Debug</span>
             <span className="admin-card-note">Debug PriceCharting queries</span>
           </Link>
+          <Link to="/admin/serper-source-match" className="admin-card admin-card--link">
+            <span className="admin-card-name">Serper Source Matching</span>
+            <span className="admin-card-note">Find PriceCharting links via Serper search</span>
+          </Link>
         </div>
       </section>
 

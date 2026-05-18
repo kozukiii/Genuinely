@@ -733,38 +733,44 @@ async function fetchMarketplaceListingByContainerQuery(listingId: string): Promi
     ...MARKETPLACE_PDP_RELAY_PROVIDERS,
   };
 
-  try {
-    const [containerRes, mediaRes] = await Promise.all([
-      makeGraphqlRequest(listingId, MARKETPLACE_PDP_CONTAINER_DOC_ID, "MarketplacePDPContainerQuery", containerVars),
-      makeGraphqlRequest(listingId, MARKETPLACE_PDP_MEDIA_DOC_ID, "MarketplacePDPC2CMediaViewerWithImagesQuery", { targetId: listingId }),
-    ]);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const [containerRes, mediaRes] = await Promise.all([
+        makeGraphqlRequest(listingId, MARKETPLACE_PDP_CONTAINER_DOC_ID, "MarketplacePDPContainerQuery", containerVars),
+        makeGraphqlRequest(listingId, MARKETPLACE_PDP_MEDIA_DOC_ID, "MarketplacePDPC2CMediaViewerWithImagesQuery", { targetId: listingId }),
+      ]);
 
-    if (containerRes.status !== 200) {
-      console.warn(`[marketplace:containerQuery] HTTP ${containerRes.status} for listing ${listingId}`);
+      if (containerRes.status !== 200) {
+        console.warn(`[marketplace:containerQuery] HTTP ${containerRes.status} for listing ${listingId}`);
+        if (attempt < 1) continue;
+        return null;
+      }
+
+      const containerJson = await containerRes.json() as any;
+      const details = containerJson?.data?.viewer?.marketplace_product_details_page ?? null;
+
+      if (!details?.target?.marketplace_listing_title) {
+        console.warn(`[marketplace:containerQuery] No listing data in response for ${listingId}`);
+        if (attempt < 1) continue;
+        return null;
+      }
+
+      let media: any = null;
+      if (mediaRes.status === 200) {
+        const mediaJson = await mediaRes.json() as any;
+        media = mediaJson?.data?.viewer?.marketplace_product_details_page ?? null;
+      } else {
+        console.warn(`[marketplace:mediaQuery] HTTP ${mediaRes.status} for listing ${listingId}`);
+      }
+
+      return { details, media };
+    } catch (err) {
+      console.warn(`[marketplace:containerQuery] Failed for ${listingId} (attempt ${attempt + 1}):`, err);
+      if (attempt < 1) continue;
       return null;
     }
-
-    const containerJson = await containerRes.json() as any;
-    const details = containerJson?.data?.viewer?.marketplace_product_details_page ?? null;
-
-    if (!details?.target?.marketplace_listing_title) {
-      console.warn(`[marketplace:containerQuery] No listing data in response for ${listingId}`);
-      return null;
-    }
-
-    let media: any = null;
-    if (mediaRes.status === 200) {
-      const mediaJson = await mediaRes.json() as any;
-      media = mediaJson?.data?.viewer?.marketplace_product_details_page ?? null;
-    } else {
-      console.warn(`[marketplace:mediaQuery] HTTP ${mediaRes.status} for listing ${listingId}`);
-    }
-
-    return { details, media };
-  } catch (err) {
-    console.warn(`[marketplace:containerQuery] Failed for ${listingId}:`, err);
-    return null;
   }
+  return null;
 }
 
 export async function getMarketplaceListingByGraphqlForAnalysis(listingId: string): Promise<Listing> {

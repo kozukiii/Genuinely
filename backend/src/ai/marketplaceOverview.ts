@@ -148,40 +148,36 @@ function getMarketplaceImageUrls(listing: any): string[] {
 }
 
 async function fetchImageAsDataUrl(url: string): Promise<string | null> {
-  try {
-    const agent = _getProxyAgent();
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 8_000);
-    const res = await fetch(url, {
-      headers: MARKETPLACE_IMAGE_FETCH_HEADERS,
-      signal: controller.signal as any,
-      ...(agent ? { agent } : {}),
-    });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const agent = _getProxyAgent();
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 8_000);
+      const res = await fetch(url, {
+        headers: MARKETPLACE_IMAGE_FETCH_HEADERS,
+        signal: controller.signal as any,
+        ...(agent ? { agent } : {}),
+      });
+      clearTimeout(timer);
 
-    if (!res.ok) {
-      console.error(`Marketplace image fetch failed: ${res.status} ${res.statusText}`);
+      if (!res.ok) {
+        if (attempt < 1) continue;
+        return null;
+      }
+
+      const contentType = res.headers.get("content-type") || "image/jpeg";
+      if (!contentType.toLowerCase().startsWith("image/")) return null;
+
+      const buffer = Buffer.from(await res.arrayBuffer());
+      if (buffer.length === 0) return null;
+
+      return `data:${contentType};base64,${buffer.toString("base64")}`;
+    } catch (err: any) {
+      if (attempt < 1 && err?.type !== "aborted") continue;
       return null;
     }
-
-    const contentType = res.headers.get("content-type") || "image/jpeg";
-    if (!contentType.toLowerCase().startsWith("image/")) {
-      console.error(`Marketplace image fetch returned non-image content-type: ${contentType}`);
-      return null;
-    }
-
-    const buffer = Buffer.from(await res.arrayBuffer());
-    if (buffer.length === 0) {
-      console.error("Marketplace image fetch returned an empty body");
-      return null;
-    }
-
-    const base64 = buffer.toString("base64");
-    clearTimeout(timer);
-    return `data:${contentType};base64,${base64}`;
-  } catch (err) {
-    console.error("Marketplace image fetch error:", err);
-    return null;
   }
+  return null;
 }
 
 async function fetchMarketplaceImageDataUrls(imageUrls: string[], limit: number): Promise<string[]> {

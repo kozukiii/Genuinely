@@ -570,6 +570,39 @@ async function processOneGroup(
         }
       }
 
+      // Fallback: if PriceCharting yielded nothing, try Serper for pricing
+      if (!marketData && serperApiKey) {
+        console.log(`[group] "${group.canonicalName}" — PC miss, falling back to Serper`);
+        const [priceJson, inspectJson] = await Promise.all([
+          !skipPriceSearch
+            ? serperSearch(serperApiKey, `${group.serperQuery} used resale price sold 2025 2026`, 8).catch(() => null)
+            : Promise.resolve(null),
+          serperSearch(serperApiKey, `${group.canonicalName} used buying guide inspect condition accessories what to look for`, 8).catch(() => null),
+        ]);
+
+        const serperPrices = priceJson ? extractPricesFromSerper(priceJson) : { priceLow: null, priceHigh: null };
+        priceLow = serperPrices.priceLow;
+        priceHigh = serperPrices.priceHigh;
+        if (priceLow != null || priceHigh != null) priceSource = "SERPER";
+
+        const parts: string[] = [];
+        if (priceJson) {
+          const ab = priceJson?.answerBox;
+          if (ab?.answer) parts.push(`Price summary: ${ab.answer}`);
+          else if (ab?.snippet) parts.push(`Price summary: ${ab.snippet}`);
+          if (priceJson?.knowledgeGraph?.description) parts.push(`Product overview: ${priceJson.knowledgeGraph.description}`);
+          const rows = extractOrganic(priceJson, 8);
+          if (rows.length) parts.push(`Pricing data:\n${rows.map((s: string, i: number) => `${i + 1}. ${s}`).join("\n")}`);
+        }
+        if (inspectJson) {
+          const ab = inspectJson?.answerBox;
+          if (ab?.answer || ab?.snippet) parts.push(`Buying guide summary: ${ab.answer ?? ab.snippet}`);
+          const rows = extractOrganic(inspectJson, 8);
+          if (rows.length) parts.push(`Condition & inspection data:\n${rows.map((s: string, i: number) => `${i + 1}. ${s}`).join("\n")}`);
+        }
+        marketData = parts.length > 0 ? parts.join("\n\n") : null;
+      }
+
     } else {
       // ── Serper path: price + inspection searches ──────────────────────────
       const [priceJson, inspectJson] = await Promise.all([

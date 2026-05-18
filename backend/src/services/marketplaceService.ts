@@ -764,9 +764,9 @@ async function fetchMarketplaceListingByContainerQuery(listingId: string): Promi
       }
 
       return { details, media };
-    } catch (err) {
+    } catch (err: any) {
       console.warn(`[marketplace:containerQuery] Failed for ${listingId} (attempt ${attempt + 1}):`, err);
-      if (attempt < 1) continue;
+      if (attempt < 1 && err?.type !== "aborted") continue;
       return null;
     }
   }

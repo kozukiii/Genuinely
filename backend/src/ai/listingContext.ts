@@ -28,6 +28,7 @@ export interface ProductGroup {
   priceSource: string | null;
   priceChartingUrl: string | null;
   tcgPlayerUrl: string | null;
+  shippingEstimate: number | null;
 }
 
 interface RawGroup {
@@ -394,9 +395,12 @@ THE SYSTEM PROMPT (everything after ---) MUST CONTAIN ALL OF THESE IN ORDER:
    - Known fakes/counterfeits if applicable (Pokémon cards, branded sneakers, electronics)
    - Vague condition language sellers use to avoid accountability ("light use", "good condition")
 
-6. SCORING GUIDANCE (inline, no sub-headers)
+6. IMAGE CONDITION ASSESSMENT (mandatory, before scoring)
+   Instruct the scoring AI: "Before assigning any scores, describe exactly what you see in the images regarding this item's physical condition. Call out every visible defect, wear area, or damage using the inspection points above as your checklist. Be specific — name the location and severity. If images are blurry, angled, or cropped in a way that hides key wear areas, say so explicitly. This description is the factual basis for all scores below."
+
+7. SCORING GUIDANCE (inline, no sub-headers)
    PRICE FAIRNESS: [anchor to the market range — at or below the low end = 100 (great deal); CRITICAL EXCEPTION: if price is below 50% of the low end, set priceFairness to 0 — this is a red flag (RISKY PRICE), not a deal; do NOT reward extreme underpricing; at or above high end = penalise based on condition and extras]
-   CONDITION HONESTY: [reference the inspection points above; CRITICAL HARD CAP: if ANY wear, scratch, scuff, dent, or damage from the inspection list is visible in the images OR acknowledged in the description, AND the condition is claimed "new", "like new", or equivalent, the conditionHonesty score MUST be 50 or below — no exceptions, no qualifiers; wear across multiple areas = 35 or below; do NOT write off defects as "minor" or "no major damage" — any defect under a new/like-new claim IS a mismatch; penalise blurry or angled shots that hide known wear areas for this product]
+   CONDITION HONESTY: [reference the inspection points above and the image condition assessment; CRITICAL HARD CAP: if ANY wear, scratch, scuff, dent, or damage from the inspection list is visible in the images OR acknowledged in the description, AND the condition is claimed "new", "like new", or equivalent, the conditionHonesty score MUST be 50 or below — no exceptions, no qualifiers; wear across multiple areas = 35 or below; do NOT write off defects as "minor" or "no major damage" — any defect under a new/like-new claim IS a mismatch; penalise blurry or angled shots that hide known wear areas for this product]
    DESCRIPTION QUALITY: [what a complete honest listing for this exact product includes — model, variant, condition details, accessory list, disclosed defects]
    SHIPPING FAIRNESS: [judge shipping cost given this product's size, weight, and fragility]
 
@@ -477,17 +481,215 @@ async function engineerPrompt(
   }
 }
 
-// ─── Main export ──────────────────────────────────────────────────────────────
+// ─── Per-group processor ──────────────────────────────────────────────────────
 
-export async function groupAndContextualize(
+async function processOneGroup(
+  group: RawGroup,
+  titles: string[],
+  serperApiKey: string | undefined,
+  acquire: () => Promise<void>,
+  release: () => void,
+): Promise<ProductGroup> {
+  const isPriceCharting = group.source === "pricecharting";
+  const skipPriceSearch = !group.hasReliableMarketData;
+  console.log(`[group] "${group.canonicalName}" → source=${group.source} indices=[${group.indices.join(",")}]`);
+
+  await acquire();
+
+  let priceLow: number | null = null;
+  let priceHigh: number | null = null;
+  let priceSource: string | null = null;
+  let priceChartingUrl: string | null = null;
+  let tcgPlayerUrl: string | null = null;
+  let marketData: string | null = null;
+
+  try {
+    if (isPriceCharting) {
+      // ── PriceCharting path: one Serper search to find the PC link ──────────
+      const firstTitle = titles[group.indices[0]] ?? group.canonicalName;
+      const CONDITION_RE = /\b(near\s+mint|lightly\s+played|moderately\s+played|heavily\s+played|mint|nm-?m?|excellent|exc|very\s+good|damaged|unplayed|played|like\s+new|brand\s+new|poor|fair|good|used|sealed|nm|lp|mp|hp|dm|dmg)\b/gi;
+      const cleanQuery = firstTitle
+        .replace(CONDITION_RE, " ")
+        .replace(/[^\x20-\x7E]/g, " ")
+        .replace(/[^a-zA-Z0-9\s'\/#+.]/g, " ")
+        .replace(/\s{2,}/g, " ")
+        .trim();
+
+      const serperJson = serperApiKey
+        ? await serperSearch(serperApiKey, cleanQuery, 10).catch(() => null)
+        : null;
+
+      const organic: { title?: string; link?: string; snippet?: string }[] = serperJson?.organic ?? [];
+      const pcResult = organic.find((r) => r.link && /pricecharting\.com\/game\//i.test(r.link));
+
+      if (pcResult?.link) {
+        try {
+          const scraped = await scrapePriceChartingUrl(pcResult.link, firstTitle);
+          priceChartingUrl = scraped.url;
+          tcgPlayerUrl = scraped.tcgPlayerUrl;
+
+          if (scraped.grade !== null) {
+            // Graded: use actual sale range from completed-auctions section
+            if (scraped.gradedSaleLow !== null && scraped.gradedSaleHigh !== null) {
+              priceLow = scraped.gradedSaleLow;
+              priceHigh = scraped.gradedSaleHigh;
+            } else if (scraped.gradedPrice !== null) {
+              priceLow = scraped.gradedPrice;
+              priceHigh = scraped.gradedPrice;
+            }
+            priceSource = "PRICECHARTING_GRADED";
+          } else {
+            // Ungraded: pair loosePrice with the best available second price.
+            // Priority: tcgPlayerPrice → completePrice → newPrice
+            const secondPrice = scraped.tcgPlayerPrice ?? scraped.completePrice ?? scraped.newPrice ?? null;
+            const firstPrice = scraped.loosePrice;
+            if (firstPrice !== null && secondPrice !== null) {
+              priceLow = Math.min(firstPrice, secondPrice);
+              priceHigh = Math.max(firstPrice, secondPrice);
+              priceSource = scraped.tcgPlayerPrice !== null ? "PRICECHARTING/TCGPLAYER" : "PRICECHARTING";
+            } else if (firstPrice !== null || secondPrice !== null) {
+              priceLow = priceHigh = firstPrice ?? secondPrice;
+              priceSource = "PRICECHARTING";
+            }
+          }
+
+          // Build brief market context from PC data for the system prompt
+          const pcLines: string[] = [`PriceCharting data for "${group.canonicalName}":`];
+          if (scraped.grade !== null) {
+            if (scraped.gradedSaleLow !== null && scraped.gradedSaleHigh !== null)
+              pcLines.push(`- Grade ${scraped.grade} sale range: $${scraped.gradedSaleLow.toFixed(2)} – $${scraped.gradedSaleHigh.toFixed(2)}`);
+            else if (scraped.gradedPrice !== null)
+              pcLines.push(`- Grade ${scraped.grade} market price: $${scraped.gradedPrice.toFixed(2)}`);
+          } else {
+            if (scraped.loosePrice !== null) pcLines.push(`- Loose/raw price: $${scraped.loosePrice.toFixed(2)}`);
+            if (scraped.tcgPlayerPrice !== null) pcLines.push(`- TCGPlayer price: $${scraped.tcgPlayerPrice.toFixed(2)}`);
+          }
+          marketData = pcLines.join("\n");
+        } catch (err) {
+          console.error(`[listingContext] PC scrape failed for "${group.canonicalName}":`, err);
+        }
+      }
+
+    } else {
+      // ── Serper path: price + inspection searches ──────────────────────────
+      const [priceJson, inspectJson] = await Promise.all([
+        serperApiKey && !skipPriceSearch
+          ? serperSearch(serperApiKey, `${group.serperQuery} used resale price sold 2025 2026`, 8).catch(() => null)
+          : Promise.resolve(null),
+        serperApiKey
+          ? serperSearch(serperApiKey, `${group.canonicalName} used buying guide inspect condition accessories what to look for`, 8).catch(() => null)
+          : Promise.resolve(null),
+      ]);
+
+      const serperPrices = priceJson ? extractPricesFromSerper(priceJson) : { priceLow: null, priceHigh: null };
+      priceLow = serperPrices.priceLow;
+      priceHigh = serperPrices.priceHigh;
+      if (priceLow != null || priceHigh != null) priceSource = "SERPER";
+
+      const parts: string[] = [];
+      if (priceJson) {
+        const ab = priceJson?.answerBox;
+        if (ab?.answer) parts.push(`Price summary: ${ab.answer}`);
+        else if (ab?.snippet) parts.push(`Price summary: ${ab.snippet}`);
+        if (priceJson?.knowledgeGraph?.description) parts.push(`Product overview: ${priceJson.knowledgeGraph.description}`);
+        const rows = extractOrganic(priceJson, 8);
+        if (rows.length) parts.push(`Pricing data:\n${rows.map((s: string, i: number) => `${i + 1}. ${s}`).join("\n")}`);
+      }
+      if (inspectJson) {
+        const ab = inspectJson?.answerBox;
+        if (ab?.answer || ab?.snippet) parts.push(`Buying guide summary: ${ab.answer ?? ab.snippet}`);
+        const rows = extractOrganic(inspectJson, 8);
+        if (rows.length) parts.push(`Condition & inspection data:\n${rows.map((s: string, i: number) => `${i + 1}. ${s}`).join("\n")}`);
+      }
+      marketData = parts.length > 0 ? parts.join("\n\n") : null;
+    }
+  } finally {
+    release();
+  }
+
+  if (!marketData) {
+    console.log(`[group] "${group.canonicalName}" — no market data, source=${group.source}`);
+    return {
+      canonicalName: group.canonicalName,
+      specificity: "specific",
+      indices: group.indices,
+      systemPrompt: null,
+      priceLow,
+      priceHigh,
+      source: group.source,
+      priceSource,
+      priceChartingUrl,
+      tcgPlayerUrl,
+      shippingEstimate: isPriceCharting ? 4 : null,
+    };
+  }
+
+  const { systemPrompt: rawSystemPrompt, priceLow: groqPriceLow, priceHigh: groqPriceHigh } =
+    await engineerPrompt(group.canonicalName, marketData);
+
+  let systemPrompt = rawSystemPrompt;
+
+  // For serper groups, prefer Serper prices over Groq-extracted ones
+  if (!isPriceCharting) {
+    priceLow = priceLow ?? groqPriceLow;
+    priceHigh = priceHigh ?? groqPriceHigh;
+  }
+
+  // Prepend authoritative PC price label to system prompt
+  if (isPriceCharting && priceChartingUrl && systemPrompt && priceLow != null && priceHigh != null) {
+    const pcLabel = priceLow === priceHigh
+      ? `$${priceLow.toFixed(2)}`
+      : `$${priceLow.toFixed(2)}–$${priceHigh.toFixed(2)}`;
+    systemPrompt = `AUTHORITATIVE PRICE DATA: The verified market price for this card is ${pcLabel} (source: PriceCharting). Use this as the sole basis for priceFairness scoring.\n\n${systemPrompt}`;
+  }
+
+  // Last resort: parse dollar amounts out of the system prompt
+  if ((priceLow == null || priceHigh == null) && systemPrompt) {
+    const extracted = extractPriceRange(systemPrompt);
+    if (extracted) {
+      if (priceLow == null)  priceLow  = extracted[0];
+      if (priceHigh == null) priceHigh = extracted[1];
+      if (priceSource == null) priceSource = "CONTEXT";
+    }
+  }
+
+  console.log(`[group] "${group.canonicalName}" — source=${group.source} priceLow=${priceLow} priceHigh=${priceHigh} priceSource=${priceSource}`);
+
+  return {
+    canonicalName: group.canonicalName,
+    specificity: "specific",
+    indices: group.indices,
+    systemPrompt,
+    priceLow,
+    priceHigh,
+    source: group.source,
+    priceSource,
+    priceChartingUrl,
+    tcgPlayerUrl,
+    shippingEstimate: isPriceCharting ? 4 : null,
+  };
+}
+
+// ─── Stream event type ────────────────────────────────────────────────────────
+
+export type ContextStreamEvent =
+  | { kind: "meta"; total: number }
+  | { kind: "group"; group: ProductGroup };
+
+// ─── Main exports ─────────────────────────────────────────────────────────────
+
+// Yields a "meta" event (total group count) as soon as grouping completes, then
+// yields each "group" event the moment its Serper + prompt-engineering work finishes.
+// This lets callers start scoring group N while groups N+1..M are still in-flight.
+export async function* streamGroupsAndContextualize(
   titles: string[],
   query: string,
-): Promise<ProductGroup[]> {
-  if (titles.length === 0) return [];
+): AsyncGenerator<ContextStreamEvent> {
+  if (titles.length === 0) return;
 
   const serperApiKey = process.env.SERPER_API_KEY;
 
-  // Step 1: group by identical product + detect card query (two parallel 8b calls)
+  // Step 1: grouping + card detection in parallel — must finish before we can stream
   const [rawGroups, isCard] = await Promise.all([
     groupListings(titles, query),
     isCardQuery(query),
@@ -497,200 +699,56 @@ export async function groupAndContextualize(
     for (const g of rawGroups) g.source = "pricecharting";
   }
 
-  // Steps 2+3: per group — Serper fetches then 8b engineers the expert prompt.
-  // Semaphore caps concurrent groups in the Serper phase.
-  const MAX_CONCURRENT_SERPER_GROUPS = 2;
-  let serperGroupSlots = MAX_CONCURRENT_SERPER_GROUPS;
-  const serperGroupQueue: (() => void)[] = [];
-  function acquireSerperGroup(): Promise<void> {
-    if (serperGroupSlots > 0) { serperGroupSlots--; return Promise.resolve(); }
-    return new Promise(resolve => serperGroupQueue.push(resolve));
+  // Emit total so the client can show accurate progress immediately
+  yield { kind: "meta", total: rawGroups.length };
+
+  if (rawGroups.length === 0) return;
+
+  // Semaphore: cap concurrent Serper calls at 2
+  let slots = 2;
+  const waitQueue: (() => void)[] = [];
+  const acquire = (): Promise<void> => {
+    if (slots > 0) { slots--; return Promise.resolve(); }
+    return new Promise(resolve => waitQueue.push(resolve));
+  };
+  const release = () => {
+    const next = waitQueue.shift();
+    if (next) { next(); } else { slots++; }
+  };
+
+  // Completion queue: groups push here as they finish; generator drains it
+  const completed: ProductGroup[] = [];
+  let pending = rawGroups.length;
+  let notifyResolve: (() => void) | null = null;
+  const notify = () => { if (notifyResolve) { notifyResolve(); notifyResolve = null; } };
+
+  for (const group of rawGroups) {
+    processOneGroup(group, titles, serperApiKey, acquire, release)
+      .then(result => { completed.push(result); pending--; notify(); })
+      .catch(err => {
+        console.error(`[streamGroupsAndContextualize] group "${group.canonicalName}" failed:`, err);
+        pending--;
+        notify();
+      });
   }
-  function releaseSerperGroup() {
-    const next = serperGroupQueue.shift();
-    if (next) { next(); } else { serperGroupSlots++; }
+
+  // Yield groups as they arrive in completion order
+  while (pending > 0 || completed.length > 0) {
+    if (completed.length > 0) {
+      yield { kind: "group", group: completed.shift()! };
+    } else {
+      await new Promise<void>(res => { notifyResolve = res; });
+    }
   }
+}
 
-  const groups: ProductGroup[] = await Promise.all(
-    rawGroups.map(async (group): Promise<ProductGroup> => {
-      const isPriceCharting = group.source === "pricecharting";
-      const skipPriceSearch = !group.hasReliableMarketData;
-      console.log(`[group] "${group.canonicalName}" → source=${group.source} indices=[${group.indices.join(",")}]`);
-
-      await acquireSerperGroup();
-
-      let priceLow: number | null = null;
-      let priceHigh: number | null = null;
-      let priceSource: string | null = null;
-      let priceChartingUrl: string | null = null;
-      let tcgPlayerUrl: string | null = null;
-      let marketData: string | null = null;
-
-      try {
-        if (isPriceCharting) {
-          // ── PriceCharting path: one Serper search to find the PC link ──────────
-          const firstTitle = titles[group.indices[0]] ?? group.canonicalName;
-          const CONDITION_RE = /\b(near\s+mint|lightly\s+played|moderately\s+played|heavily\s+played|mint|nm-?m?|excellent|exc|very\s+good|damaged|unplayed|played|like\s+new|brand\s+new|poor|fair|good|used|sealed|nm|lp|mp|hp|dm|dmg)\b/gi;
-          const cleanQuery = firstTitle
-            .replace(CONDITION_RE, " ")
-            .replace(/[^\x20-\x7E]/g, " ")
-            .replace(/[^a-zA-Z0-9\s'\/#+.]/g, " ")
-            .replace(/\s{2,}/g, " ")
-            .trim();
-
-          const serperJson = serperApiKey
-            ? await serperSearch(serperApiKey, cleanQuery, 10).catch(() => null)
-            : null;
-
-          const organic: { title?: string; link?: string; snippet?: string }[] = serperJson?.organic ?? [];
-          const pcResult = organic.find((r) => r.link && /pricecharting\.com\/game\//i.test(r.link));
-
-          if (pcResult?.link) {
-            try {
-              const scraped = await scrapePriceChartingUrl(pcResult.link, firstTitle);
-              priceChartingUrl = scraped.url;
-              tcgPlayerUrl = scraped.tcgPlayerUrl;
-
-              if (scraped.grade !== null) {
-                // Graded: use actual sale range from completed-auctions section
-                if (scraped.gradedSaleLow !== null && scraped.gradedSaleHigh !== null) {
-                  priceLow = scraped.gradedSaleLow;
-                  priceHigh = scraped.gradedSaleHigh;
-                } else if (scraped.gradedPrice !== null) {
-                  priceLow = scraped.gradedPrice;
-                  priceHigh = scraped.gradedPrice;
-                }
-                priceSource = "PRICECHARTING_GRADED";
-              } else {
-                // Ungraded: pair loosePrice with the best available second price.
-                // Priority: tcgPlayerPrice → completePrice → newPrice
-                const secondPrice = scraped.tcgPlayerPrice ?? scraped.completePrice ?? scraped.newPrice ?? null;
-                const firstPrice = scraped.loosePrice;
-                if (firstPrice !== null && secondPrice !== null) {
-                  priceLow = Math.min(firstPrice, secondPrice);
-                  priceHigh = Math.max(firstPrice, secondPrice);
-                  priceSource = scraped.tcgPlayerPrice !== null ? "PRICECHARTING/TCGPLAYER" : "PRICECHARTING";
-                } else if (firstPrice !== null || secondPrice !== null) {
-                  priceLow = priceHigh = firstPrice ?? secondPrice;
-                  priceSource = "PRICECHARTING";
-                }
-              }
-
-              // Build brief market context from PC data for the system prompt
-              const pcLines: string[] = [`PriceCharting data for "${group.canonicalName}":`];
-              if (scraped.grade !== null) {
-                if (scraped.gradedSaleLow !== null && scraped.gradedSaleHigh !== null)
-                  pcLines.push(`- Grade ${scraped.grade} sale range: $${scraped.gradedSaleLow.toFixed(2)} – $${scraped.gradedSaleHigh.toFixed(2)}`);
-                else if (scraped.gradedPrice !== null)
-                  pcLines.push(`- Grade ${scraped.grade} market price: $${scraped.gradedPrice.toFixed(2)}`);
-              } else {
-                if (scraped.loosePrice !== null) pcLines.push(`- Loose/raw price: $${scraped.loosePrice.toFixed(2)}`);
-                if (scraped.tcgPlayerPrice !== null) pcLines.push(`- TCGPlayer price: $${scraped.tcgPlayerPrice.toFixed(2)}`);
-              }
-              marketData = pcLines.join("\n");
-            } catch (err) {
-              console.error(`[listingContext] PC scrape failed for "${group.canonicalName}":`, err);
-            }
-          }
-
-        } else {
-          // ── Serper path: price + inspection searches ──────────────────────────
-          const [priceJson, inspectJson] = await Promise.all([
-            serperApiKey && !skipPriceSearch
-              ? serperSearch(serperApiKey, `${group.serperQuery} used resale price sold 2025 2026`, 8).catch(() => null)
-              : Promise.resolve(null),
-            serperApiKey
-              ? serperSearch(serperApiKey, `${group.canonicalName} used buying guide inspect condition accessories what to look for`, 8).catch(() => null)
-              : Promise.resolve(null),
-          ]);
-
-          const serperPrices = priceJson ? extractPricesFromSerper(priceJson) : { priceLow: null, priceHigh: null };
-          priceLow = serperPrices.priceLow;
-          priceHigh = serperPrices.priceHigh;
-          if (priceLow != null || priceHigh != null) priceSource = "SERPER";
-
-          const parts: string[] = [];
-          if (priceJson) {
-            const ab = priceJson?.answerBox;
-            if (ab?.answer) parts.push(`Price summary: ${ab.answer}`);
-            else if (ab?.snippet) parts.push(`Price summary: ${ab.snippet}`);
-            if (priceJson?.knowledgeGraph?.description) parts.push(`Product overview: ${priceJson.knowledgeGraph.description}`);
-            const rows = extractOrganic(priceJson, 8);
-            if (rows.length) parts.push(`Pricing data:\n${rows.map((s: string, i: number) => `${i + 1}. ${s}`).join("\n")}`);
-          }
-          if (inspectJson) {
-            const ab = inspectJson?.answerBox;
-            if (ab?.answer || ab?.snippet) parts.push(`Buying guide summary: ${ab.answer ?? ab.snippet}`);
-            const rows = extractOrganic(inspectJson, 8);
-            if (rows.length) parts.push(`Condition & inspection data:\n${rows.map((s: string, i: number) => `${i + 1}. ${s}`).join("\n")}`);
-          }
-          marketData = parts.length > 0 ? parts.join("\n\n") : null;
-        }
-      } finally {
-        releaseSerperGroup();
-      }
-
-      if (!marketData) {
-        console.log(`[group] "${group.canonicalName}" — no market data, source=${group.source}`);
-        return {
-          canonicalName: group.canonicalName,
-          specificity: "specific",
-          indices: group.indices,
-          systemPrompt: null,
-          priceLow,
-          priceHigh,
-          source: group.source,
-          priceSource,
-          priceChartingUrl,
-          tcgPlayerUrl,
-        };
-      }
-
-      const { systemPrompt: rawSystemPrompt, priceLow: groqPriceLow, priceHigh: groqPriceHigh } =
-        await engineerPrompt(group.canonicalName, marketData);
-
-      let systemPrompt = rawSystemPrompt;
-
-      // For serper groups, prefer Serper prices over Groq-extracted ones
-      if (!isPriceCharting) {
-        priceLow = priceLow ?? groqPriceLow;
-        priceHigh = priceHigh ?? groqPriceHigh;
-      }
-
-      // Prepend authoritative PC price label to system prompt
-      if (isPriceCharting && priceChartingUrl && systemPrompt && priceLow != null && priceHigh != null) {
-        const pcLabel = priceLow === priceHigh
-          ? `$${priceLow.toFixed(2)}`
-          : `$${priceLow.toFixed(2)}–$${priceHigh.toFixed(2)}`;
-        systemPrompt = `AUTHORITATIVE PRICE DATA: The verified market price for this card is ${pcLabel} (source: PriceCharting). Use this as the sole basis for priceFairness scoring.\n\n${systemPrompt}`;
-      }
-
-      // Last resort: parse dollar amounts out of the system prompt
-      if ((priceLow == null || priceHigh == null) && systemPrompt) {
-        const extracted = extractPriceRange(systemPrompt);
-        if (extracted) {
-          if (priceLow == null)  priceLow  = extracted[0];
-          if (priceHigh == null) priceHigh = extracted[1];
-          if (priceSource == null) priceSource = "CONTEXT";
-        }
-      }
-
-      console.log(`[group] "${group.canonicalName}" — source=${group.source} priceLow=${priceLow} priceHigh=${priceHigh} priceSource=${priceSource}`);
-
-      return {
-        canonicalName: group.canonicalName,
-        specificity: "specific",
-        indices: group.indices,
-        systemPrompt,
-        priceLow,
-        priceHigh,
-        source: group.source,
-        priceSource,
-        priceChartingUrl,
-        tcgPlayerUrl,
-      };
-    }),
-  );
-
+export async function groupAndContextualize(
+  titles: string[],
+  query: string,
+): Promise<ProductGroup[]> {
+  const groups: ProductGroup[] = [];
+  for await (const event of streamGroupsAndContextualize(titles, query)) {
+    if (event.kind === "group") groups.push(event.group);
+  }
   return groups;
 }

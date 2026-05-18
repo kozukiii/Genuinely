@@ -19,6 +19,10 @@ import SerperSourceMatchDemoPage from "./pages/SerperSourceMatchDemoPage";
 
 import "./pages/styles/HomePage.css";
 
+const WARMUP_START_DELAY_MS = 2000;
+const WARMUP_RETRY_DELAY_MS = 1000;
+const WARMUP_MAX_ATTEMPTS = 5;
+
 function ScrollToTop() {
   const { pathname } = useLocation();
   useEffect(() => {
@@ -52,7 +56,32 @@ function AppRoutes() {
 
 export default function App() {
   useEffect(() => {
-    fetch("/api/search/warmup").catch(() => null);
+    let cancelled = false;
+    let timeoutId: ReturnType<typeof window.setTimeout> | null = null;
+
+    const scheduleWarmup = (delayMs: number, attempt: number) => {
+      timeoutId = window.setTimeout(async () => {
+        if (cancelled) return;
+
+        try {
+          const health = await fetch("/api/health", { cache: "no-store" });
+          if (!health.ok) throw new Error("Backend health check failed");
+
+          await fetch("/api/search/warmup", { cache: "no-store" });
+        } catch {
+          if (!cancelled && attempt < WARMUP_MAX_ATTEMPTS) {
+            scheduleWarmup(WARMUP_RETRY_DELAY_MS, attempt + 1);
+          }
+        }
+      }, delayMs);
+    };
+
+    scheduleWarmup(WARMUP_START_DELAY_MS, 1);
+
+    return () => {
+      cancelled = true;
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+    };
   }, []);
 
   return (

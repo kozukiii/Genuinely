@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { searchAll } from "../controllers/searchController";
 import { scoreListings } from "../services/scoring/scoreListing";
-import { groupAndContextualize } from "../ai/listingContext";
+import { groupAndContextualize, streamGroupsAndContextualize } from "../ai/listingContext";
 import { getEbayItemByNumericId } from "../services/ebayService";
 import { getMarketplaceListingByGraphqlForAnalysis, getMarketplaceListingBySearchForAnalysis } from "../services/marketplaceService";
 import { getLocationFromIp, extractClientIp } from "../utils/geoIp";
@@ -177,8 +177,9 @@ router.post("/from-url", async (req, res) => {
 });
 
 // POST /api/search/context
-// Takes listings + query, groups by product, and generates product-specific prompts per group.
-// Returns groups with indices into the listings array plus prompt and pricing metadata.
+// Streams product groups as SSE. Emits a "meta" event (total count) immediately after
+// grouping, then a "group" event for each product group as its context finishes.
+// This lets the client start scoring each group without waiting for all groups.
 router.post("/context", async (req, res) => {
   const { query, listings } = req.body;
   if (!query || typeof query !== "string") {
@@ -188,13 +189,20 @@ router.post("/context", async (req, res) => {
     return res.status(400).json({ error: "listings must be an array" });
   }
 
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders();
+
   try {
     const titles: string[] = listings.map((l: any) => (typeof l.title === "string" ? l.title : ""));
-    const groups = await groupAndContextualize(titles, query);
-    return res.json({ groups });
+    for await (const event of streamGroupsAndContextualize(titles, query)) {
+      res.write(`data: ${JSON.stringify(event)}\n\n`);
+    }
   } catch (err: any) {
-    console.error("context error:", err);
-    return res.status(500).json({ error: err?.message ?? "Context generation failed" });
+    console.error("context SSE error:", err);
+  } finally {
+    res.end();
   }
 });
 

@@ -162,10 +162,17 @@ This starts both the backend (port 3000) and frontend (port 5173) concurrently.
 
 ## How the Scoring Works
 
-Every listing goes through a two-stage pipeline:
+Every search goes through a four-stage pipeline before any listing is scored:
 
-1. **Market context** -- Serper fetches comparable sold listings to build a real price distribution for the item.
-2. **LLM analysis** -- Groq scores the listing across all six dimensions given the market context. Price fairness uses a deterministic percentile algorithm so scores are consistent and don't drift with model temperature.
+1. **Grouping** -- An 8b-instant LLM call groups listing titles by exact product (same brand, model, and variant) and assigns each group a data source: `pricecharting` for trading cards, `serper` for everything else. A parallel card-detection call overrides all groups to PriceCharting if the entire search query is card-based.
+
+2. **Market data fetch** (per group, up to 2 concurrent) --
+   - *PriceCharting path*: Serper searches for the card title and finds the PriceCharting item URL in organic results. The item page HTML is then scraped for loose, complete, new, and graded price cells plus the TCGPlayer row.
+   - *Serper path*: Two parallel searches run -- one for resale pricing, one for buying-guide/inspection signals. Dollar amounts are extracted from snippets and trimmed to a p25–p75 range.
+
+3. **Prompt engineering** -- A second 8b-instant call synthesises the raw market data into a product-specific expert system prompt with explicit `PRICE_LOW` / `PRICE_HIGH` anchors. Groups with PriceCharting data get the verified price prepended as an authoritative anchor so the scorer can't drift from it.
+
+4. **LLM scoring** -- Groq scores each listing across all six dimensions using the engineered system prompt. Price fairness uses a deterministic percentile algorithm so scores don't drift with model temperature.
 
 Results are cached in memory to avoid redundant LLM calls on repeated searches.
 
@@ -173,19 +180,19 @@ Results are cached in memory to avoid redundant LLM calls on repeated searches.
 
 ## Per-Category Price Sources
 
-Genuinely's pricing layer is being updated continually so each category can use the best available market source instead of relying only on broad search snippets. The current implemented path is for video games and trading cards, where the prompt-engineering step can set `USE_PRICECHARTING: true` and route that product group through PriceCharting before scoring.
+Genuinely's pricing layer is designed so each product category can use the best available market source. The grouping LLM assigns a source to every product group at query time -- currently `pricecharting` for trading cards (Pokémon, MTG, Yu-Gi-Oh, sports cards) and `serper` for everything else (electronics, golf clubs, sneakers, etc.).
 
-For those groups, the backend:
+For PriceCharting groups, the backend pipeline in `backend/src/ai/listingContext.ts`:
 
-1. Groups listings by canonical product name in `backend/src/ai/listingContext.ts`.
-2. Uses Serper/Groq to build the product-specific scoring prompt and decide which source should be used. (eg. pricecharting.com)
-3. Calls `findPriceChartingMatch(...)` in `backend/src/priceSources/priceCharting.ts`.
-4. Tries PriceCharting direct URLs first, then falls back to PriceCharting search queries.
-5. Reads PriceCharting's item page HTML for the loose, complete, new, and graded price cells.
-6. Reads the TCGPlayer row from that same PriceCharting HTML and extracts both the TCGPlayer market price and destination URL.
-7. Sends `priceLow`, `priceHigh`, `priceSource`, `priceChartingUrl`, and `tcgPlayerUrl` back through the search analysis routes so the listing page can show the source links next to the price bar.
+1. Strips condition keywords from the listing title to form a clean card search query.
+2. Runs a Serper search for that query and looks for a `pricecharting.com/game/` URL in the organic results.
+3. Scrapes the PriceCharting item page (`backend/src/priceSources/priceCharting.ts`) for the loose, complete, new, and graded price cells.
+4. Reads the TCGPlayer row from that same page and extracts both the TCGPlayer market price and the destination URL.
+5. For graded cards (PSA/BGS/CGC grade detected in the title), reads the grade-specific completed-auction section for a sale range instead of the standard price cells.
+6. For ungraded cards, pairs the PriceCharting loose price with the TCGPlayer market price (falling back to complete or new price) to form the `priceLow`/`priceHigh` range.
+7. Sends `priceLow`, `priceHigh`, `priceSource`, `priceChartingUrl`, and `tcgPlayerUrl` back through the scoring pipeline so the listing page can display source links next to the price bar.
 
-TCGPlayer is integrated this way because its data is already exposed inside PriceCharting's item page HTML. While testing PriceCharting pages, I noticed a `TCGPlayer` source row and TCGPlayer product links in the markup, so the implementation parses that row instead of adding a separate TCGPlayer API path. For raw cards, the authoritative range is built from PriceCharting loose price plus TCGPlayer market price. For graded cards, PriceCharting's grade-specific price becomes the high anchor, with the raw TCGPlayer value used as the lower reference when available.
+TCGPlayer data is integrated via PriceCharting's item page HTML rather than a separate API call: PriceCharting includes a `TCGPlayer` source row with pricing and a product link in its markup, so the scraper parses that row directly.
 
 ---
 

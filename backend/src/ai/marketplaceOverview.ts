@@ -150,8 +150,11 @@ function getMarketplaceImageUrls(listing: any): string[] {
 async function fetchImageAsDataUrl(url: string): Promise<string | null> {
   try {
     const agent = _getProxyAgent();
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8_000);
     const res = await fetch(url, {
       headers: MARKETPLACE_IMAGE_FETCH_HEADERS,
+      signal: controller.signal as any,
       ...(agent ? { agent } : {}),
     });
 
@@ -173,7 +176,7 @@ async function fetchImageAsDataUrl(url: string): Promise<string | null> {
     }
 
     const base64 = buffer.toString("base64");
-
+    clearTimeout(timer);
     return `data:${contentType};base64,${base64}`;
   } catch (err) {
     console.error("Marketplace image fetch error:", err);
@@ -182,17 +185,8 @@ async function fetchImageAsDataUrl(url: string): Promise<string | null> {
 }
 
 async function fetchMarketplaceImageDataUrls(imageUrls: string[], limit: number): Promise<string[]> {
-  const dataUrls: string[] = [];
-
-  // Try later gallery URLs when early CDN URLs are stale or blocked.
-  for (const url of imageUrls) {
-    if (dataUrls.length >= limit) break;
-
-    const dataUrl = await fetchImageAsDataUrl(url);
-    if (dataUrl) dataUrls.push(dataUrl);
-  }
-
-  return dataUrls;
+  const results = await Promise.all(imageUrls.slice(0, limit * 2).map(fetchImageAsDataUrl));
+  return results.filter((u): u is string => u !== null).slice(0, limit);
 }
 
 export async function analyzeMarketplaceListingWithImages(listing: any, context?: string | null) {

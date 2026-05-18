@@ -778,10 +778,10 @@ export async function getMarketplaceListingByGraphqlForAnalysis(listingId: strin
 
   if (!listing.description) {
     const desc = await fetchDescriptionFromMobileHtml(listingId);
-    if (desc) return { ...listing, description: desc, fullDescription: desc };
+    if (desc) return { ...listing, description: desc, fullDescription: desc, _pdpFetched: true } as any;
   }
 
-  return listing;
+  return { ...listing, _pdpFetched: true } as any;
 }
 
 export async function getMarketplaceListingBySearchForAnalysis(listingId: string): Promise<Listing> {

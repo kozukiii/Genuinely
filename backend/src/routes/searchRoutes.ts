@@ -3,7 +3,7 @@ import { searchAll } from "../controllers/searchController";
 import { scoreListings } from "../services/scoring/scoreListing";
 import { groupAndContextualize, streamGroupsAndContextualize } from "../ai/listingContext";
 import { getEbayItemByNumericId } from "../services/ebayService";
-import { getMarketplaceListingByGraphqlForAnalysis, getMarketplaceListingBySearchForAnalysis } from "../services/marketplaceService";
+import { getMarketplaceListingByGraphqlForAnalysis } from "../services/marketplaceService";
 import { getLocationFromIp, extractClientIp } from "../utils/geoIp";
 import { deleteCachedAnalysis, readCacheStore } from "../services/analysisCache";
 import { applyCachedAnalysis, applyCachedAnalysisFromStore } from "../services/cachedAnalysisResult";
@@ -33,6 +33,9 @@ function mergeImageUrls(...lists: unknown[]): string[] {
 
 async function enrichMarketplaceListing(listing: any): Promise<any> {
   if (listing.source !== "marketplace" || !listing.id) return listing;
+
+  // Skip if listing already went through a full PDP fetch (e.g. from-url path)
+  if ((listing as any)._pdpFetched) return listing;
 
   const existingImages: string[] = Array.isArray(listing.images) ? listing.images : [];
   const hasDescription = typeof listing.description === "string" && listing.description.trim().length > 0;
@@ -154,7 +157,7 @@ router.post("/from-url", async (req, res) => {
 
     let listing = ebayMatch
       ? await getEbayItemByNumericId(ebayMatch[1], buyerLocation)
-      : await getMarketplaceListingBySearchForAnalysis(mpMatch![1]);
+      : await getMarketplaceListingByGraphqlForAnalysis(mpMatch![1]);
 
     // price===null means the price field was absent from the API response —
     // not the same as "Accepts Offers". Reject rather than analyze bad data.

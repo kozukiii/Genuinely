@@ -7,7 +7,7 @@ export async function scoreListing(listing: any, context?: string | null, system
     case "ebay":
       return scoreEbayListing(listing, context, systemPrompt);
     case "marketplace":
-      return scoreMarketplaceListing(listing, context, systemPrompt);
+      return scoreMarketplaceListing(listing, context);
     default:
       return listing;
   }

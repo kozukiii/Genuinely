@@ -80,7 +80,7 @@ app.use(passport.initialize());
 const api = express.Router();
 
 // Health check lives inside /api
-api.get("/health", (req, res) => {
+api.get("/health", (_req, res) => {
   res.json({ ok: true, time: new Date().toISOString() });
 });
 

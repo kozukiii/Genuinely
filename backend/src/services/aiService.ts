@@ -54,7 +54,7 @@ function buildEbayDebugInfo(listing: any): string {
   }, null, 2);
 }
 
-function parseAIAnalysis(listing: any, analysis: string, context?: string | null) {
+function parseAIAnalysis(listing: any, analysis: string) {
   const jsonBlock = extractStructuredAnalysis(analysis);
 
   if (!jsonBlock) {
@@ -94,7 +94,7 @@ function parseAIAnalysis(listing: any, analysis: string, context?: string | null
 export async function analyzeItemWithAI(merged: any, context?: string | null) {
   const analysis = await analyzeListingWithImages(merged, context);
   const result = {
-    ...parseAIAnalysis(merged, analysis, context),
+    ...parseAIAnalysis(merged, analysis),
     marketContext: context ?? undefined,
     systemPrompt: EBAY_BATCH_SYSTEM_PROMPT,
   };
@@ -130,7 +130,7 @@ export async function analyzeItemsWithAI(items: any[], context?: string | null, 
     for (let j = 0; j < chunk.length; j++) {
       const item = chunk[j];
       const origIdx = batchIndices[j];
-      const parsed = parseAIAnalysis(item, rawStrings[j], context);
+      const parsed = parseAIAnalysis(item, rawStrings[j]);
 
       resultMap.set(origIdx, {
         ...item,

@@ -41,7 +41,7 @@ export async function overviewSearch(req: Request, res: Response) {
   }
 }
 
-export async function rateLimits(req: Request, res: Response) {
+export async function rateLimits(_req: Request, res: Response) {
   try {
     const data = await getEbayRateLimits();
     res.json(data);

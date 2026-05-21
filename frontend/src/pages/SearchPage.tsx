@@ -17,6 +17,10 @@ import {
   publishAnalysisFailure,
   subscribeToAnalysis,
 } from "../utils/analysisStore";
+import {
+  publishPipelineStatus,
+  subscribeToPipelineStatus,
+} from "../utils/pipelineStore";
 import { getSavedListings } from "../utils/savedListings";
 import { getRecentlyViewed } from "../utils/recentlyViewed";
 import { getSearchCache } from "../utils/searchCache";
@@ -40,7 +44,6 @@ const SEARCH_LISTINGS_KEY = "search:listings";
 const SEARCH_TIMESTAMP_KEY = "search:ts";
 const SEARCH_PAGE_KEY = "search:page";
 const SEARCH_FILTERS_KEY = "search:filters";
-const SEARCH_PIPELINE_KEY = "search:pipeline";
 const SEARCH_PENDING_KEY = "search:pending";
 
 const DEFAULT_FILTERS: FilterState = {
@@ -485,11 +488,8 @@ export default function SearchPage() {
     sessionStorage.setItem(SEARCH_FILTERS_KEY, JSON.stringify(filters));
   }, [filters, hydrated]);
 
-  // Persist pipeline status so the loading bar survives navigation
-  useEffect(() => {
-    if (!hydrated) return;
-    sessionStorage.setItem(SEARCH_PIPELINE_KEY, JSON.stringify(pipelineStatus));
-  }, [pipelineStatus, hydrated]);
+  // Keep pipelineStatus in sync with the module-level store (survives unmount/remount)
+  useEffect(() => subscribeToPipelineStatus(setPipelineStatus), []);
 
   // Merge search cache + recently viewed + saved, dedupe, shuffle
   const shelfItems = useMemo(() => {
@@ -583,9 +583,9 @@ export default function SearchPage() {
         const elapsedSeconds = pipelineStartRef.current != null
           ? parseFloat(((Date.now() - pipelineStartRef.current) / 1000).toFixed(1))
           : undefined;
-        setPipelineStatus({ ...s, elapsedSeconds });
+        publishPipelineStatus({ ...s, elapsedSeconds });
       } else {
-        setPipelineStatus(s);
+        publishPipelineStatus(s);
       }
     };
     runAnalysisPipeline(query, toAnalyze, setListings, ctrl.signal, onStatus).finally(() => {
@@ -664,7 +664,7 @@ export default function SearchPage() {
       // Cancel any in-flight analysis from a previous search
       abortAllAnalysis();
       pipelineStartRef.current = Date.now();
-      setPipelineStatus({ phase: "fetching" });
+      publishPipelineStatus({ phase: "fetching" });
       sessionStorage.removeItem(SEARCH_PENDING_KEY);
 
       if (listingsRef.current.length > 0) {
@@ -832,11 +832,6 @@ export default function SearchPage() {
       if (savedFilters) {
         const parsed = JSON.parse(savedFilters) as FilterState;
         if (parsed && typeof parsed === "object") setFilters(parsed);
-      }
-      const savedPipeline = sessionStorage.getItem(SEARCH_PIPELINE_KEY);
-      if (savedPipeline) {
-        const parsed = JSON.parse(savedPipeline) as PipelineStatus;
-        if (parsed && typeof parsed === "object") setPipelineStatus(parsed);
       }
     } catch { /* ignore sessionStorage parse errors */ }
   }

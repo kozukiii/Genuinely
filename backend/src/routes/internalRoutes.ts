@@ -20,14 +20,6 @@ type ProviderUsage = {
   highlight?: string | null;
 };
 
-function deriveStatus(remaining: number | null, limit: number | null): ProviderUsage["status"] {
-  if (remaining === null || limit === null || limit === 0) return "unknown";
-  const pct = remaining / limit;
-  if (pct > 0.25) return "ok";
-  if (pct > 0.1)  return "warning";
-  return "critical";
-}
-
 async function fetchSerperUsage(): Promise<ProviderUsage> {
   const apiKey = process.env.SERPER_API_KEY;
   if (!apiKey) return { name: "Serper", used: null, limit: null, remaining: null, percentUsed: null, status: "unknown", note: "SERPER_API_KEY not set" };

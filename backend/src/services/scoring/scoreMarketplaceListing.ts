@@ -35,7 +35,7 @@ function buildMarketplaceDebugInfo(listing: any): string {
   }, null, 2);
 }
 
-export async function scoreMarketplaceListing(listing: any, context?: string | null, systemPrompt?: string | null) {
+export async function scoreMarketplaceListing(listing: any, context?: string | null) {
   const acceptsOffers = isAcceptsOffersPrice(listing.price, context);
   const hasFixedPrice = typeof listing.price === "number" && listing.price > 0 && !acceptsOffers;
   const analysis = await analyzeMarketplaceListingWithImages(listing, context);

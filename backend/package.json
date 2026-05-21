@@ -21,7 +21,6 @@
     "@types/node-fetch": "2.6.13",
     "@types/passport": "1.0.17",
     "@types/passport-google-oauth20": "2.0.17",
-    "axios": "^1.16.0",
     "better-sqlite3": "^12.9.0",
     "cheerio": "^1.2.0",
     "cookie-parser": "^1.4.7",
@@ -29,7 +28,6 @@
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "express-rate-limit": "^8.5.1",
-    "form-data": "^4.0.5",
     "helmet": "^8.1.0",
     "https-proxy-agent": "^5.0.1",
     "jsonwebtoken": "^9.0.3",
@@ -40,7 +38,6 @@
     "typescript": "5.9.3"
   },
   "devDependencies": {
-    "nodemon": "^3.1.14",
     "ts-node": "^10.9.2"
   },
   "overrides": {

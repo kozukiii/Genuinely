@@ -418,50 +418,6 @@ function normalizePCQuery(raw: string): string | null {
   return cleaned.replace(/#\s*0*(\d+)/g, "#$1");
 }
 
-function buildSetQuery(input: string, cardQuery: string): string | null {
-  const afterTotalMatch = input.match(/\b\d+\/\d+\s+([A-Za-z][^/]+?)(?:\s+(?:nm|lp|mp|hp|dmg|psa|bgs|cgc|sgc|graded|holo|foil|rare|secret|ultra|near|mint|english|japanese|lot|pack|sealed|booster|card|cards)\b|$)/i);
-  const setName = afterTotalMatch?.[1]?.trim() ?? null;
-  if (!setName || setName.length < 4) return null;
-  return normalizePCQuery(`${cardQuery} ${setName}`);
-}
-
-
-function buildFallbackDebugQuery(input: string): string | null {
-  const numberMatch = input.match(/\b(\d{1,4})\s*(?:\/|(?:SM|SV|SWSH|XY|BW|DP|HGSS)[-\s]?P?\b)/i);
-  if (!numberMatch) return null;
-
-  const beforeNumber = input.slice(0, numberMatch.index).trim();
-  const cleanedBeforeNumber = beforeNumber
-    .replace(/\b(?:pokemon|pokémon|tcg|sv\d+|scarlet|violet|sword|shield|ultra|rare|secret|hyper|illustration|promo|holo|foil|near|mint|nm|gem|mt|psa|bgs|cgc|sgc|graded|card|cards)\b/gi, " ")
-    .replace(/[^\p{L}\p{N}.'\-\s]/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  const words = cleanedBeforeNumber.split(/\s+/).filter(Boolean);
-  const cardNumber = String(Number.parseInt(numberMatch[1], 10));
-  if (!cardNumber || cardNumber === "NaN") return null;
-
-  const suffixIndex = words.findIndex((word) => /^(?:ex|gx|v|vmax|vstar)$/i.test(word));
-  if (suffixIndex > 0) {
-    const start = Math.max(0, suffixIndex - 2);
-    const cardName = words.slice(start, suffixIndex + 1).join(" ");
-    return `${normalizeCardName(cardName)} #${cardNumber}`;
-  }
-
-  const firstNameWord = words.find((word) =>
-    /^[\p{L}][\p{L}.'-]*$/u.test(word)
-    && !/^(?:with|and|the|a|an|of|museum|van|gogh)$/i.test(word)
-  );
-
-  return firstNameWord ? `${normalizeCardName(firstNameWord)} #${cardNumber}` : null;
-}
-
-function normalizeCardName(name: string): string {
-  return name
-    .replace(/\b(ex|gx|v|vmax|vstar)\b/gi, (token) => token.toLowerCase() === "ex" ? "ex" : token.toUpperCase())
-    .replace(/\b[a-z]/g, (letter) => letter.toUpperCase());
-}
-
 function slugifyPC(text: string, ampersand: "and" | "drop" = "and"): string {
   return text
     .toLowerCase()
@@ -501,47 +457,6 @@ function buildDirectUrlVariants(cardName: string, numStr: string, setName: strin
   }
 
   return [...new Set(urls)].slice(0, 5);
-}
-
-function extractSetName(input: string, cardName: string): string | null {
-  const NOISE = /\b(?:nm|lp|mp|hp|dmg|psa|bgs|cgc|sgc|graded|holo|foil|rare|secret|ultra|near|mint|english|japanese|lot|pack|sealed|booster|card|cards|pokemon|pokémon|tcg)\b/gi;
-
-  // Pattern 1: set name after "number/total" — "057/191 Surging Sparks NM"
-  const afterMatch = input.match(/\b\d+\/\d+\s+([A-Za-z][^/]+?)(?:\s+(?:nm|lp|mp|hp|dmg|psa|bgs|cgc|sgc|graded|holo|foil|rare|secret|ultra|near|mint|english|japanese|lot|pack|sealed|booster|card|cards)\b|$)/i);
-  if (afterMatch) {
-    const name = afterMatch[1].trim();
-    if (name.length >= 4) return name;
-  }
-
-  // Pattern 2: set name before "number/total" — "Charizard ex Obsidian Flames 125/165"
-  const numberPos = input.search(/\b\d+\/\d+/);
-  if (numberPos > 0) {
-    let remaining = input.slice(0, numberPos);
-    for (const word of cardName.split(/\s+/)) {
-      remaining = remaining.replace(new RegExp(`(?:^|\\s)${word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:\\s|$)`, "gi"), " ");
-    }
-    remaining = remaining.replace(NOISE, " ").replace(/\s+/g, " ").trim();
-    if (remaining.length >= 4) return remaining;
-  }
-
-  return null;
-}
-
-function buildDirectUrlsFromTitle(input: string): string[] {
-  const cardQuery = buildFallbackDebugQuery(input);
-  if (!cardQuery) return [];
-
-  const parsedCard = cardQuery.match(/^(.+?)\s+#(\d+)$/);
-  if (!parsedCard) return [];
-
-  const cardName = parsedCard[1];
-  const n = parseInt(parsedCard[2], 10);
-  if (isNaN(n)) return [];
-
-  const setName = extractSetName(input, cardName);
-  if (!setName) return [];
-
-  return buildDirectUrlVariants(cardName, String(n), setName);
 }
 
 async function extractCardInfoWithGroq(input: string): Promise<CardInfo[]> {
@@ -651,19 +566,15 @@ export async function findPriceChartingMatch(rawTitle: string): Promise<PriceCha
   }
 
   // --- Phase 1: direct URL tries ---
-  const [groqCandidates, regexUrls] = await Promise.all([
-    extractCardInfoWithGroq(cleanTitle),
-    Promise.resolve(buildDirectUrlsFromTitle(cleanTitle)),
-  ]);
+  const groqCandidates = await extractCardInfoWithGroq(cleanTitle);
 
   const groqUrls = groqCandidates
-    .flatMap((c) => buildDirectUrlVariants(c.cardName, c.number, c.setName))
-    .filter((url, index, all) => all.indexOf(url) === index);
+    .flatMap((c: CardInfo) => buildDirectUrlVariants(c.cardName, c.number, c.setName))
+    .filter((url: string, index: number, all: string[]) => all.indexOf(url) === index);
 
   debugLines.push(`Groq URLs: ${groqUrls.join(", ") || "none"}`);
-  debugLines.push(`Regex URLs: ${regexUrls.join(", ") || "none"}`);
 
-  const directUrls = groqUrls.slice(0, 2); // only Groq-derived; regexUrls kept but unused for now
+  const directUrls = groqUrls.slice(0, 2);
   debugLines.push(`Direct URLs (${directUrls.length}): ${directUrls.join(", ") || "none"}`);
 
   for (const url of directUrls) {
@@ -685,13 +596,11 @@ export async function findPriceChartingMatch(rawTitle: string): Promise<PriceCha
   debugLines.push("Direct URLs exhausted — waiting 2s before search fallback");
   await new Promise((resolve) => setTimeout(resolve, 2000));
 
-  // const fallback = buildFallbackDebugQuery(cleanTitle); // unused for now
-  // const setQuery = fallback ? buildSetQuery(cleanTitle, fallback) : null; // unused for now
-  const groqSearchQueries = groqCandidates.map((c) =>
+  const groqSearchQueries = groqCandidates.map((c: CardInfo) =>
     normalizePCQuery(`${c.cardName} #${c.number} ${c.setName}`)
-  ).filter((q): q is string => !!q);
+  ).filter((q: string | null): q is string => !!q);
 
-  const searchCandidates = groqSearchQueries.slice(0, 2); // only Groq search queries; fallback/setQuery/cleanTitle kept but unused for now
+  const searchCandidates = groqSearchQueries.slice(0, 2);
 
   debugLines.push(`Search candidates (${searchCandidates.length}): ${searchCandidates.join(", ") || "none"}`);
 

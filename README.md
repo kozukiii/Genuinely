@@ -9,12 +9,11 @@ Genuinely searches multiple marketplaces simultaneously, scores every listing wi
 ## Features
 
 - **Unified search** -- query eBay and Facebook Marketplace at the same time, deduplicated
-- **AI scoring** -- each listing gets scored across 6 dimensions using Groq's LLM inference
+- **AI scoring** -- each listing gets scored across 5 dimensions using Groq's LLM inference
   - Price fairness (deterministic percentile algorithm + market context)
-  - Seller trust (feedback history analysis)
-  - Condition honesty (description vs. stated condition)
+  - Seller trust (eBay: deterministic from feedback history; Marketplace: listing confidence)
+  - Condition honesty (description vs. images vs. stated condition)
   - Shipping fairness (cost vs. item value)
-  - Location risk (pickup vs. shipping logistics)
   - Description quality (detail and accuracy)
 - **Market context** -- pulls comparable listings to build real price ranges before scoring
 - **Per-category price sources** -- continually expanding source integrations let category-specific data override generic web estimates when a better source exists
@@ -172,7 +171,13 @@ Every search goes through a four-stage pipeline before any listing is scored:
 
 3. **Prompt engineering** -- A second 8b-instant call synthesises the raw market data into a product-specific expert system prompt with explicit `PRICE_LOW` / `PRICE_HIGH` anchors. Groups with PriceCharting data get the verified price prepended as an authoritative anchor so the scorer can't drift from it.
 
-4. **LLM scoring** -- Groq scores each listing across all six dimensions using the engineered system prompt. Price fairness uses a deterministic percentile algorithm so scores don't drift with model temperature.
+4. **LLM scoring** -- Groq scores each listing across five dimensions using the engineered system prompt. All scoring calls use `response_format: { type: "json_object" }` (JSON Object Mode), which forces the model to return a top-level JSON object and eliminates markdown fences, preamble text, and DEBUG INFO sections. Batch calls wrap their output in a `{ "listings": [...] }` envelope to satisfy the top-level-object requirement.
+
+   The response then passes through a two-phase parse-and-validate pipeline:
+   - **Extract** (`extractStructuredAnalysis`) -- pulls the JSON object from the raw string; a brace-depth scanner handles rare model non-compliance as a fallback.
+   - **Validate** (`validateAnalysis`) -- enforces an allow-list of expected score keys, clamps every score to 0–100, coerces numeric strings like `"90"`, allows `priceFairness: null` only on Marketplace "Accepts Offers" listings, sanitises highlights, and returns `EMPTY_ANALYSIS` on total failure rather than surfacing a broken object.
+
+   Two deterministic overrides run after validation and are never accepted from AI output: eBay `sellerTrust` is always computed from feedback history; `priceFairness` is always computed from the market percentile algorithm when market data is available.
 
 Results are cached in memory to avoid redundant LLM calls on repeated searches.
 

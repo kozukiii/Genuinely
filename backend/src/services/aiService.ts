@@ -1,8 +1,15 @@
 import { analyzeListingWithImages, batchAnalyzeListingsWithImages, EBAY_BATCH_SYSTEM_PROMPT } from "../ai/ebayOverview";
-import { extractStructuredAnalysis } from "../utils/extractStructuredAnalysis";
+import { extractStructuredAnalysis, validateAnalysis, EMPTY_ANALYSIS } from "../utils/extractStructuredAnalysis";
 import { parseEbaySellerData, calculateSellerTrust } from "./scoring/sellerTrustScore";
 import { calculatePriceFairness } from "./scoring/priceFairnessScore";
 import { setCachedAnalysis, setCachedAnalysisBatch } from "./analysisCache";
+
+const EBAY_SCORE_KEYS = new Set([
+  "priceFairness",
+  "conditionHonesty",
+  "shippingFairness",
+  "descriptionQuality",
+]);
 
 // Helper for safe average
 function average(nums: Array<number | null | undefined>) {
@@ -55,16 +62,33 @@ function buildEbayDebugInfo(listing: any): string {
 }
 
 function parseAIAnalysis(listing: any, analysis: string) {
-  const jsonBlock = extractStructuredAnalysis(analysis);
+  // Step 1: extract JSON from the raw string (defensive backup still active)
+  const raw = extractStructuredAnalysis(analysis);
 
-  if (!jsonBlock) {
-    console.error("No JSON block found in AI response.");
+  if (!raw) {
+    console.error("[aiService:parseAIAnalysis] No JSON block found in AI response — using EMPTY_ANALYSIS fallback");
+    return {
+      ...EMPTY_ANALYSIS,
+      debugInfo: buildEbayDebugInfo(listing),
+      rawAnalysis: analysis,
+    };
   }
 
-  const scores = { ...(jsonBlock?.scores || {}) };
-  const { conditionHonesty, shippingFairness, locationRisk, descriptionQuality } = scores;
+  // Step 2: validate and normalise — drop unexpected keys, clamp scores 0–100
+  const validated = validateAnalysis(raw, EBAY_SCORE_KEYS);
 
-  // Calculate sellerTrust deterministically — never use the LLM's value
+  if (!validated) {
+    console.error("[aiService:parseAIAnalysis] Validation failed — using EMPTY_ANALYSIS fallback");
+    return {
+      ...EMPTY_ANALYSIS,
+      debugInfo: buildEbayDebugInfo(listing),
+      rawAnalysis: analysis,
+    };
+  }
+
+  const scores: Record<string, number | null | undefined> = { ...(validated.scores || {}) };
+
+  // Step 3: always override sellerTrust with deterministic value — never accept from AI
   const { p, n } = parseEbaySellerData(listing);
   if (p !== null && n !== null) {
     scores.sellerTrust = calculateSellerTrust(p, n);
@@ -75,17 +99,16 @@ function parseAIAnalysis(listing: any, analysis: string) {
   const aiScore = average([
     scores.priceFairness,
     scores.sellerTrust,
-    conditionHonesty,
-    shippingFairness,
-    locationRisk,
-    descriptionQuality,
+    scores.conditionHonesty,
+    scores.shippingFairness,
+    scores.descriptionQuality,
   ]);
 
   return {
     aiScore,
     aiScores: scores,
-    overview: jsonBlock?.overview || "No overview.",
-    highlights: jsonBlock?.highlights,
+    overview: validated.overview || "No overview.",
+    highlights: validated.highlights ?? [],
     debugInfo: buildEbayDebugInfo(listing),
     rawAnalysis: analysis,
   };

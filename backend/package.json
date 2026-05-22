@@ -9,7 +9,9 @@
     "dev": "ts-node src/server.ts",
     "start": "node dist/server.js",
     "build": "tsc",
-    "debug:marketplace": "ts-node src/scripts/dumpMarketplaceGraphql.ts"
+    "debug:marketplace": "ts-node src/scripts/dumpMarketplaceGraphql.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@types/better-sqlite3": "7.6.13",
@@ -38,7 +40,8 @@
     "typescript": "5.9.3"
   },
   "devDependencies": {
-    "ts-node": "^10.9.2"
+    "ts-node": "^10.9.2",
+    "vitest": "^4.1.7"
   },
   "overrides": {
     "path-to-regexp": "8.4.0",

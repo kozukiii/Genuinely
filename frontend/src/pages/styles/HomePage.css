@@ -183,6 +183,28 @@ h6 {
   letter-spacing: 0.02em;
 }
 
+.home-page .scam-hidden-notice {
+  grid-column: 1 / -1;
+  margin-top: 1rem;
+  font-size: 0.82rem;
+  color: rgba(156, 163, 175, 0.55);
+  text-align: center;
+}
+
+.home-page .scam-toggle-btn {
+  background: none;
+  border: none;
+  color: rgba(156, 163, 175, 0.55);
+  text-decoration: underline;
+  cursor: pointer;
+  font-size: inherit;
+  padding: 0;
+}
+
+.home-page .scam-toggle-btn:hover {
+  color: rgba(156, 163, 175, 0.9);
+}
+
 /* --- Scrollbar (global but safe) --- */
 ::-webkit-scrollbar {
   width: 8px;

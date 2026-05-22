@@ -2,6 +2,15 @@ import OpenAI from "openai";
 import dotenv from "dotenv";
 import fetch from "node-fetch";
 import { logUsage } from "../services/usageLogger";
+import { extractBatchObjects } from "../utils/extractBatchObjects";
+
+const MARKETPLACE_SCORE_KEYS = new Set([
+  "priceFairness",
+  "sellerTrust",
+  "conditionHonesty",
+  "shippingFairness",
+  "descriptionQuality",
+]);
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { HttpsProxyAgent } = require("https-proxy-agent");
@@ -416,13 +425,7 @@ HIGHLIGHTS RULES:
 - Good label examples: "Original box included", "Charger included", "Local pickup only", "Active listing", "Missing accessories", "Visible wear in images"
 - Only include highlights with clear evidence. Do NOT pad or invent.
 
-After that JSON block, output exactly:
-
-DEBUG INFO:
-<Only the raw fields the user sent>
-
-Do NOT add extra JSON fields beyond scores, overview, and highlights.
-Do NOT wrap JSON in backticks.
+‼️ Return ONLY the JSON object above. No markdown fences. No backticks. No commentary. No DEBUG INFO. No extra fields beyond scores, overview, and highlights.
 `,
     },
     {
@@ -456,10 +459,12 @@ Do NOT wrap JSON in backticks.
     messages,
     max_tokens: 1000,
     temperature: 0.2,
+    response_format: { type: "json_object" },
   });
   logUsage("groq", "llama-4-scout-17b", response.usage);
+  console.log("[marketplace:single] response_format=json_object used");
 
-  return response.choices[0].message.content?.trim() || "No analysis.";
+  return response.choices[0].message.content?.trim() || "{}";
 }
 
 // ---------------------------------------------------------------------------
@@ -471,7 +476,7 @@ const MODEL_IMAGE_LIMIT = 5; // hard cap imposed by the vision model
 // Appended to any generated system prompt so the output shape stays consistent
 const MARKETPLACE_BATCH_OUTPUT_FORMAT = `
 You will receive multiple Facebook Marketplace listings numbered 1 through N (each wrapped in === LISTING N === / === END LISTING N ===).
-Analyze ALL of them and return results as a JSON array.
+Analyze ALL of them and return results as a JSON object containing a "listings" array.
 
 MARKETPLACE RULES (always apply):
 - Marketplace listings often have sparse data — score FAIRLY, do not penalize missing metadata
@@ -485,7 +490,7 @@ MARKETPLACE RULES (always apply):
 - Multiple images of the same item from different angles are normal — do NOT flag as suspicious or as a different item
 - Do NOT use "scam", "suspicious", or "fraud" language from a single signal — only when multiple explicit red flags combine
 - DO NOT include numeric scores inside the overview text
-- DO NOT add extra JSON fields
+- DO NOT add extra fields beyond listingIndex, scores, overview, and highlights
 
 PRICE FAIRNESS RULES (read carefully):
 - If the Price field for a listing LITERALLY shows the text "Accepts Offers" or "Unavailable" (not a dollar amount), set priceFairness to null and mention it in the overview
@@ -495,10 +500,10 @@ PRICE FAIRNESS RULES (read carefully):
 - Any listing priced at or below the low end of the market range must score 100 (great deal)
 - CRITICAL EXCEPTION: if price is below 50% of the market low end, set priceFairness to 0 — a price this far below market is a red flag, not a deal; do NOT treat extreme underpricing as positive
 
-JSON FORMATTING RULES — your output must pass JSON.parse() without any modification:
+JSON FORMATTING RULES — your output must be valid JSON that passes JSON.parse() without modification:
+- Return a single JSON object with one key: "listings"
 - Write every "overview" value as a single unbroken line — no literal newline characters inside any string value
-- Always put a comma between every object in the array; never omit commas between objects
-- Output nothing before the opening [ or after the closing ] — no preamble, no explanation
+- No markdown fences, no backticks, no commentary, no preamble
 
 HIGHLIGHTS RULES (apply to every listing):
 - First scan the PRODUCT CONTEXT block for accessories and inspection points for this item type. Surface presence as positive, absence as negative.
@@ -509,23 +514,24 @@ HIGHLIGHTS RULES (apply to every listing):
 - Examples: "Original box included", "Charger included", "Local pickup only", "Active listing", "Missing accessories", "Visible wear in images"
 - Only include highlights with clear evidence. Do NOT pad.
 
-OUTPUT FORMAT — return ONLY a JSON array:
-[
-  {
-    "listingIndex": 0,
-    "scores": { "priceFairness": <number or null>, "sellerTrust": <number>, "conditionHonesty": <number>, "shippingFairness": <number>, "descriptionQuality": <number> },
-    "overview": "Short confident reasoning paragraph.",
-    "highlights": [{ "label": "...", "positive": true }]
-  },
-  ...one entry per listing, zero-indexed
-]
+OUTPUT FORMAT — return ONLY this JSON object:
+{
+  "listings": [
+    {
+      "listingIndex": 0,
+      "scores": { "priceFairness": <number or null>, "sellerTrust": <number>, "conditionHonesty": <number>, "shippingFairness": <number>, "descriptionQuality": <number> },
+      "overview": "Short confident reasoning paragraph.",
+      "highlights": [{ "label": "...", "positive": true }]
+    }
+  ]
+}
 `.trim();
 
 export const MARKETPLACE_BATCH_SYSTEM_PROMPT = `
 You are an expert AI specializing in evaluating Facebook Marketplace listings for a deal-finding product.
 
 You will receive multiple listings numbered 1 through N (each wrapped in === LISTING N === / === END LISTING N ===).
-Analyze ALL of them using the scoring rules below and return results as a JSON array.
+Analyze ALL of them using the scoring rules below and return results as a JSON object containing a "listings" array.
 
 IMPORTANT: Marketplace listings often have sparse data. Score them FAIRLY without over-penalizing missing metadata.
 
@@ -558,12 +564,12 @@ GENERAL RULES:
 - Multiple images of the same item from different angles are completely normal — do NOT flag as suspicious or as a different item
 - Do NOT use "scam", "suspicious", or "fraud" language from a single signal — only when multiple explicit red flags combine
 - DO NOT include numeric scores inside the overview text
-- DO NOT add extra JSON fields
+- DO NOT add extra fields beyond listingIndex, scores, overview, and highlights
 
-JSON FORMATTING RULES — your output must pass JSON.parse() without any modification:
+JSON FORMATTING RULES — your output must be valid JSON that passes JSON.parse() without modification:
+- Return a single JSON object with one key: "listings"
 - Write every "overview" value as a single unbroken line — no literal newline characters inside any string value
-- Always put a comma between every object in the array; never omit commas between objects
-- Output nothing before the opening [ or after the closing ] — no preamble, no explanation
+- No markdown fences, no backticks, no commentary, no preamble
 
 HIGHLIGHTS RULES:
 - First scan the PRODUCT CONTEXT block for accessories and inspection points for this item type. Surface presence as positive, absence as negative.
@@ -574,75 +580,18 @@ HIGHLIGHTS RULES:
 - Examples: "Original box included", "Charger included", "Local pickup only", "Active listing", "Missing accessories", "Visible wear in images"
 - Only include highlights with clear evidence. Do NOT pad.
 
-OUTPUT FORMAT — return ONLY a JSON array:
-[
-  {
-    "listingIndex": 0,
-    "scores": { "priceFairness": <n>, "sellerTrust": <n>, "conditionHonesty": <n>, "shippingFairness": <n>, "descriptionQuality": <n> },
-    "overview": "Short confident reasoning paragraph.",
-    "highlights": [{ "label": "...", "positive": true }]
-  },
-  ...one entry per listing, zero-indexed
-]
-`.trim();
-
-// Escape literal newlines/carriage-returns inside JSON string values.
-// Used as a fallback repair on individual objects that fail to parse.
-function repairLiteralNewlines(s: string): string {
-  let out = "";
-  let inString = false;
-  let escaped = false;
-  for (let i = 0; i < s.length; i++) {
-    const ch = s[i];
-    if (escaped) { out += ch; escaped = false; continue; }
-    if (ch === "\\") { escaped = true; out += ch; continue; }
-    if (ch === '"') { inString = !inString; out += ch; continue; }
-    if (inString && ch === "\r") continue;
-    if (inString && ch === "\n") { out += "\\n"; continue; }
-    out += ch;
-  }
-  return out;
-}
-
-// Extract each top-level {...} object from the model's raw response by tracking brace depth.
-// Resilient to missing commas between objects, stray text before/after the array, and any
-// other inter-object formatting issues. Each object is parsed individually so one bad entry
-// cannot fail the whole batch.
-function extractObjects(raw: string): any[] {
-  const results: any[] = [];
-  let depth = 0;
-  let start = -1;
-  let inString = false;
-  let escaped = false;
-
-  for (let i = 0; i < raw.length; i++) {
-    const ch = raw[i];
-    if (escaped) { escaped = false; continue; }
-    if (ch === "\\" && inString) { escaped = true; continue; }
-    if (ch === '"') { inString = !inString; continue; }
-    if (inString) continue;
-
-    if (ch === "{") {
-      if (depth === 0) start = i;
-      depth++;
-    } else if (ch === "}") {
-      depth--;
-      if (depth === 0 && start !== -1) {
-        const slice = raw.slice(start, i + 1);
-        try {
-          results.push(JSON.parse(slice));
-        } catch {
-          try {
-            results.push(JSON.parse(repairLiteralNewlines(slice).replace(/,(\s*[}\]])/g, "$1")));
-          } catch { /* skip truly unparseable object */ }
-        }
-        start = -1;
-      }
+OUTPUT FORMAT — return ONLY this JSON object:
+{
+  "listings": [
+    {
+      "listingIndex": 0,
+      "scores": { "priceFairness": <n>, "sellerTrust": <n>, "conditionHonesty": <n>, "shippingFairness": <n>, "descriptionQuality": <n> },
+      "overview": "Short confident reasoning paragraph.",
+      "highlights": [{ "label": "...", "positive": true }]
     }
-  }
-
-  return results;
+  ]
 }
+`.trim();
 
 async function _runMarketplaceBatch(listings: any[], allDataUrls: string[][], context?: string | null, systemPrompt?: string | null): Promise<string[]> {
   const contentParts: any[] = [];
@@ -697,33 +646,52 @@ async function _runMarketplaceBatch(listings: any[], allDataUrls: string[][], co
       ],
       max_tokens: Math.min(listings.length * 800, 5000),
       temperature: 0.2,
+      response_format: { type: "json_object" },
     }));
     logUsage("groq", "llama-4-scout-17b", response.usage);
-    rawResponse = response.choices[0].message.content?.trim() ?? "[]";
+    rawResponse = response.choices[0].message.content?.trim() ?? "{}";
+    console.log(`[marketplace:batch] response_format=json_object received ${rawResponse.length} chars`);
   } catch (err) {
-    console.error("Marketplace batch API call failed, falling back to sequential individual calls:", err);
+    console.error("[marketplace:batch] API call failed, falling back to sequential individual calls:", err);
     const results: string[] = [];
     for (const l of listings) {
-      results.push(await analyzeMarketplaceListingWithImages(l, context).catch(() => "No analysis.\nDEBUG INFO:\n(individual fallback failed)"));
+      results.push(await analyzeMarketplaceListingWithImages(l, context).catch(() => "{}"));
     }
     return results;
   }
 
   try {
-    const parsed = extractObjects(rawResponse);
-    if (parsed.length === 0) throw new Error("No objects extracted from response");
+    // Primary: parse the { listings: [...] } wrapper from JSON Object Mode
+    let parsed: any[] = [];
+    try {
+      const top = JSON.parse(rawResponse);
+      if (Array.isArray(top?.listings)) {
+        parsed = top.listings;
+      } else if (Array.isArray(top)) {
+        // Model returned a bare array despite the prompt — accept it
+        parsed = top;
+      }
+    } catch {
+      // Fallback: brace-depth extraction for malformed responses
+      console.warn("[marketplace:batch] top-level JSON.parse failed, falling back to extractBatchObjects");
+      parsed = extractBatchObjects(rawResponse);
+    }
+
+    if (parsed.length === 0) throw new Error("No objects extracted from batch response");
 
     return listings.map((_, i) => {
       const item = parsed.find((x: any) => x.listingIndex === i) ?? parsed[i];
-      if (!item?.scores) return "No analysis.\nDEBUG INFO:\n(batch item missing)";
-      const jsonStr = JSON.stringify({ scores: item.scores, overview: item.overview ?? "", highlights: item.highlights ?? [] });
-      return `${jsonStr}\nDEBUG INFO:\n(batched with ${listings.length} items)`;
+      if (!item?.scores) {
+        console.warn(`[marketplace:batch] listing ${i} missing scores — returning empty`);
+        return "{}";
+      }
+      return JSON.stringify({ scores: item.scores, overview: item.overview ?? "", highlights: item.highlights ?? [] });
     });
   } catch (err) {
-    console.error("Marketplace batch response parse failed, falling back to sequential individual calls:", err);
+    console.error("[marketplace:batch] response parse failed, falling back to sequential individual calls:", err);
     const results: string[] = [];
     for (const l of listings) {
-      results.push(await analyzeMarketplaceListingWithImages(l, context).catch(() => "No analysis.\nDEBUG INFO:\n(individual fallback failed)"));
+      results.push(await analyzeMarketplaceListingWithImages(l, context).catch(() => "{}"));
     }
     return results;
   }

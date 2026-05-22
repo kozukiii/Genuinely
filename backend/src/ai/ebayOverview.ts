@@ -1,6 +1,15 @@
 import OpenAI from "openai";
 import dotenv from "dotenv";
 import { calculatePriceFairness } from "../services/scoring/priceFairnessScore";
+import { extractBatchObjects } from "../utils/extractBatchObjects";
+import { validateAnalysis, EMPTY_ANALYSIS } from "../utils/extractStructuredAnalysis";
+
+const EBAY_SCORE_KEYS = new Set([
+  "priceFairness",
+  "conditionHonesty",
+  "shippingFairness",
+  "descriptionQuality",
+]);
 
 dotenv.config({ quiet: true });
 
@@ -241,14 +250,8 @@ HIGHLIGHTS RULES:
 - Good label examples: "Original box included", "Charger included", "Free shipping", "Top-rated seller", "Missing accessories", "Visible wear in images"
 - Only include highlights with clear evidence. Do NOT pad or invent.
 
-After that JSON block, output:
-
-DEBUG INFO:
-<Only the raw fields the user sent>
-
+‼️ Return ONLY the JSON object above. No markdown fences. No backticks. No commentary. No DEBUG INFO. No extra fields beyond scores, overview, and highlights.
 ‼️ DO NOT include any scoring numbers inside the overview text.
-‼️ DO NOT add extra fields to the JSON beyond scores, overview, and highlights.
-‼️ DO NOT wrap JSON in backticks.
 `,
     },
     {
@@ -293,9 +296,10 @@ DEBUG INFO:
     messages,
     max_tokens: 1000,
     temperature: 0.2,
+    response_format: { type: "json_object" },
   });
 
-  return response.choices[0].message.content?.trim() || "No analysis.";
+  return response.choices[0].message.content?.trim() || "{}";
 }
 
 // ---------------------------------------------------------------------------
@@ -306,7 +310,7 @@ DEBUG INFO:
 // Appended to any generated system prompt so the output shape stays consistent
 const EBAY_BATCH_OUTPUT_FORMAT = `
 You will receive multiple eBay listings numbered 1 through N (each wrapped in === LISTING N === / === END LISTING N ===).
-Analyze ALL of them and return results as a JSON array.
+Analyze ALL of them and return results as a JSON object containing a "listings" array.
 
 ALWAYS APPLY:
 - priceFairness: a Suggested Price Fairness score is pre-calculated from market data and included with each listing. Use it as-is unless there is a clear qualitative reason to adjust (e.g. listing is for parts/repair only, seller discloses damage beyond the stated condition, obvious fraud signals). Do not adjust based on price position alone — that is already accounted for. When the suggested score is N/A, estimate from the PRODUCT CONTEXT price range or your own knowledge.
@@ -321,12 +325,12 @@ ALWAYS APPLY:
 - Multiple images showing different angles of the same item (front, back, sides) are completely normal — do NOT treat this as suspicious
 - Do NOT use "scam", "suspicious", or "fraud" language based on any single signal — only raise concerns when multiple explicit red flags combine
 - DO NOT include numeric scores inside the overview text
-- DO NOT add extra JSON fields
+- DO NOT add extra fields beyond listingIndex, scores, overview, and highlights
 
-JSON FORMATTING RULES — your output must pass JSON.parse() without any modification:
+JSON FORMATTING RULES — your output must be valid JSON that passes JSON.parse() without modification:
+- Return a single JSON object with one key: "listings"
 - Write every "overview" value as a single unbroken line — no literal newline characters inside any string value
-- Always put a comma between every object in the array; never omit commas between objects
-- Output nothing before the opening [ or after the closing ] — no preamble, no explanation
+- No markdown fences, no backticks, no commentary, no preamble
 
 HIGHLIGHTS RULES (apply to every listing):
 - First scan the PRODUCT CONTEXT block for accessories and inspection points for this item type. Surface presence as positive, absence as negative.
@@ -338,23 +342,24 @@ HIGHLIGHTS RULES (apply to every listing):
 - Examples: "Original box included", "Charger included", "Free shipping", "Top-rated seller", "Missing accessories", "Visible wear in images"
 - Only include highlights with clear evidence. Do NOT pad.
 
-OUTPUT FORMAT — return ONLY a JSON array:
-[
-  {
-    "listingIndex": 0,
-    "scores": { "priceFairness": <n>, "conditionHonesty": <n>, "shippingFairness": <n>, "descriptionQuality": <n> },
-    "overview": "Short reasoning paragraph.",
-    "highlights": [{ "label": "...", "positive": true }]
-  },
-  ...one entry per listing, zero-indexed
-]
+OUTPUT FORMAT — return ONLY this JSON object:
+{
+  "listings": [
+    {
+      "listingIndex": 0,
+      "scores": { "priceFairness": <n>, "conditionHonesty": <n>, "shippingFairness": <n>, "descriptionQuality": <n> },
+      "overview": "Short reasoning paragraph.",
+      "highlights": [{ "label": "...", "positive": true }]
+    }
+  ]
+}
 `.trim();
 
 export const EBAY_BATCH_SYSTEM_PROMPT = `
 You are an expert AI specializing in evaluating eBay listings for a deal-finding product.
 
 You will receive multiple listings numbered 1 through N (each wrapped in === LISTING N === / === END LISTING N ===).
-Analyze ALL of them and return results as a JSON array.
+Analyze ALL of them and return results as a JSON object containing a "listings" array.
 
 SCORING RULES (apply to every listing):
 - priceFairness (0–100): a Suggested Price Fairness score is pre-calculated from market data and included with each listing. Use it as-is unless there is a clear qualitative reason to adjust (e.g. parts/repair only, seller discloses damage beyond the stated condition, obvious fraud signals). Do not adjust based on price position alone. When the suggested score is N/A, estimate from the PRODUCT CONTEXT price range or your own knowledge.
@@ -373,12 +378,12 @@ GENERAL RULES:
 - Describe images in the overview if provided; multiple views of the same item (front, back, sides) are completely normal — do NOT treat as suspicious
 - Do NOT use "scam", "suspicious", or "fraud" language from a single signal — only when multiple explicit red flags combine
 - DO NOT include numeric scores inside the overview text
-- DO NOT add extra JSON fields
+- DO NOT add extra fields beyond listingIndex, scores, overview, and highlights
 
-JSON FORMATTING RULES — your output must pass JSON.parse() without any modification:
+JSON FORMATTING RULES — your output must be valid JSON that passes JSON.parse() without modification:
+- Return a single JSON object with one key: "listings"
 - Write every "overview" value as a single unbroken line — no literal newline characters inside any string value
-- Always put a comma between every object in the array; never omit commas between objects
-- Output nothing before the opening [ or after the closing ] — no preamble, no explanation
+- No markdown fences, no backticks, no commentary, no preamble
 
 HIGHLIGHTS RULES:
 - First scan the PRODUCT CONTEXT block for accessories and inspection points for this item type. Surface presence as positive, absence as negative.
@@ -390,16 +395,17 @@ HIGHLIGHTS RULES:
 - Examples: "Original box included", "Charger included", "Free shipping", "Top-rated seller", "Missing accessories", "Visible wear in images"
 - Only include highlights with clear evidence. Do NOT pad.
 
-OUTPUT FORMAT — return ONLY a JSON array:
-[
-  {
-    "listingIndex": 0,
-    "scores": { "priceFairness": <n>, "conditionHonesty": <n>, "shippingFairness": <n>, "descriptionQuality": <n> },
-    "overview": "Short reasoning paragraph.",
-    "highlights": [{ "label": "...", "positive": true }]
-  },
-  ...one entry per listing, zero-indexed
-]
+OUTPUT FORMAT — return ONLY this JSON object:
+{
+  "listings": [
+    {
+      "listingIndex": 0,
+      "scores": { "priceFairness": <n>, "conditionHonesty": <n>, "shippingFairness": <n>, "descriptionQuality": <n> },
+      "overview": "Short reasoning paragraph.",
+      "highlights": [{ "label": "...", "positive": true }]
+    }
+  ]
+}
 `.trim();
 
 const MAX_IMAGES_PER_BATCH = 5;
@@ -444,64 +450,6 @@ function buildImageAwareBatches(listings: any[]): BatchEntry[][] {
 
   if (current.length > 0) batches.push(current);
   return batches;
-}
-
-// Escape literal newlines/carriage-returns inside JSON string values.
-// Used as a fallback repair on individual objects that fail to parse.
-function repairLiteralNewlines(s: string): string {
-  let out = "";
-  let inString = false;
-  let escaped = false;
-  for (let i = 0; i < s.length; i++) {
-    const ch = s[i];
-    if (escaped) { out += ch; escaped = false; continue; }
-    if (ch === "\\") { escaped = true; out += ch; continue; }
-    if (ch === '"') { inString = !inString; out += ch; continue; }
-    if (inString && ch === "\r") continue;
-    if (inString && ch === "\n") { out += "\\n"; continue; }
-    out += ch;
-  }
-  return out;
-}
-
-// Extract each top-level {...} object from the model's raw response by tracking brace depth.
-// Resilient to missing commas between objects, stray text before/after the array, and any
-// other inter-object formatting issues. Each object is parsed individually so one bad entry
-// cannot fail the whole batch.
-function extractObjects(raw: string): any[] {
-  const results: any[] = [];
-  let depth = 0;
-  let start = -1;
-  let inString = false;
-  let escaped = false;
-
-  for (let i = 0; i < raw.length; i++) {
-    const ch = raw[i];
-    if (escaped) { escaped = false; continue; }
-    if (ch === "\\" && inString) { escaped = true; continue; }
-    if (ch === '"') { inString = !inString; continue; }
-    if (inString) continue;
-
-    if (ch === "{") {
-      if (depth === 0) start = i;
-      depth++;
-    } else if (ch === "}") {
-      depth--;
-      if (depth === 0 && start !== -1) {
-        const slice = raw.slice(start, i + 1);
-        try {
-          results.push(JSON.parse(slice));
-        } catch {
-          try {
-            results.push(JSON.parse(repairLiteralNewlines(slice).replace(/,(\s*[}\]])/g, "$1")));
-          } catch { /* skip truly unparseable object */ }
-        }
-        start = -1;
-      }
-    }
-  }
-
-  return results;
 }
 
 async function _runEbayBatch(entries: BatchEntry[], context?: string | null, systemPrompt?: string | null): Promise<string[]> {
@@ -573,35 +521,51 @@ async function _runEbayBatch(entries: BatchEntry[], context?: string | null, sys
       ],
       max_tokens: Math.min(listings.length * 800, 5000),
       temperature: 0.2,
+      response_format: { type: "json_object" },
     }));
-    rawResponse = response.choices[0].message.content?.trim() ?? "[]";
+    rawResponse = response.choices[0].message.content?.trim() ?? "{}";
+    console.log(`[ebay:batch] response_format=json_object received ${rawResponse.length} chars`);
   } catch (err) {
-    console.error("eBay batch API call failed, falling back to sequential individual calls:", err);
+    console.error("[ebay:batch] API call failed, falling back to sequential individual calls:", err);
     const results: string[] = [];
     for (const l of listings) {
-      results.push(await analyzeListingWithImages(l, context).catch(() => "No analysis.\nDEBUG INFO:\n(individual fallback failed)"));
+      results.push(await analyzeListingWithImages(l, context).catch(() => "{}"));
     }
     return results;
   }
 
   try {
-    const start = rawResponse.indexOf("[");
-    const end = rawResponse.lastIndexOf("]");
-    if (start === -1 || end === -1 || end < start) throw new Error("No JSON array found in response");
-    const parsed = extractObjects(rawResponse);
-    if (parsed.length === 0) throw new Error("No objects extracted from response");
+    // Primary: parse the { listings: [...] } wrapper from JSON Object Mode
+    let parsed: any[] = [];
+    try {
+      const top = JSON.parse(rawResponse);
+      if (Array.isArray(top?.listings)) {
+        parsed = top.listings;
+      } else if (Array.isArray(top)) {
+        // Model returned a bare array despite the prompt — accept it
+        parsed = top;
+      }
+    } catch {
+      // Fallback: brace-depth extraction for malformed responses
+      console.warn("[ebay:batch] top-level JSON.parse failed, falling back to extractBatchObjects");
+      parsed = extractBatchObjects(rawResponse);
+    }
+
+    if (parsed.length === 0) throw new Error("No objects extracted from batch response");
 
     return listings.map((_, i) => {
       const item = parsed.find((x: any) => x.listingIndex === i) ?? parsed[i];
-      if (!item?.scores) return "No analysis.\nDEBUG INFO:\n(batch item missing)";
-      const jsonStr = JSON.stringify({ scores: item.scores, overview: item.overview ?? "", highlights: item.highlights ?? [] });
-      return `${jsonStr}\nDEBUG INFO:\n(batched with ${listings.length} items)`;
+      if (!item?.scores) {
+        console.warn(`[ebay:batch] listing ${i} missing scores — returning empty`);
+        return "{}";
+      }
+      return JSON.stringify({ scores: item.scores, overview: item.overview ?? "", highlights: item.highlights ?? [] });
     });
   } catch (err) {
-    console.error("eBay batch response parse failed, falling back to sequential individual calls:", err);
+    console.error("[ebay:batch] response parse failed, falling back to sequential individual calls:", err);
     const results: string[] = [];
     for (const l of listings) {
-      results.push(await analyzeListingWithImages(l, context).catch(() => "No analysis.\nDEBUG INFO:\n(individual fallback failed)"));
+      results.push(await analyzeListingWithImages(l, context).catch(() => "{}"));
     }
     return results;
   }

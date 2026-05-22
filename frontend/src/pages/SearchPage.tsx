@@ -467,6 +467,7 @@ export default function SearchPage() {
   const [savedVersion, setSavedVersion] = useState(0);
   const [hydrated, setHydrated] = useState(false);
   const [activeHighlightFilters, setActiveHighlightFilters] = useState<string[]>([]);
+  const [showScamListings, setShowScamListings] = useState(false);
   const [refineOpen, setRefineOpen] = useState(false);
   const [refineExiting, setRefineExiting] = useState(false);
 
@@ -638,18 +639,28 @@ export default function SearchPage() {
     setPage(1);
   }, []);
 
-  const totalPages = Math.max(1, Math.ceil(displayListings.length / PAGE_SIZE));
+  const scamCount = useMemo(
+    () => displayListings.filter((l) => !l.acceptsOffers && l.aiScores?.priceFairness === 0 && l.aiScores?.sellerTrust === 0).length,
+    [displayListings]
+  );
+
+  const visibleListings = useMemo(
+    () => showScamListings ? displayListings : displayListings.filter((l) => l.acceptsOffers || l.aiScores?.priceFairness !== 0 || l.aiScores?.sellerTrust !== 0),
+    [displayListings, showScamListings]
+  );
+
+  const totalPages = Math.max(1, Math.ceil(visibleListings.length / PAGE_SIZE));
   const canGoPrev = page > 1;
   const canGoNext = page < totalPages || hasMore;
 
   const pageItems = useMemo(() => {
-    const slice = displayListings.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).slice();
+    const slice = visibleListings.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).slice();
     const sortBy = filters.sortBy;
     if (sortBy === "price_asc") slice.sort((a, b) => (a.price ?? 0) - (b.price ?? 0));
     else if (sortBy === "price_desc") slice.sort((a, b) => (b.price ?? 0) - (a.price ?? 0));
     else if (sortBy === "ai_score") slice.sort((a, b) => (b.aiScore ?? -1) - (a.aiScore ?? -1));
     return slice;
-  }, [displayListings, page, filters.sortBy]);
+  }, [visibleListings, page, filters.sortBy]);
 
   // ── Initial search (new query) ──────────────────────────────────────────
   const handleSearch = useCallback(
@@ -678,6 +689,7 @@ export default function SearchPage() {
       setCurrentQuery(q);
       setPage(1);
       setActiveHighlightFilters([]);
+      setShowScamListings(false);
 
       const parsedLimit = activeFilters.limit !== "" ? Math.max(1, parseInt(activeFilters.limit, 10)) : undefined;
       const fetchSize = parsedLimit ?? PRELOAD_SIZE;
@@ -1006,6 +1018,14 @@ export default function SearchPage() {
                 )}
                 {!loading && !hasMore && pageItems.length > 0 && page === totalPages && (
                   <p className="end-of-results">You've reached the end of results.</p>
+                )}
+                {!loading && scamCount > 0 && (
+                  <p className="scam-hidden-notice">
+                    {showScamListings
+                      ? <>Showing {scamCount} scam likely listing{scamCount !== 1 ? "s" : ""} — <button className="scam-toggle-btn" onClick={() => setShowScamListings(false)}>hide</button></>
+                      : <>{scamCount} listing{scamCount !== 1 ? "s" : ""} hidden as scam likely — <button className="scam-toggle-btn" onClick={() => setShowScamListings(true)}>show</button></>
+                    }
+                  </p>
                 )}
               </div>
             )}

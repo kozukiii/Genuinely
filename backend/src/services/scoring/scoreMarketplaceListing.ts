@@ -1,7 +1,15 @@
 import { analyzeMarketplaceListingWithImages, batchAnalyzeMarketplaceListingsWithImages, MARKETPLACE_BATCH_SYSTEM_PROMPT } from "../../ai/marketplaceOverview";
-import { extractStructuredAnalysis } from "../../utils/extractStructuredAnalysis";
+import { extractStructuredAnalysis, validateAnalysis, EMPTY_ANALYSIS } from "../../utils/extractStructuredAnalysis";
 import { calculatePriceFairness, isAcceptsOffersPrice } from "./priceFairnessScore";
 import { setCachedAnalysis, setCachedAnalysisBatch } from "../analysisCache";
+
+const MARKETPLACE_SCORE_KEYS = new Set([
+  "priceFairness",
+  "sellerTrust",
+  "conditionHonesty",
+  "shippingFairness",
+  "descriptionQuality",
+]);
 
 function average(nums: Array<number | null | undefined>) {
   const valid = nums.filter((n): n is number => typeof n === "number" && !isNaN(n));
@@ -39,13 +47,17 @@ export async function scoreMarketplaceListing(listing: any, context?: string | n
   const acceptsOffers = isAcceptsOffersPrice(listing.price, context);
   const hasFixedPrice = typeof listing.price === "number" && listing.price > 0 && !acceptsOffers;
   const analysis = await analyzeMarketplaceListingWithImages(listing, context);
-  const jsonBlock = extractStructuredAnalysis(analysis);
 
-  if (!jsonBlock) {
-    console.error("No JSON block found in Marketplace AI response.");
+  const raw = extractStructuredAnalysis(analysis);
+  if (!raw) {
+    console.error("[scoreMarketplaceListing] No JSON block found — using EMPTY_ANALYSIS fallback");
+  }
+  const validated = raw ? validateAnalysis(raw, MARKETPLACE_SCORE_KEYS) : null;
+  if (!validated) {
+    console.error("[scoreMarketplaceListing] Validation failed — using EMPTY_ANALYSIS fallback");
   }
 
-  const scores = { ...(jsonBlock?.scores || {}) };
+  const scores: Record<string, number | null | undefined> = { ...(validated?.scores || {}) };
   const { sellerTrust, conditionHonesty, shippingFairness, descriptionQuality } = scores;
 
   // Override LLM price fairness with deterministic context-based score when available
@@ -69,8 +81,8 @@ export async function scoreMarketplaceListing(listing: any, context?: string | n
     acceptsOffers,
     aiScore,
     aiScores: scores,
-    overview: jsonBlock?.overview || "No overview.",
-    highlights: jsonBlock?.highlights,
+    overview: validated?.overview || "No overview.",
+    highlights: validated?.highlights ?? [],
     debugInfo: buildMarketplaceDebugInfo(listing),
     rawAnalysis: analysis,
     marketContext: context ?? undefined,
@@ -92,13 +104,17 @@ export async function scoreMarketplaceListing(listing: any, context?: string | n
 function parseMarketplaceAnalysis(listing: any, analysis: string, context?: string | null, priceLow?: number | null, priceHigh?: number | null) {
   const acceptsOffers = isAcceptsOffersPrice(listing.price, context);
   const hasFixedPrice = typeof listing.price === "number" && listing.price > 0 && !acceptsOffers;
-  const jsonBlock = extractStructuredAnalysis(analysis);
 
-  if (!jsonBlock) {
-    console.error("No JSON block found in Marketplace AI response.");
+  const raw = extractStructuredAnalysis(analysis);
+  if (!raw) {
+    console.error("[parseMarketplaceAnalysis] No JSON block found in AI response.");
+  }
+  const validated = raw ? validateAnalysis(raw, MARKETPLACE_SCORE_KEYS) : null;
+  if (!validated) {
+    console.error("[parseMarketplaceAnalysis] Validation failed — using EMPTY_ANALYSIS fallback");
   }
 
-  const scores = { ...(jsonBlock?.scores || {}) };
+  const scores: Record<string, number | null | undefined> = { ...(validated?.scores || {}) };
   const { sellerTrust, conditionHonesty, shippingFairness, descriptionQuality } = scores;
 
   const calculatedPriceFairness = hasFixedPrice
@@ -121,8 +137,8 @@ function parseMarketplaceAnalysis(listing: any, analysis: string, context?: stri
     acceptsOffers,
     aiScore,
     aiScores: scores,
-    overview: jsonBlock?.overview || "No overview.",
-    highlights: jsonBlock?.highlights,
+    overview: validated?.overview || "No overview.",
+    highlights: validated?.highlights ?? [],
     debugInfo: buildMarketplaceDebugInfo(listing),
     rawAnalysis: analysis,
     marketContext: context ?? undefined,

@@ -1,219 +1,195 @@
-# Genuinely
+Genuinely
 
-**AI-powered deal hunting across eBay and Facebook Marketplace.**
+AI-powered deal hunting across secondhand marketplaces.
 
-Genuinely searches multiple marketplaces simultaneously, scores every listing with an LLM, and gives you a straight answer: is this a good deal or not? Price fairness, seller trust, condition honesty, shipping costs, and more -- all surfaced before you click Buy.
+Genuinely helps shoppers search multiple marketplaces at once, compare listings faster, and understand whether an item is actually a good deal before clicking through. It combines marketplace data, price context, seller signals, and AI-generated listing analysis into a cleaner shopping experience.
 
----
+Live site: https://www.genuinelyshop.com
 
-## Features
+⸻
 
-- **Unified search** -- query eBay and Facebook Marketplace at the same time, deduplicated
-- **AI scoring** -- each listing gets scored across 5 dimensions using Groq's LLM inference
-  - Price fairness (deterministic percentile algorithm + market context)
-  - Seller trust (eBay: deterministic from feedback history; Marketplace: listing confidence)
-  - Condition honesty (description vs. images vs. stated condition)
-  - Shipping fairness (cost vs. item value)
-  - Description quality (detail and accuracy)
-- **Market context** -- pulls comparable listings to build real price ranges before scoring
-- **Per-category price sources** -- continually expanding source integrations let category-specific data override generic web estimates when a better source exists
-- **Trending shortcuts** -- one-click searches for PS5, Nintendo Switch, Air Jordan 1, and more
-- **Filters** -- price range, condition, free shipping, location
-- **Save listings** -- synced to your account via SQLite, falls back to LocalStorage
-- **Link analysis** -- paste any listing URL for on-demand AI scoring
-- **Admin dashboard** -- API usage monitoring for eBay, Groq, and Serper providers
-- **Image proxy** -- high-res variants, proxied cleanly through the backend
+Overview
 
----
+Secondhand shopping is powerful, but it is also messy. Listings are scattered across platforms, prices vary wildly, descriptions are inconsistent, and buyers often have to do their own research before knowing whether something is worth pursuing.
 
-## Tech Stack
+Genuinely is built to reduce that friction.
 
-| Layer | Technology |
-|---|---|
-| Frontend | React 18, TypeScript, Vite, Tailwind CSS 4 |
-| Backend | Express 5, TypeScript, Node.js |
-| Database | SQLite via better-sqlite3 (WAL mode) |
-| Auth | Google OAuth 2.0 + JWT (HTTP-only cookies) |
-| AI/LLM | Groq API (OpenAI-compatible endpoint) |
-| Marketplaces | eBay Browse API v1, Facebook Marketplace GraphQL |
-| Search fallback | Serper API |
-| Category price sources | PriceCharting, TCGPlayer data exposed through PriceCharting item pages |
-| Geocoding | OpenStreetMap Nominatim |
-| Deployment | Vercel (frontend), Render (backend) |
-| Analytics | Vercel Analytics + Speed Insights |
+The app searches supported marketplaces, organizes listing data, analyzes price fairness and trust signals, and summarizes the most important buying context in a simple interface.
 
----
+⸻
 
-## Project Structure
+Features
 
-```
+* Unified marketplace search across supported secondhand sources
+* AI-assisted listing analysis for faster decision-making
+* Price fairness scoring using market context and deterministic pricing logic
+* Seller trust signals based on available marketplace data
+* Condition and description review to help surface listing quality
+* Shipping fairness analysis where shipping data is available
+* Category-aware price sources for more accurate pricing in supported categories
+* Trending search shortcuts for popular products
+* Filters for price, condition, shipping, and location
+* Saved listings synced to user accounts with guest fallback support
+* Listing detail pages with a visual score breakdown and plain-English analysis
+* Image proxying for cleaner and more reliable listing images
+
+⸻
+
+Tech Stack
+
+Layer	Technology
+Frontend	React, TypeScript, Vite, Tailwind CSS
+Backend	Node.js, Express, TypeScript
+Database	SQLite with better-sqlite3
+Auth	Google OAuth 2.0, JWT, HTTP-only cookies
+AI	Groq API
+Marketplace Data	eBay Browse API, marketplace integration services
+Search Fallback	Serper API
+Price Sources	Category-specific pricing integrations
+Geocoding	OpenStreetMap Nominatim
+Deployment	Vercel, Render
+Analytics	Vercel Analytics, Speed Insights
+
+⸻
+
+Project Structure
+
 Genuinely/
-├── frontend/               # React SPA
+├── frontend/
 │   └── src/
-│       ├── components/     # NavBar, ListingCard, RatingRing, filters, etc.
-│       ├── pages/          # HomePage, SearchPage, ListingPage, CartPage, AdminPage
-│       ├── context/        # AuthContext (Google OAuth state)
-│       └── utils/          # savedListings, searchCache, analysisStore, imageHelpers
+│       ├── components/
+│       ├── pages/
+│       ├── context/
+│       └── utils/
 │
-└── backend/                # Express API
+└── backend/
     └── src/
-        ├── ai/             # Groq batch analysis, market context fetching
-        ├── controllers/    # Search orchestration, eBay, Marketplace
-        ├── routes/         # auth, search, ebay, marketplace, saved, image proxy, admin
-        ├── services/       # aiService, ebayService, marketplaceService, scoring/
-        ├── middleware/      # JWT verification, admin guard
-        └── utils/          # extractStructuredAnalysis, mapEbaySummary, geoIp, etc.
-```
+        ├── ai/
+        ├── controllers/
+        ├── routes/
+        ├── services/
+        ├── middleware/
+        └── utils/
 
----
+⸻
 
-## Getting Started
+How It Works
 
-### Prerequisites
+Genuinely uses a multi-stage pipeline to turn raw marketplace listings into useful buying guidance.
 
-- Node.js 18+
-- npm 9+
-- API keys for: Groq, eBay (App ID, Cert ID, Dev ID, Prod Token), Google OAuth, Serper
-- (Optional) Proxy URL for Facebook Marketplace scraping
+First, the app collects listings from supported sources and normalizes them into a shared format. This allows results from different marketplaces to be compared in one interface.
 
-### 1. Clone and install
+Next, the backend gathers market context for each product. Depending on the category, this may come from general search results, marketplace comparables, or more specific pricing sources.
 
-```bash
+The scoring layer then evaluates each listing across several practical buying dimensions:
+
+* Price fairness
+* Seller trust
+* Condition honesty
+* Shipping fairness
+* Description quality
+
+AI is used to explain and summarize listing quality, while deterministic logic is used where consistency matters most, especially for price fairness and seller trust calculations.
+
+The goal is not just to assign a score. The goal is to explain why a listing may be a good deal, overpriced, risky, or worth a closer look.
+
+⸻
+
+AI Scoring
+
+Genuinely uses structured AI responses to evaluate listings in a predictable format. Listing analysis is validated before being shown to users, which helps prevent malformed responses or unreliable score objects from reaching the frontend.
+
+The backend includes safeguards for:
+
+* Structured JSON output
+* Score validation
+* Score clamping
+* Invalid field removal
+* Fallback analysis states
+* Deterministic overrides for key scoring fields
+
+This keeps the AI layer useful without letting it fully control business-critical scoring.
+
+⸻
+
+Local Development
+
+This project requires private API credentials to run with full marketplace, auth, and AI functionality.
+
 git clone https://github.com/kozukiii/genuinely.git
 cd genuinely
 npm install
-cd frontend && npm install
-cd ../backend && npm install
-```
+npm run dev
 
-### 2. Configure environment
+Environment variables are required for the frontend and backend. Example files should be created as:
 
-Create `backend/.env`:
+frontend/.env.example
+backend/.env.example
 
-```env
-# LLM
-GROQ_API_KEY=your_groq_key
+The actual .env files are not committed.
 
-# eBay
+⸻
+
+Environment Variables
+
+Backend variables include:
+
+GROQ_API_KEY=
 EBAY_APP_ID=
 EBAY_CERT_ID=
 EBAY_DEV_ID=
 EBAY_PROD_TOKEN=
 EBAY_ENVIRONMENT=production
-
-# Google OAuth
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
-GOOGLE_CALLBACK_URL=http://localhost:3000/auth/google/callback
-JWT_SECRET=your_jwt_secret
-
-# Serper (web search fallback)
+GOOGLE_CALLBACK_URL=
+JWT_SECRET=
 SERPER_API_KEY=
-
-# App config
-ALLOWED_ORIGIN=http://localhost:5173
-FRONTEND_URL=http://localhost:5173
+ALLOWED_ORIGIN=
+FRONTEND_URL=
 PORT=3000
-
-# Proxy for Facebook Marketplace (optional, comma-separated)
-PROXY_URL=
-
-# SQLite location (default: ./data)
 DATA_DIR=./data
-```
 
-Create `frontend/.env`:
+Frontend variables include:
 
-```env
-VITE_API_BASE_URL=http://localhost:3000
-```
+VITE_API_BASE_URL=
 
-### 3. Run in development
+⸻
 
-```bash
-# From the root
-npm run dev
-```
+Deployment
 
-This starts both the backend (port 3000) and frontend (port 5173) concurrently.
+The frontend is deployed on Vercel.
 
----
+The backend is deployed separately on Render.
 
-## API Reference
+SQLite persistence is handled through a configured backend data directory. Production secrets are managed through the hosting provider environment variable dashboards.
 
-| Method | Route | Description |
-|---|---|---|
-| `POST` | `/auth/google` | Initiate Google OAuth |
-| `GET` | `/auth/google/callback` | OAuth callback |
-| `GET` | `/auth/me` | Current user + admin flag |
-| `POST` | `/auth/logout` | Clear auth cookie |
-| `GET` | `/api/search` | Multi-source search (`?query=&sources=ebay,marketplace&analyze=1`) |
-| `GET` | `/api/marketplace/item/:id` | Single Marketplace listing detail |
-| `GET` | `/api/proxy-image` | Image proxy (`?url=`) |
-| `GET` | `/api/featured` | Admin-curated featured listings |
-| `GET` | `/api/saved` | User's saved listings |
-| `POST` | `/api/saved` | Save a listing |
-| `DELETE` | `/api/saved/:id` | Remove a saved listing |
-| `POST` | `/api/internal/admin/usage` | API usage stats (admin only) |
-| `GET` | `/api/health` | Health check |
+⸻
 
----
+Security
 
-## How the Scoring Works
+Genuinely includes several basic production hardening measures:
 
-Every search goes through a four-stage pipeline before any listing is scored:
+* Environment variables for secrets
+* HTTP-only auth cookies
+* JWT-based session handling
+* CORS origin restrictions
+* Rate limiting on public endpoints
+* Helmet.js security headers
+* Sanitized logging to avoid exposing sensitive tokens or credentials
 
-1. **Grouping** -- An 8b-instant LLM call groups listing titles by exact product (same brand, model, and variant) and assigns each group a data source: `pricecharting` for trading cards, `serper` for everything else. A parallel card-detection call overrides all groups to PriceCharting if the entire search query is card-based.
+⸻
 
-2. **Market data fetch** (per group, up to 2 concurrent) --
-   - *PriceCharting path*: Serper searches for the card title and finds the PriceCharting item URL in organic results. The item page HTML is then scraped for loose, complete, new, and graded price cells plus the TCGPlayer row.
-   - *Serper path*: Two parallel searches run -- one for resale pricing, one for buying-guide/inspection signals. Dollar amounts are extracted from snippets and trimmed to a p25–p75 range.
+Current Status
 
-3. **Prompt engineering** -- A second 8b-instant call synthesises the raw market data into a product-specific expert system prompt with explicit `PRICE_LOW` / `PRICE_HIGH` anchors. Groups with PriceCharting data get the verified price prepended as an authoritative anchor so the scorer can't drift from it.
+Genuinely is an active portfolio and product project. The live version focuses on proving the core experience: faster secondhand search, clearer listing analysis, and better price confidence for shoppers.
 
-4. **LLM scoring** -- Groq scores each listing across five dimensions using the engineered system prompt. All scoring calls use `response_format: { type: "json_object" }` (JSON Object Mode), which forces the model to return a top-level JSON object and eliminates markdown fences, preamble text, and DEBUG INFO sections. Batch calls wrap their output in a `{ "listings": [...] }` envelope to satisfy the top-level-object requirement.
+Planned improvements include broader category-specific pricing, stronger marketplace coverage, improved ranking, and deeper personalization for saved listings.
 
-   The response then passes through a two-phase parse-and-validate pipeline:
-   - **Extract** (`extractStructuredAnalysis`) -- pulls the JSON object from the raw string; a brace-depth scanner handles rare model non-compliance as a fallback.
-   - **Validate** (`validateAnalysis`) -- enforces an allow-list of expected score keys, clamps every score to 0–100, coerces numeric strings like `"90"`, allows `priceFairness: null` only on Marketplace "Accepts Offers" listings, sanitises highlights, and returns `EMPTY_ANALYSIS` on total failure rather than surfacing a broken object.
+⸻
 
-   Two deterministic overrides run after validation and are never accepted from AI output: eBay `sellerTrust` is always computed from feedback history; `priceFairness` is always computed from the market percentile algorithm when market data is available.
+Author
 
-Results are cached in memory to avoid redundant LLM calls on repeated searches.
+Built by Zach Higdon.
 
----
-
-## Per-Category Price Sources
-
-Genuinely's pricing layer is designed so each product category can use the best available market source. The grouping LLM assigns a source to every product group at query time -- currently `pricecharting` for trading cards (Pokémon, MTG, Yu-Gi-Oh, sports cards) and `serper` for everything else (electronics, golf clubs, sneakers, etc.).
-
-For PriceCharting groups, the backend pipeline in `backend/src/ai/listingContext.ts`:
-
-1. Strips condition keywords from the listing title to form a clean card search query.
-2. Runs a Serper search for that query and looks for a `pricecharting.com/game/` URL in the organic results.
-3. Scrapes the PriceCharting item page (`backend/src/priceSources/priceCharting.ts`) for the loose, complete, new, and graded price cells.
-4. Reads the TCGPlayer row from that same page and extracts both the TCGPlayer market price and the destination URL.
-5. For graded cards (PSA/BGS/CGC grade detected in the title), reads the grade-specific completed-auction section for a sale range instead of the standard price cells.
-6. For ungraded cards, pairs the PriceCharting loose price with the TCGPlayer market price (falling back to complete or new price) to form the `priceLow`/`priceHigh` range.
-7. Sends `priceLow`, `priceHigh`, `priceSource`, `priceChartingUrl`, and `tcgPlayerUrl` back through the scoring pipeline so the listing page can display source links next to the price bar.
-
-TCGPlayer data is integrated via PriceCharting's item page HTML rather than a separate API call: PriceCharting includes a `TCGPlayer` source row with pricing and a product link in its markup, so the scraper parses that row directly.
-
----
-
-## Deployment
-
-**Frontend** is deployed to Vercel. Push to `master` and Vercel handles it automatically via `vercel.json`.
-
-**Backend** is deployed to Render. Set all environment variables in the Render dashboard. The SQLite database persists to the `DATA_DIR` path -- use a Render disk mount for durability.
-
----
-
-## Security
-
-- API keys stored in `.env`, never committed
-- HTTP-only cookies prevent XSS token theft
-- Rate limiting: 30 requests per 5 minutes on most endpoints
-- CORS restricted to configured `ALLOWED_ORIGIN`
-- Helmet.js hardens HTTP headers
-- Facebook scraping routed through proxy rotation to avoid IP blocks
+Software Development student focused on full-stack development, product thinking, marketplace systems, and practical AI integrations.

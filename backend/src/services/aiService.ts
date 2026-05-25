@@ -96,6 +96,14 @@ function parseAIAnalysis(listing: any, analysis: string) {
     delete scores.sellerTrust;
   }
 
+  // For variation listings the displayed price is a single variant — not representative
+  // of the listing. Strip priceFairness entirely so it doesn't drag the overall score.
+  const listingIdStr = String((listing as any).id ?? (listing as any).itemId ?? "");
+  const isVariation = !!(listing as any).itemGroupId || /^v1\|\d+\|[1-9]\d*$/.test(listingIdStr);
+  if (isVariation) {
+    delete scores.priceFairness;
+  }
+
   const aiScore = average([
     scores.priceFairness,
     scores.sellerTrust,
@@ -175,6 +183,12 @@ export async function analyzeItemsWithAI(items: any[], context?: string | null, 
 
   return items.map((item, i) => {
     const result = resultMap.get(i)!;
+
+    // Variation listings have no single representative price — skip the fairness override.
+    const itemIdStr = String(item.id ?? item.itemId ?? "");
+    const itemIsVariation = !!item.itemGroupId || /^v1\|\d+\|[1-9]\d*$/.test(itemIdStr);
+    if (itemIsVariation) return result;
+
     const fairness = calculatePriceFairness(item.price, context, priceLow, priceHigh);
     if (fairness === null || !result.aiScores) return result;
     const updatedScores = { ...result.aiScores, priceFairness: fairness };

@@ -27,6 +27,13 @@ function sourceLabel(source: Listing["source"]) {
   return "eBay";
 }
 
+function availabilityLabel(status?: Listing["availabilityStatus"]) {
+  if (status === "sold") return "Sold";
+  if (status === "ended") return "Ended";
+  if (status === "removed") return "Unavailable";
+  return null;
+}
+
 const STAR_DATA = [
   { left: -9,    top: -8,     size: 7, delay: "0s"    },
   { right: -8,   top: -7,     size: 6, delay: "0.6s"  },
@@ -122,6 +129,25 @@ function getPriceBadge(price: number, priceLow: number, priceHigh: number) {
   return                             { label: "HIGH PRICE",   color: "#ef4444" };
 }
 
+function getPriceBadgeTitle(label: string): string {
+  switch (label) {
+    case "RISKY PRICE":
+      return "Far below the expected low price, which can be a risk signal.";
+    case "GREAT PRICE":
+      return "Under the expected low price, but still close enough to be reasonable.";
+    case "GOOD PRICE":
+      return "Below the middle of the expected market range.";
+    case "FAIR PRICE":
+      return "Within the expected market range, closer to the high side.";
+    case "HIGH PRICE":
+      return "Above the expected high price for similar listings.";
+    case "No price to analyze":
+      return "No fixed listing price is available to compare against the market range.";
+    default:
+      return "Based on how the listing price compares with the expected market range.";
+  }
+}
+
 export default function ListingCard({ data }: { data: Listing }) {
   const images = (data.images ?? []).filter((url) => isDisplayableListingImage(url, data.source));
   const [imageIndex, setImageIndex] = useState(0);
@@ -166,13 +192,14 @@ export default function ListingCard({ data }: { data: Listing }) {
     && data.analysisPending
     && data.acceptsOffers !== true
     && data.price === 0;
+  const unavailableLabel = availabilityLabel(data.availabilityStatus);
 
   return (
     <div className="listing-card-wrapper">
       <Link
         to={`/listing/${data.id}`}
         state={{ listing: data }}
-        className={`listing-card${data.source === "marketplace" ? " listing-card--marketplace" : ""}`}
+        className={`listing-card${data.source === "marketplace" ? " listing-card--marketplace" : ""}${unavailableLabel ? " listing-card--unavailable" : ""}`}
       >
         <div className="image-badge-wrapper">
           <div
@@ -186,7 +213,11 @@ export default function ListingCard({ data }: { data: Listing }) {
               onError={(e) => (e.currentTarget.src = PLACEHOLDER_IMAGE)}
               loading="lazy"
             />
-            {!data.acceptsOffers && data.aiScores?.priceFairness === 0 && data.aiScores?.sellerTrust === 0 && (
+            {unavailableLabel ? (
+              <div className="scam-overlay listing-unavailable-overlay">
+                <span className="scam-overlay-text listing-unavailable-overlay-text">LISTING UNAVAILABLE</span>
+              </div>
+            ) : !data.acceptsOffers && data.aiScores?.priceFairness === 0 && data.aiScores?.sellerTrust === 0 && (
               <div className="scam-overlay">
                 <span className="scam-overlay-text">SCAM LIKELY</span>
               </div>
@@ -196,11 +227,15 @@ export default function ListingCard({ data }: { data: Listing }) {
 
         <div className="listing-title-row">
           <h3 className="listing-title">{data.title}</h3>
+          {unavailableLabel && (
+            <span className="listing-availability-badge">{unavailableLabel}</span>
+          )}
           <button
             type="button"
             className="badge-heart"
             aria-pressed={saved}
             aria-label={saved ? "Unsave listing" : "Save listing"}
+            title={saved ? "Unsave Listing" : "Save Listing"}
             onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
@@ -221,7 +256,11 @@ export default function ListingCard({ data }: { data: Listing }) {
                 ? { label: "No price to analyze", color: "#6b7280", borderColor: "#6b728055" }
                 : getPriceBadge(data.price, data.priceLow, data.priceHigh);
               return (
-                <span className="listing-price-badge" style={{ color: badge.color, borderColor: `${badge.color}55`, position: "relative", overflow: "visible" }}>
+                <span
+                  className="listing-price-badge"
+                  title={getPriceBadgeTitle(badge.label)}
+                  style={{ color: badge.color, borderColor: `${badge.color}55`, position: "relative", overflow: "visible" }}
+                >
                   {!data.acceptsOffers && badge.label === "GREAT PRICE" && <StarSparkles />}
                   {!data.acceptsOffers && badge.label === "GOOD PRICE" && <GoodStarSparkles />}
                   {!data.acceptsOffers && badge.label === "FAIR PRICE" && <FairStarSparkles />}
@@ -263,7 +302,14 @@ export default function ListingCard({ data }: { data: Listing }) {
                     {data.location && <span className="listing-location">📍 {data.location}</span>}
                     {Array.isArray(data.delivery_types) && (
                       data.delivery_types.length > 1
-                        ? <span className="listing-delivery-badge">{data.delivery_types.length} shipping/pickup options</span>
+                        ? (
+                            <span
+                              className="listing-delivery-badge"
+                              title={data.delivery_types.map(formatDeliveryType).join(", ")}
+                            >
+                              {data.delivery_types.length} shipping/pickup options
+                            </span>
+                          )
                         : data.delivery_types.map((type) => (
                             <span key={type} className="listing-delivery-badge">
                               {formatDeliveryType(type)}

@@ -112,6 +112,20 @@ function extractOriginalAndDiscount(item: any) {
   };
 }
 
+function parseItemGroupId(itemGroupHref?: string | null): string | undefined {
+  if (!itemGroupHref) return undefined;
+  try {
+    const href = itemGroupHref.startsWith("http")
+      ? itemGroupHref
+      : `https://api.ebay.com${itemGroupHref}`;
+    const url = new URL(href);
+    return url.searchParams.get("item_group_id") ?? undefined;
+  } catch {
+    const match = itemGroupHref.match(/[?&]item_group_id=([^&]+)/);
+    return match?.[1] ? decodeURIComponent(match[1]) : undefined;
+  }
+}
+
 function mapEbayInternalToListing(item: any): EbayListingRich {
   const id = String(item.id ?? item.itemId ?? "");
   const title = String(item.title ?? item.name ?? "");
@@ -234,6 +248,28 @@ function mapEbayInternalToListing(item: any): EbayListingRich {
 
     // --- never lose source payload ---
     raw: item,
+
+    // --- eBay item-group variation support ---
+    ...(() => {
+      const href = item.itemGroupHref ?? null;
+      const type = item.itemGroupType ?? undefined;
+      let groupId = parseItemGroupId(href);
+
+      // Fallback: eBay often omits itemGroupHref on search summaries but encodes the
+      // parent/variant relationship in the item ID itself: "v1|parentId|variantId".
+      // When the variant segment is non-zero, parentId IS the item group ID.
+      if (!groupId) {
+        const idStr = String(item.id ?? item.itemId ?? "");
+        const m = idStr.match(/^v1\|(\d+)\|([1-9]\d*)$/);
+        if (m) groupId = m[1];
+      }
+
+      return {
+        itemGroupHref: href ?? undefined,
+        itemGroupType: type,
+        itemGroupId: groupId,
+      };
+    })(),
   };
 }
 
@@ -325,6 +361,9 @@ export async function getEbayItemsWithDetails(
           (Array.isArray(summary.conditionDescriptors) ? summary.conditionDescriptors : undefined),
 
         shortDescription: fullJson.shortDescription ?? summary.shortDescription,
+
+        itemGroupHref: fullJson.itemGroupHref ?? summary.itemGroupHref ?? null,
+        itemGroupType: fullJson.itemGroupType ?? summary.itemGroupType ?? null,
       };
     })
   );
@@ -348,12 +387,12 @@ export async function searchEbayNormalized(
     .filter((l) => l.id && l.title && l.url);
 }
 
-export async function getEbayItemByNumericId(
-  numericId: string,
+// Shared fetch-and-map logic for a fully-formed eBay item ID (e.g. "v1|123|0" or "v1|123|456").
+export async function getEbayItemByEbayId(
+  ebayId: string,
   buyerLocation?: { country: string; zip: string } | null
 ): Promise<Listing> {
   const token = await getEbayToken();
-  const ebayId = `v1|${numericId}|0`;
 
   const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
   if (buyerLocation?.country) {
@@ -379,15 +418,24 @@ export async function getEbayItemByNumericId(
   const merged = {
     ...item,
     id: item.itemId ?? ebayId,
-    url: item.itemWebUrl ?? `https://www.ebay.com/itm/${numericId}`,
+    url: item.itemWebUrl ?? "",
     images,
     seller: item.seller?.username,
     feedback: item.seller?.feedbackPercentage,
     score: item.seller?.feedbackScore,
     fullDescription: item.description ?? "",
+    itemGroupHref: item.itemGroupHref ?? null,
+    itemGroupType: item.itemGroupType ?? null,
   };
 
   return mapEbayInternalToListing(merged);
+}
+
+export async function getEbayItemByNumericId(
+  numericId: string,
+  buyerLocation?: { country: string; zip: string } | null
+): Promise<Listing> {
+  return getEbayItemByEbayId(`v1|${numericId}|0`, buyerLocation);
 }
 
 export async function getEbayRateLimits() {
@@ -408,4 +456,135 @@ export async function getEbayRateLimits() {
   }
 
   return res.json();
+}
+
+// ─── Item-Group Variation Support ────────────────────────────────────────────
+
+export interface EbayVariant {
+  itemId: string;
+  price: number;
+  currency: string;
+  imageUrl?: string;
+  affiliateUrl: string;
+  webUrl: string;
+  shippingCost?: number;
+  shippingCalculated?: boolean;
+  availability: "IN_STOCK" | "LIMITED_STOCK" | "OUT_OF_STOCK" | "UNKNOWN";
+  aspects: Record<string, string>;
+}
+
+export interface EbayItemGroup {
+  itemGroupId: string;
+  optionMatrix: Record<string, string[]>;
+  variants: EbayVariant[];
+}
+
+const EBAY_ITEM_GROUP = "https://api.ebay.com/buy/browse/v1/item/get_items_by_item_group";
+const ITEM_GROUP_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
+const itemGroupCache = new Map<string, { data: EbayItemGroup; fetchedAt: number }>();
+
+function normalizeAvailability(raw?: string): EbayVariant["availability"] {
+  if (!raw) return "UNKNOWN";
+  const up = raw.toUpperCase();
+  if (up.includes("IN_STOCK") || up === "IN_STOCK") return "IN_STOCK";
+  if (up.includes("LIMITED") || up.includes("LOW")) return "LIMITED_STOCK";
+  if (up.includes("OUT") || up.includes("SOLD") || up.includes("UNAVAILABLE")) return "OUT_OF_STOCK";
+  return "UNKNOWN";
+}
+
+function inferShippingFromOptions(opts: any[]): { shippingCost?: number; shippingCalculated?: boolean } {
+  if (!Array.isArray(opts) || opts.length === 0) return {};
+  const isFree = opts.some(
+    (o: any) =>
+      String(o.shippingCostType ?? o.type ?? "").toUpperCase() === "FREE" ||
+      (o.shippingCost != null && toNumberPrice(o.shippingCost) === 0)
+  );
+  if (isFree) return { shippingCost: 0 };
+  const isCalculated = opts.some(
+    (o: any) =>
+      String(o.shippingCostType ?? "").toUpperCase() === "CALCULATED" &&
+      o.shippingCost == null
+  );
+  if (isCalculated) return { shippingCalculated: true };
+  const costs = opts
+    .map((o: any) => toNumberPrice(o.shippingCost))
+    .filter((n: number) => n > 0);
+  if (costs.length > 0) return { shippingCost: Math.min(...costs) };
+  return {};
+}
+
+export async function getEbayItemGroup(
+  itemGroupId: string,
+  buyerLocation?: { country?: string; zip?: string } | null
+): Promise<EbayItemGroup> {
+  const cached = itemGroupCache.get(itemGroupId);
+  if (cached && Date.now() - cached.fetchedAt < ITEM_GROUP_TTL_MS) {
+    return cached.data;
+  }
+
+  const token = await getEbayToken();
+  const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
+
+  if (buyerLocation?.country) {
+    const parts = [`country=${buyerLocation.country}`];
+    if (buyerLocation.zip) parts.push(`zip=${buyerLocation.zip}`);
+    headers["X-EBAY-C-ENDUSERCTX"] = `contextualLocation=${parts.join(",")}`;
+  }
+
+  const url = `${EBAY_ITEM_GROUP}?item_group_id=${encodeURIComponent(itemGroupId)}`;
+  const res = await fetch(url, { headers });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`eBay getItemsByItemGroup failed: HTTP ${res.status} | ${body.slice(0, 200)}`);
+  }
+
+  const json: any = await res.json();
+  const items: any[] = Array.isArray(json.items) ? json.items : [];
+
+  if (items.length === 0) {
+    throw new Error(`eBay item group ${itemGroupId} returned no child items`);
+  }
+
+  const variants: EbayVariant[] = items.map((item: any) => {
+    const aspects: Record<string, string> = {};
+    if (Array.isArray(item.localizedAspects)) {
+      for (const a of item.localizedAspects) {
+        if (a.name && a.value) aspects[String(a.name)] = String(a.value);
+      }
+    }
+
+    const availRaw: string | undefined =
+      item.estimatedAvailabilities?.[0]?.estimatedAvailabilityStatus;
+
+    const webUrl: string = item.itemWebUrl ?? "";
+    const affiliateUrl: string = buildEpnUrl(webUrl) || webUrl;
+
+    const shipping = inferShippingFromOptions(item.shippingOptions ?? []);
+
+    return {
+      itemId: String(item.itemId ?? ""),
+      price: toNumberPrice(item.price),
+      currency: toStringCurrency(item.price) ?? "USD",
+      imageUrl: item.image?.imageUrl ?? undefined,
+      affiliateUrl,
+      webUrl,
+      ...shipping,
+      availability: normalizeAvailability(availRaw),
+      aspects,
+    };
+  });
+
+  const optionMatrix: Record<string, string[]> = {};
+  for (const variant of variants) {
+    for (const [key, value] of Object.entries(variant.aspects)) {
+      if (!optionMatrix[key]) optionMatrix[key] = [];
+      if (!optionMatrix[key].includes(value)) optionMatrix[key].push(value);
+    }
+  }
+
+  const data: EbayItemGroup = { itemGroupId, optionMatrix, variants };
+  itemGroupCache.set(itemGroupId, { data, fetchedAt: Date.now() });
+  return data;
 }

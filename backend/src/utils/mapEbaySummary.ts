@@ -38,5 +38,8 @@ export function mapEbaySummary(item: any) {
     buyingOptions: item.buyingOptions || [],
 
     description: item.shortDescription || "",
+
+    itemGroupHref: item.itemGroupHref ?? null,
+    itemGroupType: item.itemGroupType ?? null,
   };
 }

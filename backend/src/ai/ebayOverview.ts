@@ -157,7 +157,14 @@ function stripHtml(html: string): string {
   return html.replace(/<[^>]*>/g, " ").replace(/\s{2,}/g, " ").trim();
 }
 
+function isVariationListing(listing: any): boolean {
+  if (listing.itemGroupId) return true;
+  const id = String(listing.id ?? listing.itemId ?? "");
+  return /^v1\|\d+\|[1-9]\d*$/.test(id);
+}
+
 export async function analyzeListingWithImages(listing: any, context?: string | null) {
+  const isVariation = isVariationListing(listing);
   const title = clean(listing.title) ?? "Untitled";
   const currency = clean(listing.currency) ?? "USD";
   const link = clean(listing.link ?? listing.url) ?? "";
@@ -258,7 +265,7 @@ HIGHLIGHTS RULES:
       role: "user",
       content: [
         { type: "text", text: `Title: ${title}` },
-        { type: "text", text: `Price: ${listing.price} ${currency}` },
+        { type: "text", text: isVariation ? `Price: VARIES — this is a variation listing; price depends on the selected option` : `Price: ${listing.price} ${currency}` },
 
         { type: "text", text: `Seller: ${seller}` },
         { type: "text", text: `Feedback: ${feedbackLine}` },
@@ -278,7 +285,8 @@ HIGHLIGHTS RULES:
 
         { type: "text", text: `Listing URL: ${link}` },
         { type: "text", text: `Images Provided: ${imageUrls.length}` },
-        { type: "text", text: `Suggested Price Fairness: ${calculatePriceFairness(listing.price, context, listing.priceLow, listing.priceHigh) ?? "N/A"}` },
+        { type: "text", text: `Suggested Price Fairness: ${isVariation ? "N/A — variation listing" : (calculatePriceFairness(listing.price, context, listing.priceLow, listing.priceHigh) ?? "N/A")}` },
+        ...(isVariation ? [{ type: "text", text: `IMPORTANT: This is a variation listing. Price varies across options and cannot be fairly assessed. Do NOT include priceFairness in your scores object — omit the key entirely. Score only: conditionHonesty, shippingFairness, descriptionQuality.` }] : []),
         ...(context ? [{ type: "text", text: `\n--- PRODUCT CONTEXT ---\n${context}\n--- END PRODUCT CONTEXT ---` }] : []),
       ],
     },
@@ -473,11 +481,12 @@ async function _runEbayBatch(entries: BatchEntry[], context?: string | null, sys
     const description = clean(stripHtml(rawDesc)) ?? "";
     const imageUrls = getListingImageUrls(listing).slice(0, imageCount);
 
-    const suggestedPriceFairness = calculatePriceFairness(listing.price, context, listing.priceLow, listing.priceHigh);
+    const isVariation = isVariationListing(listing);
+    const suggestedPriceFairness = isVariation ? null : calculatePriceFairness(listing.price, context, listing.priceLow, listing.priceHigh);
 
     contentParts.push({ type: "text", text: `=== LISTING ${i + 1} ===` });
     contentParts.push({ type: "text", text: `Title: ${title}` });
-    contentParts.push({ type: "text", text: `Price: ${listing.price} ${currency}` });
+    contentParts.push({ type: "text", text: isVariation ? `Price: VARIES — variation listing; price depends on selected option` : `Price: ${listing.price} ${currency}` });
     contentParts.push({ type: "text", text: `Seller: ${seller}` });
     contentParts.push({ type: "text", text: `Feedback: ${feedbackLine}` });
     contentParts.push({ type: "text", text: `Condition: ${condition}` });
@@ -491,7 +500,10 @@ async function _runEbayBatch(entries: BatchEntry[], context?: string | null, sys
     contentParts.push({ type: "text", text: `Description: ${description}` });
     contentParts.push({ type: "text", text: `Listing URL: ${link}` });
     contentParts.push({ type: "text", text: `Images Provided: ${imageUrls.length}` });
-    contentParts.push({ type: "text", text: `Suggested Price Fairness: ${suggestedPriceFairness ?? "N/A"}` });
+    contentParts.push({ type: "text", text: `Suggested Price Fairness: ${isVariation ? "N/A — variation listing" : (suggestedPriceFairness ?? "N/A")}` });
+    if (isVariation) {
+      contentParts.push({ type: "text", text: `IMPORTANT: Variation listing — do NOT include priceFairness in this listing's scores. Omit the key. Score only: conditionHonesty, shippingFairness, descriptionQuality.` });
+    }
 
     if (imageUrls.length > 0) {
       contentParts.push({ type: "text", text: `[Images for Listing ${i + 1}]` });

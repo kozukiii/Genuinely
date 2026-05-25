@@ -7,6 +7,11 @@ import { getMarketplaceListingByGraphqlForAnalysis } from "../services/marketpla
 import { getLocationFromIp, extractClientIp } from "../utils/geoIp";
 import { deleteCachedAnalysis, readCacheStore } from "../services/analysisCache";
 import { applyCachedAnalysis, applyCachedAnalysisFromStore } from "../services/cachedAnalysisResult";
+import {
+  isInactiveAvailability,
+  refreshListingAvailability,
+  refreshListingsAvailability,
+} from "../services/listingHealth";
 
 const router = Router();
 
@@ -112,16 +117,45 @@ router.get("/warmup", async (req, res) => {
 });
 
 // POST /api/analyze — analyze a single listing on demand
+// POST /api/search/health - refresh saved listing availability without AI analysis
+router.post("/health", async (req, res) => {
+  const listings = Array.isArray(req.body?.listings) ? req.body.listings : null;
+  if (!listings) {
+    return res.status(400).json({ error: "listings must be an array" });
+  }
+
+  try {
+    const checked = await refreshListingsAvailability(listings.slice(0, 12), {
+      force: req.body?.force === true,
+      maxChecks: 12,
+    });
+    return res.json({ listings: checked });
+  } catch (err: any) {
+    return res.status(500).json({ error: err?.message ?? "Listing health check failed" });
+  }
+});
+
+// POST /api/search/analyze - analyze a single listing on demand
 router.post("/analyze", async (req, res) => {
   const { _reanalyze, ...listing } = req.body;
   if (!listing || !listing.id || !listing.source) {
     return res.status(400).json({ error: "Missing listing id or source" });
   }
+  let listingForAnalysis = listing;
   if (_reanalyze) {
+    const checked = await refreshListingAvailability(listing, { force: true });
+    if (isInactiveAvailability(checked.availabilityStatus)) {
+      return res.json({
+        ...checked,
+        analysisSkipped: true,
+        analyzedAt: new Date().toISOString(),
+      });
+    }
+    listingForAnalysis = checked;
     deleteCachedAnalysis(listing.source, listing.id);
   }
   try {
-    const result = await scoreSingleListingWithContext(listing);
+    const result = await scoreSingleListingWithContext(listingForAnalysis);
     return res.json({ ...result, analyzedAt: new Date().toISOString() });
   } catch (err: any) {
     console.error("analyze error:", err);

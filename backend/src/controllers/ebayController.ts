@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import {
   getEbayItemsWithDetails,
   getEbayRateLimits,
+  getEbayItemGroup,
 } from "../services/ebayService";
 import {
   
@@ -38,6 +39,29 @@ export async function overviewSearch(req: Request, res: Response) {
     console.error("AI Route Error:", err);
     const message = err?.message ?? err?.error?.message ?? String(err);
     res.status(500).json({ error: message });
+  }
+}
+
+export async function itemGroup(req: Request, res: Response) {
+  const { itemGroupId } = req.params;
+  if (!itemGroupId) {
+    return res.status(400).json({ error: "Missing itemGroupId" });
+  }
+
+  const country = req.query.country as string | undefined;
+  const zip = req.query.zip as string | undefined;
+  const buyerLocation = country ? { country, zip } : null;
+
+  try {
+    const data = await getEbayItemGroup(itemGroupId, buyerLocation);
+    res.json(data);
+  } catch (err: any) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`eBay item-group error [${itemGroupId}]:`, message);
+    if (message.includes("returned no child items")) {
+      return res.status(404).json({ error: "Item group has no variants" });
+    }
+    res.status(502).json({ error: "Failed to fetch item group from eBay" });
   }
 }
 

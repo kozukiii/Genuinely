@@ -1305,6 +1305,16 @@ h6 {
   border-color: rgba(239, 68, 68, 0.55);
 }
 
+.home-page .price-refine-chip {
+  background: rgba(255, 255, 255, 0.035);
+  font-weight: 800;
+}
+
+.home-page .price-refine-chip:hover,
+.home-page .price-refine-chip--active {
+  background: rgba(255, 255, 255, 0.09);
+}
+
 .home-page .highlight-filter-chip-x {
   font-size: 0.85rem;
   line-height: 1;

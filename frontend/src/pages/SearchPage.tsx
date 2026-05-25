@@ -128,6 +128,42 @@ function stripQueryCategoryDebugInfo(listing: Listing): Listing {
 // ── Analysis pipeline ────────────────────────────────────────────────────────
 // Groups listings by product via context LLM, then batch-analyzes each group
 // in parallel. Calls setListings incrementally as each group resolves.
+const PRICE_BADGE_ORDER = ["GREAT PRICE", "GOOD PRICE", "FAIR PRICE", "HIGH PRICE", "RISKY PRICE"] as const;
+
+type PriceBadgeLabel = typeof PRICE_BADGE_ORDER[number];
+
+function getPriceBadge(price: number, priceLow: number, priceHigh: number): { label: PriceBadgeLabel; color: string; bg: string } {
+  const mid = (priceLow + priceHigh) / 2;
+  if (price < priceLow * 0.5) return { label: "RISKY PRICE", color: "#ef4444", bg: "rgba(239,68,68,0.08)" };
+  if (price < priceLow) return { label: "GREAT PRICE", color: "#a855f7", bg: "rgba(168,85,247,0.08)" };
+  if (price <= mid) return { label: "GOOD PRICE", color: "#22c55e", bg: "rgba(34,197,94,0.08)" };
+  if (price <= priceHigh) return { label: "FAIR PRICE", color: "#facc15", bg: "rgba(250,204,21,0.08)" };
+  return { label: "HIGH PRICE", color: "#ef4444", bg: "rgba(239,68,68,0.08)" };
+}
+
+function getListingPriceBadge(listing: Listing): ReturnType<typeof getPriceBadge> | null {
+  if (listing.acceptsOffers) return null;
+  if (listing.price == null || listing.priceLow == null || listing.priceHigh == null) return null;
+  return getPriceBadge(listing.price, listing.priceLow, listing.priceHigh);
+}
+
+function getPriceBadgeTitle(label: string): string {
+  switch (label) {
+    case "RISKY PRICE":
+      return "Far below the expected low price, which can be a risk signal.";
+    case "GREAT PRICE":
+      return "Under the expected low price, but still close enough to be reasonable.";
+    case "GOOD PRICE":
+      return "Below the middle of the expected market range.";
+    case "FAIR PRICE":
+      return "Within the expected market range, closer to the high side.";
+    case "HIGH PRICE":
+      return "Above the expected high price for similar listings.";
+    default:
+      return "Based on how the listing price compares with the expected market range.";
+  }
+}
+
 async function runAnalysisPipeline(
   query: string,
   items: Listing[],
@@ -467,6 +503,7 @@ export default function SearchPage() {
   const [savedVersion, setSavedVersion] = useState(0);
   const [hydrated, setHydrated] = useState(false);
   const [activeHighlightFilters, setActiveHighlightFilters] = useState<string[]>([]);
+  const [activePriceBadgeFilters, setActivePriceBadgeFilters] = useState<PriceBadgeLabel[]>([]);
   const [showScamListings, setShowScamListings] = useState(false);
   const [refineOpen, setRefineOpen] = useState(false);
   const [refineExiting, setRefineExiting] = useState(false);
@@ -619,22 +656,53 @@ export default function SearchPage() {
       .sort((a, b) => b.count - a.count);
   }, [listings]);
 
+  const availablePriceBadges = useMemo(() => {
+    const countMap = new Map<PriceBadgeLabel, { label: PriceBadgeLabel; color: string; bg: string; count: number }>();
+    for (const listing of filtered) {
+      const badge = getListingPriceBadge(listing);
+      if (!badge) continue;
+      const entry = countMap.get(badge.label);
+      if (entry) entry.count++;
+      else countMap.set(badge.label, { ...badge, count: 1 });
+    }
+
+    return PRICE_BADGE_ORDER
+      .map((label) => countMap.get(label))
+      .filter((badge): badge is { label: PriceBadgeLabel; color: string; bg: string; count: number } => Boolean(badge));
+  }, [filtered]);
+
   const displayListings = useMemo(() => {
-    if (activeHighlightFilters.length === 0) return filtered;
+    if (activeHighlightFilters.length === 0 && activePriceBadgeFilters.length === 0) return filtered;
     return filtered.filter((listing) => {
-      if (!Array.isArray(listing.highlights)) return false;
-      return activeHighlightFilters.every((filterKey) => {
-        const sep = filterKey.lastIndexOf("||");
-        const label = filterKey.slice(0, sep);
-        const positive = filterKey.slice(sep + 2) === "true";
-        return listing.highlights!.some((h) => h.label === label && h.positive === positive);
-      });
+      if (activePriceBadgeFilters.length > 0) {
+        const badge = getListingPriceBadge(listing);
+        if (!badge || !activePriceBadgeFilters.includes(badge.label)) return false;
+      }
+
+      if (activeHighlightFilters.length > 0) {
+        if (!Array.isArray(listing.highlights)) return false;
+        return activeHighlightFilters.every((filterKey) => {
+          const sep = filterKey.lastIndexOf("||");
+          const label = filterKey.slice(0, sep);
+          const positive = filterKey.slice(sep + 2) === "true";
+          return listing.highlights!.some((h) => h.label === label && h.positive === positive);
+        });
+      }
+
+      return true;
     });
-  }, [filtered, activeHighlightFilters]);
+  }, [filtered, activeHighlightFilters, activePriceBadgeFilters]);
 
   const toggleHighlightFilter = useCallback((key: string) => {
     setActiveHighlightFilters((prev) =>
       prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
+    );
+    setPage(1);
+  }, []);
+
+  const togglePriceBadgeFilter = useCallback((label: PriceBadgeLabel) => {
+    setActivePriceBadgeFilters((prev) =>
+      prev.includes(label) ? prev.filter((item) => item !== label) : [...prev, label]
     );
     setPage(1);
   }, []);
@@ -689,6 +757,7 @@ export default function SearchPage() {
       setCurrentQuery(q);
       setPage(1);
       setActiveHighlightFilters([]);
+      setActivePriceBadgeFilters([]);
       setShowScamListings(false);
 
       const parsedLimit = activeFilters.limit !== "" ? Math.max(1, parseInt(activeFilters.limit, 10)) : undefined;
@@ -967,9 +1036,24 @@ export default function SearchPage() {
 
           <LoadingBar status={pipelineStatus} />
 
-          {refineOpen && availableHighlightBadges.length > 0 && (
+          {refineOpen && (availableHighlightBadges.length > 0 || availablePriceBadges.length > 0) && (
             <div className={`highlight-filter-chips${refineExiting ? " highlight-filter-chips--exiting" : " highlight-filter-chips--open"}`}>
               <span className="highlight-filter-title">Refine Results</span>
+              {availablePriceBadges.map((badge) => {
+                const isActive = activePriceBadgeFilters.includes(badge.label);
+                return (
+                  <button
+                    key={badge.label}
+                    className={`highlight-filter-chip price-refine-chip${isActive ? " price-refine-chip--active" : ""}`}
+                    style={{ color: badge.color, borderColor: `${badge.color}55`, background: isActive ? badge.bg : undefined }}
+                    title={getPriceBadgeTitle(badge.label)}
+                    onClick={() => togglePriceBadgeFilter(badge.label)}
+                  >
+                    {badge.label}
+                    {isActive && <span className="highlight-filter-chip-x"> ✕</span>}
+                  </button>
+                );
+              })}
               {availableHighlightBadges.map((badge) => {
                 const key = `${badge.label}||${badge.positive}`;
                 const isActive = activeHighlightFilters.includes(key);
@@ -1058,6 +1142,7 @@ export default function SearchPage() {
 
         <RefineResultsSidebar
           badges={availableHighlightBadges}
+          hasPriceBadges={availablePriceBadges.length > 0}
           open={refineOpen || refineExiting}
           onToggle={() => setRefineOpen((o) => !o)}
         />

@@ -8,18 +8,118 @@ const proxyUrls = process.env.PROXY_URL
   ? process.env.PROXY_URL.split(",").map((s) => s.trim()).filter(Boolean)
   : [];
 
-const FETCH_TIMEOUT_MS = 12_000;
+const FETCH_TIMEOUT_MS = 12_000;   // utility calls (geocoding, etc.)
+const FACEBOOK_TIMEOUT_MS = 4_000; // FB GraphQL / HTML — bail fast on tarpits
+const RACE_STAGGER_MS = 1_500;     // gap between staggered race attempts
 
-function getProxyAgent() {
-  if (proxyUrls.length === 0) return undefined;
-  const url = proxyUrls[Math.floor(Math.random() * proxyUrls.length)];
-  return new HttpsProxyAgent(url);
+// Committed proxy — null means we're in racing mode.
+// Set on first win; cleared on rate-limit or failure so the next call re-races.
+let committedProxyUrl: string | null = null;
+
+// Called by callers that detect a rate-limit signal in the response body.
+export function markProxyRateLimited(): void {
+  if (committedProxyUrl) {
+    console.warn(`[proxy] rate limited on ${committedProxyUrl} — dropping back to race mode`);
+  }
+  committedProxyUrl = null;
 }
 
 function fetchWithTimeout(url: string, options: Parameters<typeof fetch>[1]): ReturnType<typeof fetch> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   return fetch(url, { ...options, signal: controller.signal as any }).finally(() => clearTimeout(timer));
+}
+
+function fetchDirect(
+  url: string,
+  options: Parameters<typeof fetch>[1],
+  proxyUrl: string | null,
+  timeoutMs: number,
+): ReturnType<typeof fetch> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  const reqOptions: any = { ...options, signal: ctrl.signal };
+  if (proxyUrl) reqOptions.agent = new HttpsProxyAgent(proxyUrl);
+  return fetch(url, reqOptions).finally(() => clearTimeout(timer));
+}
+
+function happyEyeballs(
+  url: string,
+  options: Parameters<typeof fetch>[1],
+  timeoutMs: number,
+): ReturnType<typeof fetch> {
+  const urls: Array<string | null> =
+    proxyUrls.length > 0 ? [...proxyUrls].sort(() => Math.random() - 0.5) : [null];
+
+  const outerController = new AbortController();
+  const outerTimer = setTimeout(() => outerController.abort(), timeoutMs);
+  const childControllers: AbortController[] = [];
+  const staggerTimers: NodeJS.Timeout[] = [];
+
+  return new Promise<Awaited<ReturnType<typeof fetch>>>((resolve, reject) => {
+    let settled = false;
+    let failures = 0;
+
+    const finish = (winner: Awaited<ReturnType<typeof fetch>> | null, winnerUrl?: string | null, winnerCtrl?: AbortController, err?: unknown) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(outerTimer);
+      for (const t of staggerTimers) clearTimeout(t);
+      for (const c of childControllers) {
+        if (c !== winnerCtrl) c.abort();
+      }
+      if (winner) {
+        if (winnerUrl) {
+          committedProxyUrl = winnerUrl;
+          console.log(`[proxy] committed to ${winnerUrl}`);
+        }
+        resolve(winner);
+      } else {
+        reject(err ?? new Error("All marketplace fetch attempts failed"));
+      }
+    };
+
+    outerController.signal.addEventListener("abort", () =>
+      finish(null, undefined, undefined, Object.assign(new Error("Marketplace fetch timed out"), { name: "AbortError", type: "aborted" }))
+    );
+
+    const tryUrl = (proxyUrl: string | null) => {
+      if (settled) return;
+      const ctrl = new AbortController();
+      childControllers.push(ctrl);
+      outerController.signal.addEventListener("abort", () => ctrl.abort());
+      const reqOptions: any = { ...options, signal: ctrl.signal };
+      if (proxyUrl) reqOptions.agent = new HttpsProxyAgent(proxyUrl);
+      fetch(url, reqOptions)
+        .then((res) => finish(res, proxyUrl, ctrl))
+        .catch(() => {
+          if (settled) return;
+          if (++failures === urls.length) finish(null);
+        });
+    };
+
+    tryUrl(urls[0]);
+    for (let i = 1; i < urls.length; i++) {
+      staggerTimers.push(setTimeout(() => tryUrl(urls[i]), i * RACE_STAGGER_MS));
+    }
+  });
+}
+
+// Committed mode: blast everything at the known-good proxy.
+// Failure or timeout drops back to racing mode for this and all future calls.
+function raceProxiedFetch(
+  url: string,
+  options: Parameters<typeof fetch>[1],
+  timeoutMs = FACEBOOK_TIMEOUT_MS,
+): ReturnType<typeof fetch> {
+  if (committedProxyUrl) {
+    return fetchDirect(url, options, committedProxyUrl, timeoutMs).catch((err) => {
+      console.warn(`[proxy] committed proxy failed (${err?.message}) — re-racing`);
+      committedProxyUrl = null;
+      return happyEyeballs(url, options, timeoutMs);
+    });
+  }
+  return happyEyeballs(url, options, timeoutMs);
 }
 
 const GRAPHQL_URL = "https://www.facebook.com/api/graphql/";
@@ -247,18 +347,18 @@ async function searchMarketplaceListingsByLatLng({
     doc_id: "7111939778879383",
   });
 
-  const res = await fetchWithTimeout(GRAPHQL_URL, {
+  const res = await raceProxiedFetch(GRAPHQL_URL, {
     method: "POST",
     headers: {
       "user-agent": "Mozilla/5.0",
       "content-type": "application/x-www-form-urlencoded",
     },
     body,
-    ...(proxyUrls.length ? { agent: getProxyAgent() } : {}),
   });
 
   const json = await res.json();
   if (json?.errors?.some((e: any) => e.code === 1675004)) {
+    markProxyRateLimited();
     throw new Error("Marketplace rate limit exceeded");
   }
   const edges = json?.data?.marketplace_search?.feed_units?.edges ?? [];
@@ -424,127 +524,6 @@ function buildMarketplaceImageGallery(sources: any[]): string[] {
   return Array.from(imageSet);
 }
 
-function extractImagesFromHtml(html: string, _listingId: string): string[] {
-  const byFilename = new Map<string, string>();
-  const addUri = (raw: string) => {
-    const url = raw.replace(/\\u0025/g, "%").replace(/\\\//g, "/").replace(/&amp;/g, "&");
-    if (!url.startsWith("http")) return;
-    if (!url.includes("scontent")) return;
-    if (/\/t1[._]/.test(url)) return; // profile pictures, not listing photos
-    const fnMatch = url.match(/\/(\d+_[^/?#"\\]+\.(?:jpg|jpeg|png|webp))/i);
-    const key = fnMatch ? fnMatch[1] : url;
-    if (!byFilename.has(key)) byFilename.set(key, url);
-  };
-
-  // Listing photos are in 178px-tall containers; "Today's picks" thumbnails are 174px.
-  // Checking the 80 chars before each <img> reliably separates them.
-  const imgPattern = /<img[^>]+src="(https?:\/\/[^"]*scontent[^"]*)"/gi;
-  let m;
-  while ((m = imgPattern.exec(html)) !== null) {
-    const before = html.slice(Math.max(0, m.index - 80), m.index);
-    if (before.includes("height:174px")) continue; // related listing thumbnail
-    addUri(m[1]);
-  }
-
-  // og:image gives the highest-quality primary — always first
-  const ogMatch = html.match(/<meta[^>]+property="og:image"\s+content="(https:\/\/[^"]*scontent[^"]*)"/);
-  const primary = ogMatch ? ogMatch[1].replace(/&amp;/g, "&") : undefined;
-
-  const results = Array.from(byFilename.values());
-
-  if (primary) {
-    const base = primary.split("?")[0];
-    return [primary, ...results.filter(u => !u.startsWith(base))];
-  }
-  return results;
-}
-
-function extractTitleFromHtml(html: string): string | undefined {
-  const og = html.match(/<meta[^>]+property="og:title"\s+content="([^"]+)"/);
-  if (og) return og[1].replace(/&amp;/g, "&").replace(/&#039;/g, "'").trim();
-  const m = html.match(/"marketplace_listing_title"\s*:\s*"([^"]+)"/);
-  if (m) return m[1];
-  const h1 = html.match(/<h1[^>]*>([^<]+)<\/h1>/);
-  if (h1) return h1[1].trim();
-  return undefined;
-}
-
-function extractPriceFromHtml(html: string): number {
-  const m = html.match(/"formatted_amount"\s*:\s*"([^"]+)"/);
-  if (m) {
-    const n = Number(m[1].replace(/[^0-9.]/g, ""));
-    if (!isNaN(n) && n > 0) return n;
-  }
-  const dollar = html.match(/\$\s*([0-9][0-9,]*(?:\.[0-9]{2})?)/);
-  if (dollar) {
-    const n = Number(dollar[1].replace(/,/g, ""));
-    if (!isNaN(n) && n > 0) return n;
-  }
-  return 0;
-}
-
-function extractDescriptionFromHtml(html: string): string | undefined {
-  // Embedded Relay JSON blobs — same format on www, m, and mbasic
-  const m = html.match(/"redacted_description"\s*:\s*\{\s*"text"\s*:\s*"([^"]+)"/);
-  if (m) return m[1].replace(/\\n/g, "\n");
-  const m2 = html.match(/"description"\s*:\s*\{\s*"text"\s*:\s*"([^"]+)"/);
-  if (m2) return m2[1].replace(/\\n/g, "\n");
-
-  // Simple string variant present in m.facebook.com JSON blobs
-  const m3 = html.match(/"listing_description"\s*:\s*"((?:[^"\\]|\\.)*)"/);
-  if (m3) return m3[1].replace(/\\n/g, "\n").replace(/\\"/g, '"').replace(/\\u003C/gi, "<").replace(/\\u003E/gi, ">");
-
-  // og:description / name=description — two-step: find the <meta> tag first,
-  // then pull content= from it, so other attributes in between don't break the match
-  for (const tagPattern of [
-    /<meta[^>]*property="og:description"[^>]*>/i,
-    /<meta[^>]*name="description"[^>]*>/i,
-  ]) {
-    const tagMatch = html.match(tagPattern);
-    if (tagMatch) {
-      const contentMatch = tagMatch[0].match(/content="([^"]+)"/i);
-      if (contentMatch) {
-        return contentMatch[1]
-          .replace(/&amp;/g, "&")
-          .replace(/&#039;/g, "'")
-          .replace(/&quot;/g, '"')
-          .replace(/&lt;/g, "<")
-          .replace(/&gt;/g, ">")
-          .trim();
-      }
-    }
-  }
-
-  return undefined;
-}
-
-async function fetchDescriptionFromMobileHtml(listingId: string): Promise<string | undefined> {
-  try {
-    const res = await fetchWithTimeout(`https://m.facebook.com/marketplace/item/${listingId}/`, {
-      method: "GET",
-      headers: {
-        "user-agent": "Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.91 Mobile Safari/537.36",
-        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "accept-language": "en-US,en;q=0.9",
-      },
-      ...(proxyUrls.length ? { agent: getProxyAgent() } : {}),
-    });
-
-    console.warn(`[marketplace:mobileHtml] ${listingId} → HTTP ${res.status}, url=${res.url}`);
-
-    if (res.status !== 200) return undefined;
-
-    const html = await res.text();
-    console.warn(`[marketplace:mobileHtml] html length=${html.length}, preview=${html.slice(0, 300).replace(/\n/g, " ")}`);
-
-    const desc = extractDescriptionFromHtml(html);
-    console.warn(`[marketplace:mobileHtml] extracted description=${desc ? JSON.stringify(desc.slice(0, 120)) : "null"}`);
-    return desc;
-  } catch (err) {
-    console.warn(`[marketplace:mobileHtml] fetch error for ${listingId}:`, err);
-    return undefined;
-  }
-}
 
 
 function extractMarketplaceDescription(target: any): string | undefined {
@@ -700,7 +679,7 @@ function makeGraphqlRequest(
     fb_api_req_friendly_name: friendlyName,
   });
 
-  return fetchWithTimeout(GRAPHQL_URL, {
+  return raceProxiedFetch(GRAPHQL_URL, {
     method: "POST",
     headers: {
       "user-agent": FB_DESKTOP_USER_AGENT,
@@ -715,7 +694,6 @@ function makeGraphqlRequest(
       "sec-fetch-site": "same-origin",
     },
     body,
-    ...(proxyUrls.length ? { agent: getProxyAgent() } : {}),
   });
 }
 
@@ -780,14 +758,7 @@ export async function getMarketplaceListingByGraphqlForAnalysis(listingId: strin
     throw new Error("Marketplace listing unavailable or could not be retrieved.");
   }
 
-  const listing = buildMarketplaceListingFromProductDetails(listingId, result.details, result.media);
-
-  if (!listing.description) {
-    const desc = await fetchDescriptionFromMobileHtml(listingId);
-    if (desc) return { ...listing, description: desc, fullDescription: desc, _pdpFetched: true } as any;
-  }
-
-  return { ...listing, _pdpFetched: true } as any;
+  return { ...buildMarketplaceListingFromProductDetails(listingId, result.details, result.media), _pdpFetched: true } as any;
 }
 
 export async function getMarketplaceListingBySearchForAnalysis(listingId: string): Promise<Listing> {
@@ -882,52 +853,9 @@ async function enrichMarketplaceSearchListings(listings: Listing[]): Promise<Lis
   );
 }
 
-async function fetchMarketplaceListingByMbasicHtml(listingId: string): Promise<Listing> {
-  const res = await fetch(`https://mbasic.facebook.com/marketplace/item/${listingId}/`, {
-    method: "GET",
-    headers: {
-      "user-agent": "Mozilla/5.0 (Linux; Android 9; SM-G960F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.157 Mobile Safari/537.36",
-      "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      "accept-language": "en-US,en;q=0.9",
-    },
-    ...(proxyUrls.length ? { agent: getProxyAgent() } : {}),
-  });
-
-  if (res.status !== 200) {
-    throw new Error(`Marketplace fetch failed: HTTP ${res.status}`);
-  }
-
-  const html = await res.text();
-  const images = extractImagesFromHtml(html, listingId);
-  const description = extractDescriptionFromHtml(html);
-  const title = extractTitleFromHtml(html) ?? "Marketplace Listing";
-  const price = extractPriceFromHtml(html);
-
-  return {
-    id: listingId,
-    source: "marketplace",
-    title,
-    price,
-    currency: "USD",
-    url: `https://www.facebook.com/marketplace/item/${listingId}`,
-    images,
-    description,
-    fullDescription: description,
-  };
-}
-
-async function fetchMarketplaceListingWithCanonicalImages(listingId: string): Promise<Listing> {
-  try {
-    return await getMarketplaceListingByGraphqlForAnalysis(listingId);
-  } catch (err) {
-    console.warn(`[marketplace] canonical image fetch failed for ${listingId}, falling back to mbasic HTML`, err);
-    return fetchMarketplaceListingByMbasicHtml(listingId);
-  }
-}
-
 export async function getMarketplaceListing(listingId: string): Promise<Partial<Listing>> {
   try {
-    const listing = await fetchMarketplaceListingWithCanonicalImages(listingId);
+    const listing = await getMarketplaceListingByGraphqlForAnalysis(listingId);
     return {
       images: listing.images,
       description: listing.description,
@@ -940,7 +868,7 @@ export async function getMarketplaceListing(listingId: string): Promise<Partial<
 }
 
 export async function getMarketplaceListingFull(listingId: string): Promise<Listing> {
-  return fetchMarketplaceListingWithCanonicalImages(listingId);
+  return getMarketplaceListingByGraphqlForAnalysis(listingId);
 }
 
 export async function searchMarketplaceListings({

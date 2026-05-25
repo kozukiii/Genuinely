@@ -89,6 +89,19 @@ export interface Listing {
   // The from-url route will resolve this to an eBay listing instead.
   crossListedEbayId?: string;
 
+  // Freshness/availability metadata for saved listings.
+  availabilityStatus?: "active" | "sold" | "ended" | "removed" | "unknown";
+  availabilityCheckedAt?: string;
+  availabilityReason?: string;
+  lastSeenActiveAt?: string;
+  endedAt?: string;
+  analysisSkipped?: boolean;
+
+  // eBay item-group variation support
+  itemGroupHref?: string;
+  itemGroupType?: string;
+  itemGroupId?: string;
+
   // backwards compat if anything still uses `link`
   link?: string;
 }

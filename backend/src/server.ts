@@ -14,6 +14,7 @@ import featuredRoutes from "./routes/featuredRoutes";
 import authRoutes from "./routes/authRoutes";
 import savedRoutes from "./routes/savedRoutes";
 import internalRoutes from "./routes/internalRoutes";
+import ebayRoutes from "./routes/ebayRoutes";
 
 const app = express();
 app.disable("x-powered-by");
@@ -86,6 +87,7 @@ api.get("/health", (_req, res) => {
 
 // Rate limit all non-health routes
 api.use("/search", limiter, searchRoutes);
+api.use("/ebay", limiter, ebayRoutes);
 api.use("/marketplace", limiter, marketplaceRoutes);
 api.use("/proxy-image", limiter, imageProxyRoutes);
 api.use("/featured", featuredRoutes);

@@ -1,0 +1,69 @@
+.variant-selector {
+  margin-top: 14px;
+  margin-bottom: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.variant-selector--loading {
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+}
+
+.variant-selector__loading-text {
+  font-size: 0.8rem;
+  color: #6b7280;
+}
+
+.variant-selector__row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.variant-selector__label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #9ca3af;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.variant-selector__select {
+  appearance: none;
+  background-color: #1a1f2e;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%236b7280' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  border: 1.5px solid #374151;
+  border-radius: 8px;
+  color: #d1d5db;
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 7px 32px 7px 12px;
+  width: 100%;
+  max-width: 320px;
+  transition: border-color 0.15s;
+}
+
+.variant-selector__select:hover {
+  border-color: #6366f1;
+}
+
+.variant-selector__select:focus {
+  border-color: #6366f1;
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+}
+
+.variant-selector__select option:disabled {
+  color: #6b7280;
+}
+
+.variant-selector__no-match {
+  font-size: 0.78rem;
+  color: #f87171;
+  margin: 2px 0 0;
+}

@@ -4,6 +4,8 @@ import { useAuth } from "../context/AuthContext";
 import type { Listing } from "../types/Listing";
 import RatingRing from "../components/RatingRing";
 import ListingCard from "../components/ListingCard";
+import VariantSelector from "../components/VariantSelector";
+import type { EbayVariant } from "../utils/ebayApi";
 import "./styles/ListingPage.css";
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { getHighResImage, isDisplayableListingImage, PLACEHOLDER_IMAGE } from "../utils/imageHelpers";
@@ -14,6 +16,13 @@ import { subscribeToAnalysis } from "../utils/analysisStore";
 function sourceLabel(source?: Listing["source"]) {
   if (source === "marketplace") return "Marketplace";
   return "eBay";
+}
+
+function availabilityLabel(status?: Listing["availabilityStatus"]) {
+  if (status === "sold") return "sold";
+  if (status === "ended") return "ended";
+  if (status === "removed") return "unavailable";
+  return null;
 }
 
 function formatDeliveryType(type: string): string {
@@ -92,6 +101,18 @@ function scoreColor(score: number) {
   return "#ef4444";
 }
 
+function computePriceFairness(price: number, low: number, high: number): number {
+  if (price <= 0 || low <= 0 || high <= 0 || high <= low) return 50;
+  if (price <= low * 0.5) return 0;
+  if (price < low) return 100;
+  if (price <= high) {
+    const t = (price - low) / (high - low);
+    return Math.round(100 - Math.pow(t, 0.9) * 25);
+  }
+  const overpayRatio = (price - high) / high;
+  return Math.max(0, Math.round(75 - Math.pow(overpayRatio, 0.65) * 90));
+}
+
 function getPriceBadge(price: number, priceLow: number, priceHigh: number): { label: string; color: string; bg: string } {
   const mid = (priceLow + priceHigh) / 2;
   if (price < priceLow * 0.5)  return { label: "RISKY PRICE", color: "#ef4444", bg: "rgba(239,68,68,0.08)" };
@@ -99,6 +120,25 @@ function getPriceBadge(price: number, priceLow: number, priceHigh: number): { la
   if (price <= mid)             return { label: "GOOD PRICE",  color: "#22c55e", bg: "rgba(34,197,94,0.08)" };
   if (price <= priceHigh)       return { label: "FAIR PRICE",  color: "#facc15", bg: "rgba(250,204,21,0.08)" };
   return                               { label: "HIGH PRICE",  color: "#ef4444", bg: "rgba(239,68,68,0.08)" };
+}
+
+function getPriceBadgeTitle(label: string): string {
+  switch (label) {
+    case "RISKY PRICE":
+      return "Far below the expected low price, which can be a risk signal.";
+    case "GREAT PRICE":
+      return "Under the expected low price, but still close enough to be reasonable.";
+    case "GOOD PRICE":
+      return "Below the middle of the expected market range.";
+    case "FAIR PRICE":
+      return "Within the expected market range, closer to the high side.";
+    case "HIGH PRICE":
+      return "Above the expected high price for similar listings.";
+    case "No price to analyze":
+      return "No fixed listing price is available to compare against the market range.";
+    default:
+      return "Based on how the listing price compares with the expected market range.";
+  }
 }
 
 const STAR_DATA = [
@@ -251,6 +291,12 @@ export default function ListingPage() {
 
   const { user } = useAuth();
   const isAdmin = user?.isAdmin === true;
+
+  const [activeVariant, setActiveVariant] = useState<EbayVariant | null>(null);
+  // null = group not yet loaded (or not a variation listing)
+  // false = group loaded, all variants share the same price → graph is still valid
+  // true  = group loaded, prices differ across options → hide graph entirely
+  const [variantPricesVary, setVariantPricesVary] = useState<boolean | null>(null);
 
   const [showDebug,   setShowDebug]   = useState(false);
   const [showRaw,     setShowRaw]     = useState(false);
@@ -446,11 +492,15 @@ export default function ListingPage() {
         analyzedAt: undefined,
       };
       const withTs = { ...enriched, analyzedAt: data.analyzedAt ?? new Date().toISOString() };
-      targetScoreRef.current = data.aiScore ?? 0;
+      targetScoreRef.current = enriched.aiScore ?? 0;
       setAnalysisResult(withTs);
       updateSavedListing(enriched);
       updateRecentlyViewed(enriched);
       navigate(".", { replace: true, state: { listing: enriched } });
+      if (data.analysisSkipped) {
+        setAnalysisPhase(enriched.aiScore != null ? "done" : "idle");
+        return;
+      }
 
       // Write back to sessionStorage so the search page shows the new analysis when navigating back
       try {
@@ -476,12 +526,14 @@ export default function ListingPage() {
 
   // ── Hooks that must precede the early return ─────────────────────────────
   const money = useMemo(() => {
+    const price = activeVariant?.price ?? listing?.price ?? 0;
+    const currency = activeVariant?.currency ?? listing?.currency ?? "USD";
     try {
       return new Intl.NumberFormat(undefined, {
-        style: "currency", currency: listing?.currency ?? "USD", maximumFractionDigits: 0,
-      }).format(listing?.price ?? 0);
-    } catch { return `$${listing?.price ?? 0}`; }
-  }, [listing?.price, listing?.currency]);
+        style: "currency", currency, maximumFractionDigits: 0,
+      }).format(price);
+    } catch { return `$${price}`; }
+  }, [activeVariant, listing?.price, listing?.currency]);
 
   const sellerLine = useMemo(() => {
     if (!listing) return null;
@@ -552,13 +604,35 @@ export default function ListingPage() {
 
   // ── Derived values ────────────────────────────────────────────────────────
 
-  const images = (enrichedImages !== null && enrichedImages.length > 0
+  const baseImages = (enrichedImages !== null && enrichedImages.length > 0
     ? enrichedImages : listing.images ?? []
   ).filter((url) => isDisplayableListingImage(url, listing.source));
+
+  // When a variant with its own image is active, show it first
+  const images = activeVariant?.imageUrl
+    ? [activeVariant.imageUrl, ...baseImages.filter((u) => u !== activeVariant.imageUrl)]
+    : baseImages;
+
   const safeIndex    = Math.min(Math.max(imageIndex, 0), Math.max(images.length - 1, 0));
   const currentImage = getHighResImage(images[safeIndex] ?? "", listing.source);
 
+  // Variant-aware display values
+  const displayShippingCost: number | undefined =
+    activeVariant != null ? activeVariant.shippingCost : listing.shippingPrice;
+  const displayShippingCalculated: boolean =
+    activeVariant != null ? (activeVariant.shippingCalculated ?? false) : (listing.shippingCalculated ?? false);
+  const displayBuyUrl: string = activeVariant?.affiliateUrl ?? listing.url;
+
+  // Hide the price bar and price fairness ring when this is a variation listing whose
+  // options actually change the price. We only know this once the group loads:
+  //   null  → still loading, hide to avoid showing a misleading single-variant price
+  //   true  → prices differ, keep hidden
+  //   false → all variants cost the same, the graph is valid, show normally
+  const hidePriceGraph = !!listing.itemGroupId && variantPricesVary !== false;
+
   const ai          = analysisResult ?? listing;
+  const unavailableLabel = availabilityLabel(ai.availabilityStatus ?? listing.availabilityStatus);
+  const listingUnavailable = unavailableLabel !== null;
   const priceChartingUrl = ai.priceChartingUrl ?? null;
   const tcgPlayerUrl = ai.tcgPlayerUrl ?? null;
   const showPriceSourceLinks =
@@ -574,7 +648,10 @@ export default function ListingPage() {
     : ai.overview);
 
   const scores = {
-    priceFairness:      ai.aiScores?.priceFairness,
+    priceFairness: ai.aiScores?.priceFairness
+      ?? (!hidePriceGraph && ai.priceLow != null && ai.priceHigh != null
+          ? computePriceFairness(activeVariant?.price ?? listing.price ?? 0, ai.priceLow, ai.priceHigh)
+          : undefined),
     sellerTrust:        ai.aiScores?.sellerTrust,
     conditionHonesty:   ai.aiScores?.conditionHonesty,
     shippingFairness:   ai.aiScores?.shippingFairness,
@@ -624,7 +701,11 @@ export default function ListingPage() {
               {enrichLoading && listing.source === "marketplace" && (
                 <span className="image-loading-badge">Loading gallery{"\u2026"}</span>
               )}
-              {!listing.acceptsOffers && listing.aiScores?.priceFairness === 0 && listing.aiScores?.sellerTrust === 0 && (
+              {unavailableLabel ? (
+                <div className="scam-overlay listing-unavailable-overlay">
+                  <span className="scam-overlay-text listing-unavailable-overlay-text">LISTING UNAVAILABLE</span>
+                </div>
+              ) : !listing.acceptsOffers && listing.aiScores?.priceFairness === 0 && listing.aiScores?.sellerTrust === 0 && (
                 <div className="scam-overlay">
                   <span className="scam-overlay-text">SCAM LIKELY</span>
                 </div>
@@ -666,11 +747,15 @@ export default function ListingPage() {
             {/* Title + heart */}
             <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
               <h1 className="page-title" style={{ margin: 0 }}>{listing.title}</h1>
+              {unavailableLabel && (
+                <span className="page-availability-badge">{unavailableLabel}</span>
+              )}
               <button
                 type="button"
                 className="page-heart-inline"
                 aria-pressed={saved}
                 aria-label={saved ? "Unsave listing" : "Save listing"}
+                title={saved ? "Unsave Listing" : "Save Listing"}
                 onClick={(e) => { e.preventDefault(); e.stopPropagation(); setSaved(toggleSaved(listing)); }}
               >
                 <svg viewBox="0 0 24 24" width="20" height="20" fill={saved ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -678,6 +763,21 @@ export default function ListingPage() {
                 </svg>
               </button>
             </div>
+
+            {unavailableLabel && (
+              <div className="page-availability-alert">
+                This listing appears to be {unavailableLabel}. Any score shown is historical.
+              </div>
+            )}
+
+            {/* Variant selector — only for real eBay item groups */}
+            {listing.source === "ebay" && listing.itemGroupId && (
+              <VariantSelector
+                itemGroupId={listing.itemGroupId}
+                onVariantChange={setActiveVariant}
+                onGroupLoaded={setVariantPricesVary}
+              />
+            )}
 
             {/* Price / ring row */}
             <div className="info-ring-row" style={{ justifyContent: "flex-start", gap: "32px" }}>
@@ -696,12 +796,23 @@ export default function ListingPage() {
                   ) : (
                     <p className="page-price">{money}</p>
                   )}
-                  {listing.shippingPrice != null ? (
+                  {displayShippingCost != null ? (
                     <span className="page-shipping">
-                      {listing.shippingPrice === 0
+                      {displayShippingCost === 0
                         ? "Free shipping"
-                        : `${listing.shippingEstimated ? "~" : "+ "}${new Intl.NumberFormat(undefined, { style: "currency", currency: listing.currency ?? "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(listing.shippingPrice)} shipping${listing.shippingEstimated ? " (est.)" : ""}`}
+                        : (() => {
+                            const isEst = activeVariant == null && listing.shippingEstimated;
+                            const fmt = new Intl.NumberFormat(undefined, {
+                              style: "currency",
+                              currency: activeVariant?.currency ?? listing.currency ?? "USD",
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            }).format(displayShippingCost);
+                            return `${isEst ? "~" : "+ "}${fmt} shipping${isEst ? " (est.)" : ""}`;
+                          })()}
                     </span>
+                  ) : displayShippingCalculated ? (
+                    <span className="page-shipping">Calculated shipping</span>
                   ) : null}
                 </div>
                 {listing.condition && <span className="page-condition">{listing.condition}</span>}
@@ -727,30 +838,34 @@ export default function ListingPage() {
                   <div aria-hidden="true" style={{ width: "220px", marginTop: "30px", flexShrink: 0 }} />
                 )}
                 {showRing && ai.priceLow != null && ai.priceHigh != null && (() => {
+                  const displayPrice = activeVariant?.price ?? listing.price;
                   const { lowPct, midPct, highPct, fillPct } = buildPriceBarProps(
-                    ai.priceLow, ai.priceHigh, listing.acceptsOffers ? null : listing.price
+                    ai.priceLow, ai.priceHigh, listing.acceptsOffers ? null : displayPrice
                   );
                   return (
                     <div
                       className={`demo-score-bar-wrap${analysisPhase !== "done" ? " demo-score-bar-wrap--pending" : ""}`}
-                      style={{ marginTop: "6px" }}
+                      style={{ marginTop: "6px", opacity: hidePriceGraph ? 0.4 : 1, transition: "opacity 0.2s" }}
                     >
                       {(() => {
                         const done = analysisPhase === "done" && ai.priceLow != null && ai.priceHigh != null;
-                        const badge = done && !listing.acceptsOffers && listing.price != null
-                          ? getPriceBadge(listing.price, ai.priceLow!, ai.priceHigh!)
-                          : done
-                            ? { label: "No price to analyze", color: "#6b7280", bg: "rgba(107,114,128,0.08)" }
-                            : null;
+                        const badge = hidePriceGraph
+                          ? { label: "NOT APPLICABLE", color: "#6b7280", bg: "rgba(107,114,128,0.08)" }
+                          : done && !listing.acceptsOffers && displayPrice != null
+                            ? getPriceBadge(displayPrice, ai.priceLow!, ai.priceHigh!)
+                            : done
+                              ? { label: "No price to analyze", color: "#6b7280", bg: "rgba(107,114,128,0.08)" }
+                              : null;
                         return (
                           <div style={{ display: "flex", flexDirection: "column", gap: "6px", alignItems: "flex-start" }}>
                             <div
                               className="demo-score-bar-title"
+                              title={badge && !hidePriceGraph ? getPriceBadgeTitle(badge.label) : undefined}
                               style={badge ? { color: badge.color, background: badge.bg, borderColor: `${badge.color}48` } : undefined}
                             >
-                              {badge?.label === "GREAT PRICE" && <StarSparkles />}
-                              {badge?.label === "GOOD PRICE" && <GoodStarSparkles />}
-                              {badge?.label === "FAIR PRICE" && <FairStarSparkles />}
+                              {!hidePriceGraph && badge?.label === "GREAT PRICE" && <StarSparkles />}
+                              {!hidePriceGraph && badge?.label === "GOOD PRICE" && <GoodStarSparkles />}
+                              {!hidePriceGraph && badge?.label === "FAIR PRICE" && <FairStarSparkles />}
                               {badge ? badge.label : "Price Data"}
                             </div>
                           </div>
@@ -840,9 +955,11 @@ export default function ListingPage() {
               <button
                 className="analyze-btn"
                 onClick={runAnalysis}
-                disabled={analyzing}
+                disabled={analyzing || listingUnavailable}
               >
-                {analyzing
+                {listingUnavailable
+                  ? "Listing unavailable"
+                  : analyzing
                   ? `Analyzing\u2026`
                   : analysisResult?.analyzedAt
                   ? "Re-analyze"
@@ -860,7 +977,11 @@ export default function ListingPage() {
                   <p className="analyze-subtext">Previously analyzed</p>
                 )}
                 {(analysisResult?.analyzedAt || ai.aiScore != null) && !analyzing && (
-                  <p className="analyze-hint">Something look off? Rerun analysis with the latest market data!</p>
+                  <p className="analyze-hint">
+                    {listingUnavailable
+                      ? "Reanalysis is paused because the source listing is no longer active."
+                      : "Something look off? Rerun analysis with the latest market data!"}
+                  </p>
                 )}
               </div>
               {analyzeError && <p className="analyze-error">{analyzeError}</p>}
@@ -869,7 +990,7 @@ export default function ListingPage() {
             {/* External link */}
             <a
               className="external-ebay-link demo-external-link"
-              href={listing.url}
+              href={displayBuyUrl}
               target="_blank"
               rel="noopener noreferrer"
             >
@@ -879,19 +1000,26 @@ export default function ListingPage() {
             {/* Sub-rings */}
             {showRing && (
               <div className="ai-score-grid">
-                {Object.entries(scores).map(([key, value]) => (
-                  <div key={key} className="ai-score-item">
-                    <AnimatedRing
-                      phase={analysisPhase}
-                      fillProgress={fillProgress}
-                      compressProgress={compressProgress}
-                      compressStartFrac={compressStartFrac}
-                      targetValue={value ?? 0}
-                      size={50}
-                    />
-                    <p className="ring-title">{readableLabels[key]}</p>
-                  </div>
-                ))}
+                {Object.entries(scores).map(([key, value]) => {
+                  const dimmed = key === "priceFairness" && hidePriceGraph;
+                  return (
+                    <div
+                      key={key}
+                      className="ai-score-item"
+                      style={dimmed ? { opacity: 0.35, transition: "opacity 0.2s" } : undefined}
+                    >
+                      <AnimatedRing
+                        phase={analysisPhase}
+                        fillProgress={fillProgress}
+                        compressProgress={compressProgress}
+                        compressStartFrac={compressStartFrac}
+                        targetValue={dimmed ? 0 : (value ?? 0)}
+                        size={50}
+                      />
+                      <p className="ring-title">{readableLabels[key]}</p>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>

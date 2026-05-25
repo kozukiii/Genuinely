@@ -67,4 +67,17 @@ export interface Listing {
 
   // Set when a Marketplace listing was resolved to an eBay cross-listing
   crossListedEbayId?: string;
+
+  // Saved-listing freshness/availability metadata
+  availabilityStatus?: "active" | "sold" | "ended" | "removed" | "unknown";
+  availabilityCheckedAt?: string;
+  availabilityReason?: string;
+  lastSeenActiveAt?: string;
+  endedAt?: string;
+  analysisSkipped?: boolean;
+
+  // eBay item-group variation support
+  itemGroupHref?: string;
+  itemGroupType?: string;
+  itemGroupId?: string;
 }

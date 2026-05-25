@@ -6,12 +6,13 @@ export interface HighlightBadge {
 
 interface Props {
   badges: HighlightBadge[];
+  hasPriceBadges?: boolean;
   open: boolean;
   onToggle: () => void;
 }
 
-export default function RefineResultsSidebar({ badges, open, onToggle }: Props) {
-  if (badges.length === 0 || open) return null;
+export default function RefineResultsSidebar({ badges, hasPriceBadges = false, open, onToggle }: Props) {
+  if ((badges.length === 0 && !hasPriceBadges) || open) return null;
 
   return (
     <aside className="refine-sidebar">

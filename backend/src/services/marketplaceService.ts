@@ -10,7 +10,7 @@ const proxyUrls = process.env.PROXY_URL
 
 const FETCH_TIMEOUT_MS = 12_000;   // utility calls (geocoding, etc.)
 const FACEBOOK_TIMEOUT_MS = 4_000; // FB GraphQL / HTML — bail fast on tarpits
-const RACE_STAGGER_MS = 1_500;     // gap between staggered race attempts
+const RACE_STAGGER_MS = 800;       // gap between staggered race attempts
 
 // Committed proxy — null means we're in racing mode.
 // Set on first win; cleared on rate-limit or failure so the next call re-races.

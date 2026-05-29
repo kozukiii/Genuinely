@@ -767,8 +767,9 @@ export default function SearchPage() {
       try {
         const items = await fetchFromApi(q, fetchSize, activeFilters);
 
-        // With no custom limit: only mark/analyze page 1; page 2 stays raw until navigated to
-        const analyzeCount = parsedLimit ? items.length : PAGE_SIZE;
+        // Always analyze at most PAGE_SIZE items on initial load regardless of custom limit.
+        // A custom parsedLimit only controls how many items are fetched, not how many are scored upfront.
+        const analyzeCount = Math.min(items.length, PAGE_SIZE);
         const withPending = items.map((l: Listing, i: number) =>
           i < analyzeCount ? { ...l, analysisPending: true } : l
         );

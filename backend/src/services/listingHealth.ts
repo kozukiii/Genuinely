@@ -95,17 +95,13 @@ function patchAvailability<T extends Record<string, any>>(
   return { ...listing, ...patch } as T & ListingWithHealth;
 }
 
-function mergeFreshListing<T extends Record<string, any>>(
+function markReachable<T extends Record<string, any>>(
   original: T,
-  fresh: Listing,
   checkedAt: string,
 ): T & ListingWithHealth {
-  return patchAvailability(
-    { ...original, ...fresh },
-    "active",
-    "Source listing was reachable.",
-    checkedAt,
-  );
+  // Health check is a reachability probe only — never merge re-fetched data
+  // over the saved listing, or we clobber stored analysis fields (score, etc).
+  return patchAvailability(original, "active", "Source listing was reachable.", checkedAt);
 }
 
 export async function refreshListingAvailability<T extends Record<string, any>>(
@@ -134,7 +130,8 @@ export async function refreshListingAvailability<T extends Record<string, any>>(
       const fresh = isVariantId
         ? await getEbayItemByEbayId(storedId, null)
         : await getEbayItemByNumericId(numericId, null);
-      return mergeFreshListing(listing, fresh, checkedAt);
+      void fresh;
+      return markReachable(listing, checkedAt);
     } catch (err: any) {
       const message = err?.message ?? String(err);
       const status = /HTTP\s+(404|410)\b|not found|not available|unavailable/i.test(message)
@@ -148,9 +145,9 @@ export async function refreshListingAvailability<T extends Record<string, any>>(
     try {
       const fresh = await getMarketplaceListingByGraphqlForAnalysis(String(listing.id));
       if (marketplaceIsSold((fresh as any).raw)) {
-        return patchAvailability({ ...listing, ...fresh }, "sold", "Marketplace marks this listing as sold.", checkedAt);
+        return patchAvailability(listing, "sold", "Marketplace marks this listing as sold.", checkedAt);
       }
-      return mergeFreshListing(listing, fresh, checkedAt);
+      return markReachable(listing, checkedAt);
     } catch (err: any) {
       const message = err?.message ?? String(err);
       const status = /unavailable|could not be retrieved|HTTP\s+(404|410)\b/i.test(message)

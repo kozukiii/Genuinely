@@ -11,17 +11,43 @@ const proxyUrls = process.env.PROXY_URL
 const FETCH_TIMEOUT_MS = 12_000;   // utility calls (geocoding, etc.)
 const FACEBOOK_TIMEOUT_MS = 4_000; // FB GraphQL / HTML — bail fast on tarpits
 const RACE_STAGGER_MS = 800;       // gap between staggered race attempts
+const PROXY_RACE_WIDTH = 6;
+const STICKY_PROXY_POOL_SIZE = 3;
+const STICKY_PROXY_TTL_MS = 10 * 60 * 1000;
+const POST_WIN_RACE_GRACE_MS = 1_500;
 
-// Committed proxy — null means we're in racing mode.
-// Set on first win; cleared on rate-limit or failure so the next call re-races.
-let committedProxyUrl: string | null = null;
+type StickyProxyEntry = {
+  url: string;
+  inflight: number;
+  lastUsedAt: number;
+  lastSucceededAt: number;
+};
+
+type ProxyTaggedResponse = Awaited<ReturnType<typeof fetch>> & {
+  __proxyUrl?: string | null;
+};
+
+// Sticky proxy pool — empty means we're in racing mode.
+// The race seeds up to three winners, then later requests spread over the pool.
+let stickyProxyPool: StickyProxyEntry[] = [];
 
 // Called by callers that detect a rate-limit signal in the response body.
-export function markProxyRateLimited(): void {
-  if (committedProxyUrl) {
-    console.warn(`[proxy] rate limited on ${committedProxyUrl} — dropping back to race mode`);
+export function markProxyRateLimited(proxyUrl?: string | null): void {
+  if (proxyUrl) {
+    const before = stickyProxyPool.length;
+    stickyProxyPool = stickyProxyPool.filter((entry) => entry.url !== proxyUrl);
+    if (before !== stickyProxyPool.length) {
+      console.warn(`[proxy] rate limited on ${proxyUrl} — evicting from sticky pool`);
+      return;
+    }
+    console.warn(`[proxy] rate limited on ${proxyUrl} — proxy was not in sticky pool`);
+    return;
   }
-  committedProxyUrl = null;
+
+  if (stickyProxyPool.length > 0) {
+    console.warn("[proxy] rate limited without proxy attribution — clearing sticky pool");
+  }
+  stickyProxyPool = [];
 }
 
 function fetchWithTimeout(url: string, options: Parameters<typeof fetch>[1]): ReturnType<typeof fetch> {
@@ -40,7 +66,84 @@ function fetchDirect(
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   const reqOptions: any = { ...options, signal: ctrl.signal };
   if (proxyUrl) reqOptions.agent = new HttpsProxyAgent(proxyUrl);
-  return fetch(url, reqOptions).finally(() => clearTimeout(timer));
+  return fetch(url, reqOptions)
+    .then((res) => {
+      (res as ProxyTaggedResponse).__proxyUrl = proxyUrl;
+      return res;
+    })
+    .finally(() => clearTimeout(timer));
+}
+
+function getResponseProxyUrl(res: Awaited<ReturnType<typeof fetch>> | null | undefined): string | null {
+  const proxyUrl = (res as ProxyTaggedResponse | null | undefined)?.__proxyUrl;
+  return typeof proxyUrl === "string" && proxyUrl.trim().length > 0 ? proxyUrl : null;
+}
+
+function hasMarketplaceRateLimitError(json: any): boolean {
+  return Array.isArray(json?.errors) && json.errors.some((e: any) => e?.code === 1675004);
+}
+
+function pruneStickyProxyPool(now = Date.now()): void {
+  stickyProxyPool = stickyProxyPool.filter((entry) => now - entry.lastSucceededAt < STICKY_PROXY_TTL_MS);
+}
+
+function addStickyProxyWinner(proxyUrl: string): void {
+  const now = Date.now();
+  pruneStickyProxyPool(now);
+
+  const existing = stickyProxyPool.find((entry) => entry.url === proxyUrl);
+  if (existing) {
+    existing.lastSucceededAt = now;
+    return;
+  }
+
+  if (stickyProxyPool.length >= STICKY_PROXY_POOL_SIZE) {
+    return;
+  }
+
+  stickyProxyPool.push({
+    url: proxyUrl,
+    inflight: 0,
+    lastUsedAt: 0,
+    lastSucceededAt: now,
+  });
+
+  console.log(`[proxy] added ${proxyUrl} to sticky pool (${stickyProxyPool.length}/${STICKY_PROXY_POOL_SIZE})`);
+}
+
+function pickStickyProxy(excluded = new Set<string>()): StickyProxyEntry | null {
+  pruneStickyProxyPool();
+
+  const candidates = stickyProxyPool
+    .filter((entry) => !excluded.has(entry.url))
+    .sort((a, b) => {
+      if (a.inflight !== b.inflight) return a.inflight - b.inflight;
+      return a.lastUsedAt - b.lastUsedAt;
+    });
+
+  return candidates[0] ?? null;
+}
+
+async function fetchViaStickyProxy(
+  url: string,
+  options: Parameters<typeof fetch>[1],
+  entry: StickyProxyEntry,
+  timeoutMs: number,
+): Promise<Awaited<ReturnType<typeof fetch>>> {
+  entry.inflight += 1;
+  entry.lastUsedAt = Date.now();
+
+  try {
+    const res = await fetchDirect(url, options, entry.url, timeoutMs);
+    entry.lastSucceededAt = Date.now();
+    return res;
+  } catch (err: any) {
+    stickyProxyPool = stickyProxyPool.filter((candidate) => candidate.url !== entry.url);
+    console.warn(`[proxy] sticky proxy failed (${entry.url}: ${err?.message ?? "unknown error"}) — evicting`);
+    throw err;
+  } finally {
+    entry.inflight = Math.max(0, entry.inflight - 1);
+  }
 }
 
 function happyEyeballs(
@@ -49,52 +152,93 @@ function happyEyeballs(
   timeoutMs: number,
 ): ReturnType<typeof fetch> {
   const urls: Array<string | null> =
-    proxyUrls.length > 0 ? [...proxyUrls].sort(() => Math.random() - 0.5) : [null];
+    proxyUrls.length > 0
+      ? [...proxyUrls].sort(() => Math.random() - 0.5).slice(0, PROXY_RACE_WIDTH)
+      : [null];
 
   const outerController = new AbortController();
   const outerTimer = setTimeout(() => outerController.abort(), timeoutMs);
   const childControllers: AbortController[] = [];
   const staggerTimers: NodeJS.Timeout[] = [];
+  let cleanupTimer: NodeJS.Timeout | null = null;
 
   return new Promise<Awaited<ReturnType<typeof fetch>>>((resolve, reject) => {
-    let settled = false;
+    let primarySettled = false;
+    let cleanedUp = false;
     let failures = 0;
+    let winners = 0;
+    let primaryWinnerCtrl: AbortController | null = null;
 
-    const finish = (winner: Awaited<ReturnType<typeof fetch>> | null, winnerUrl?: string | null, winnerCtrl?: AbortController, err?: unknown) => {
-      if (settled) return;
-      settled = true;
+    const cleanup = () => {
+      if (cleanedUp) return;
+      cleanedUp = true;
       clearTimeout(outerTimer);
+      if (cleanupTimer) clearTimeout(cleanupTimer);
       for (const t of staggerTimers) clearTimeout(t);
       for (const c of childControllers) {
-        if (c !== winnerCtrl) c.abort();
+        if (c !== primaryWinnerCtrl) c.abort();
       }
+    };
+
+    const finishPrimary = (
+      winner: Awaited<ReturnType<typeof fetch>> | null,
+      winnerCtrl?: AbortController,
+      err?: unknown
+    ) => {
+      if (primarySettled) return;
+      primarySettled = true;
+      primaryWinnerCtrl = winnerCtrl ?? null;
       if (winner) {
-        if (winnerUrl) {
-          committedProxyUrl = winnerUrl;
-          console.log(`[proxy] committed to ${winnerUrl}`);
-        }
+        clearTimeout(outerTimer);
         resolve(winner);
+        if (winners >= STICKY_PROXY_POOL_SIZE) {
+          cleanup();
+        } else {
+          cleanupTimer = setTimeout(() => cleanup(), POST_WIN_RACE_GRACE_MS);
+        }
       } else {
+        cleanup();
         reject(err ?? new Error("All marketplace fetch attempts failed"));
       }
     };
 
     outerController.signal.addEventListener("abort", () =>
-      finish(null, undefined, undefined, Object.assign(new Error("Marketplace fetch timed out"), { name: "AbortError", type: "aborted" }))
+      finishPrimary(
+        null,
+        undefined,
+        Object.assign(new Error("Marketplace fetch timed out"), { name: "AbortError", type: "aborted" })
+      )
     );
 
     const tryUrl = (proxyUrl: string | null) => {
-      if (settled) return;
+      if (cleanedUp) return;
       const ctrl = new AbortController();
       childControllers.push(ctrl);
       outerController.signal.addEventListener("abort", () => ctrl.abort());
       const reqOptions: any = { ...options, signal: ctrl.signal };
       if (proxyUrl) reqOptions.agent = new HttpsProxyAgent(proxyUrl);
       fetch(url, reqOptions)
-        .then((res) => finish(res, proxyUrl, ctrl))
+        .then((res) => {
+          (res as ProxyTaggedResponse).__proxyUrl = proxyUrl;
+          if (proxyUrl) {
+            addStickyProxyWinner(proxyUrl);
+            winners += 1;
+          }
+          finishPrimary(res, ctrl);
+          if (primarySettled && (winners >= STICKY_PROXY_POOL_SIZE || failures + winners >= urls.length)) {
+            cleanup();
+          }
+        })
         .catch(() => {
-          if (settled) return;
-          if (++failures === urls.length) finish(null);
+          if (cleanedUp) return;
+          failures += 1;
+          if (!primarySettled && failures === urls.length) {
+            finishPrimary(null);
+            return;
+          }
+          if (primarySettled && failures + winners >= urls.length) {
+            cleanup();
+          }
         });
     };
 
@@ -105,21 +249,40 @@ function happyEyeballs(
   });
 }
 
-// Committed mode: blast everything at the known-good proxy.
-// Failure or timeout drops back to racing mode for this and all future calls.
+// Sticky-pool mode: prefer known-good proxies and only re-race when the pool is empty or exhausted.
+// Failure or timeout evicts the bad proxy and falls back to the next pool member or a new race.
 function raceProxiedFetch(
   url: string,
   options: Parameters<typeof fetch>[1],
   timeoutMs = FACEBOOK_TIMEOUT_MS,
 ): ReturnType<typeof fetch> {
-  if (committedProxyUrl) {
-    return fetchDirect(url, options, committedProxyUrl, timeoutMs).catch((err) => {
-      console.warn(`[proxy] committed proxy failed (${err?.message}) — re-racing`);
-      committedProxyUrl = null;
-      return happyEyeballs(url, options, timeoutMs);
-    });
-  }
-  return happyEyeballs(url, options, timeoutMs);
+  return (async () => {
+    pruneStickyProxyPool();
+
+    const attempted = new Set<string>();
+    let stickyErr: unknown = null;
+
+    while (true) {
+      const stickyProxy = pickStickyProxy(attempted);
+      if (!stickyProxy) break;
+
+      attempted.add(stickyProxy.url);
+
+      try {
+        return await fetchViaStickyProxy(url, options, stickyProxy, timeoutMs);
+      } catch (err) {
+        stickyErr = err;
+      }
+    }
+
+    if (attempted.size > 0) {
+      console.warn(
+        `[proxy] sticky pool exhausted${stickyErr ? ` (${(stickyErr as any)?.message ?? "unknown error"})` : ""} — re-racing`
+      );
+    }
+
+    return happyEyeballs(url, options, timeoutMs);
+  })();
 }
 
 const GRAPHQL_URL = "https://www.facebook.com/api/graphql/";
@@ -357,8 +520,8 @@ async function searchMarketplaceListingsByLatLng({
   });
 
   const json = await res.json();
-  if (json?.errors?.some((e: any) => e.code === 1675004)) {
-    markProxyRateLimited();
+  if (hasMarketplaceRateLimitError(json)) {
+    markProxyRateLimited(getResponseProxyUrl(res));
     throw new Error("Marketplace rate limit exceeded");
   }
   const edges = json?.data?.marketplace_search?.feed_units?.edges ?? [];
@@ -725,6 +888,10 @@ async function fetchMarketplaceListingByContainerQuery(listingId: string): Promi
       }
 
       const containerJson = await containerRes.json() as any;
+      if (hasMarketplaceRateLimitError(containerJson)) {
+        markProxyRateLimited(getResponseProxyUrl(containerRes));
+        throw new Error("Marketplace rate limit exceeded");
+      }
       const details = containerJson?.data?.viewer?.marketplace_product_details_page ?? null;
 
       if (!details?.target?.marketplace_listing_title) {
@@ -736,6 +903,10 @@ async function fetchMarketplaceListingByContainerQuery(listingId: string): Promi
       let media: any = null;
       if (mediaRes.status === 200) {
         const mediaJson = await mediaRes.json() as any;
+        if (hasMarketplaceRateLimitError(mediaJson)) {
+          markProxyRateLimited(getResponseProxyUrl(mediaRes));
+          throw new Error("Marketplace rate limit exceeded");
+        }
         media = mediaJson?.data?.viewer?.marketplace_product_details_page ?? null;
       } else {
         console.warn(`[marketplace:mediaQuery] HTTP ${mediaRes.status} for listing ${listingId}`);
@@ -810,7 +981,7 @@ export async function getMarketplaceListingBySearchForAnalysis(listingId: string
   return attachSearchMetadataToMarketplaceListing(seedListing, exactMatch);
 }
 
-const MARKETPLACE_SEARCH_IMAGE_ENRICHMENT_CONCURRENCY = 4;
+const MARKETPLACE_SEARCH_IMAGE_ENRICHMENT_CONCURRENCY = 6;
 
 async function mapWithConcurrency<T, R>(
   items: T[],

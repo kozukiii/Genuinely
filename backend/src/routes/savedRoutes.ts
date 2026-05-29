@@ -1,7 +1,6 @@
 import { Router } from "express";
 import db from "../db";
 import { requireAuth } from "../middleware/auth";
-import { refreshListingsAvailability } from "../services/listingHealth";
 
 const router = Router();
 
@@ -28,29 +27,7 @@ router.get("/", requireAuth, async (req, res) => {
       return data && typeof data === "object" ? data : null;
     } catch { return null; }
   }).filter(Boolean);
-
-  try {
-    const refreshed = await refreshListingsAvailability(listings as Record<string, unknown>[], { maxChecks: 12 });
-
-    const updates = db.prepare(`
-      UPDATE saved_listings
-      SET data = ?
-      WHERE user_id = ? AND source = ? AND listing_id = ?
-    `);
-
-    const updateMany = db.transaction((items: Record<string, unknown>[]) => {
-      for (const listing of items) {
-        if (!listing.id || !listing.source) continue;
-        updates.run(JSON.stringify(stripListing(listing)), req.user!.id, String(listing.source), String(listing.id));
-      }
-    });
-
-    updateMany(refreshed);
-    res.json({ listings: refreshed });
-  } catch (err) {
-    console.warn("saved listing health check failed:", err);
-    res.json({ listings });
-  }
+  res.json({ listings });
 });
 
 // POST /api/saved  — body: { listing: Listing }

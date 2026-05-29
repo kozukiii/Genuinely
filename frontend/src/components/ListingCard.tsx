@@ -3,8 +3,9 @@ import RatingRing from "./RatingRing";
 import { Link } from "react-router-dom";
 import { useEffect, useRef, useState } from "react";
 import type { Listing } from "../types/Listing";
+import { hasEbayCustomizableOptions } from "../utils/ebayVariations";
 import { getHighResImage, isDisplayableListingImage, PLACEHOLDER_IMAGE } from "../utils/imageHelpers";
-import { isSaved, toggleSaved } from "../utils/savedListings";
+import { isSaved, refreshSavedListingsHealthCheck, toggleSaved } from "../utils/savedListings";
 
 function formatDeliveryType(type: string): string {
   return type.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
@@ -193,6 +194,7 @@ export default function ListingCard({ data }: { data: Listing }) {
     && data.acceptsOffers !== true
     && data.price === 0;
   const unavailableLabel = availabilityLabel(data.availabilityStatus);
+  const hidePriceBadge = hasEbayCustomizableOptions(data);
 
   return (
     <div className="listing-card-wrapper">
@@ -251,7 +253,7 @@ export default function ListingCard({ data }: { data: Listing }) {
         <div className="price-rating">
           <div className="left-side">
 
-            {data.price != null && data.priceLow != null && data.priceHigh != null && (() => {
+            {!hidePriceBadge && data.price != null && data.priceLow != null && data.priceHigh != null && (() => {
               const badge = data.acceptsOffers
                 ? { label: "No price to analyze", color: "#6b7280", borderColor: "#6b728055" }
                 : getPriceBadge(data.price, data.priceLow, data.priceHigh);
@@ -370,6 +372,7 @@ export default function ListingCard({ data }: { data: Listing }) {
             onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
+              refreshSavedListingsHealthCheck(undefined, { force: true }).catch(() => {});
               window.open(data.url, "_blank", "noopener,noreferrer");
             }}
           >

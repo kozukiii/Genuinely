@@ -32,6 +32,9 @@ Features
 * Saved listings synced to user accounts with guest fallback support
 * Listing detail pages with a visual score breakdown and plain-English analysis
 * Image proxying for cleaner and more reliable listing images
+* eBay variation selector for item-group listings, allowing users to pick a specific color, size, or model before analyzing
+* Availability checking for saved listings, with TTL-based refresh so sold, ended, or removed listings surface automatically
+* Marketplace fetches use a sticky/racing proxy strategy for lower latency and more consistent access
 
 ⸻
 
@@ -95,6 +98,18 @@ The goal is not just to assign a score. The goal is to explain why a listing may
 
 ⸻
 
+Marketplace Proxy Strategy
+
+Marketplace fetches use a hybrid sticky/racing approach to maximize reliability and minimize latency when multiple proxies are configured.
+
+On the first request, all available proxies are raced simultaneously using a happy eyeballs-style strategy: attempts are staggered 800ms apart so the fastest proxy wins without blasting them all at once. The winning proxy is then committed, meaning all subsequent requests go directly to it without re-racing.
+
+If the committed proxy returns a rate-limit signal in the response body, or fails on a subsequent request, the system drops back to racing mode and picks a new winner on the next call. This lets the app recover automatically from tarpitted or blocked proxies without any manual intervention.
+
+Proxies are configured via the PROXY_URL environment variable as a comma-separated list. This is a production-only variable — local development runs without it and requests go out directly.
+
+⸻
+
 AI Scoring
 
 Genuinely uses structured AI responses to evaluate listings in a predictable format. Listing analysis is validated before being shown to users, which helps prevent malformed responses or unreliable score objects from reaching the frontend.
@@ -145,6 +160,7 @@ GOOGLE_CLIENT_SECRET=
 GOOGLE_CALLBACK_URL=
 JWT_SECRET=
 SERPER_API_KEY=
+PROXY_URL=                          # production only — not required for local dev
 ALLOWED_ORIGIN=
 FRONTEND_URL=
 PORT=3000

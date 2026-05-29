@@ -3,7 +3,8 @@ import { useEffect } from "react";
 import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import NavBar from "./components/NavBar";
 import SignInToast from "./components/SignInToast";
-import { AuthProvider } from "./context/AuthContext";
+import { AuthProvider, useAuth } from "./context/AuthContext";
+import { refreshSavedListingsHealthCheck } from "./utils/savedListings";
 
 // Pages
 import SearchPage from "./pages/SearchPage";
@@ -28,6 +29,18 @@ function ScrollToTop() {
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [pathname]);
+  return null;
+}
+
+function SessionListingHealthCheck() {
+  const { pathname } = useLocation();
+  const { loading } = useAuth();
+
+  useEffect(() => {
+    if (loading) return;
+    refreshSavedListingsHealthCheck().catch(() => {});
+  }, [loading, pathname]);
+
   return null;
 }
 
@@ -88,6 +101,7 @@ export default function App() {
     <BrowserRouter>
       <AuthProvider>
         <ScrollToTop />
+        <SessionListingHealthCheck />
         <NavBar />
         <AppRoutes />
         <SignInToast />

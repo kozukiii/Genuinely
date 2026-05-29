@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import type { Listing } from "../types/listing";
 import { searchEbayNormalized } from "./ebayService";
+import { searchMarketplaceListings } from "./marketplaceService";
 import { scoreListings } from "./scoring/scoreListing";
 import { fetchMarketContext } from "../ai/listingContext";
 
@@ -60,7 +61,15 @@ async function buildFeatured(): Promise<FeaturedCache> {
 
   const raw: Listing[] = chunks.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
 
-  if (raw.length === 0) throw new Error("No listings fetched for featured");
+  if (raw.length === 0) {
+    console.log("[init] eBay initialization failed");
+    throw new Error("No listings fetched for featured");
+  }
+  console.log("[init] eBay initialized");
+
+  searchMarketplaceListings({ query: "iphone", location: "10001", limit: 1, enrichImages: false })
+    .then(() => console.log("[init] Marketplace initialized"))
+    .catch(() => console.log("[init] Marketplace initialization failed"));
 
   const context = await fetchMarketContext(shuffled.join(", ")).catch(() => null);
   const scored = await scoreListings(raw, context);

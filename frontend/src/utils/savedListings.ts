@@ -2,10 +2,12 @@ import type { Listing } from "../types/Listing";
 
 const API_BASE  = import.meta.env.VITE_API_BASE_URL ?? "";
 const LOCAL_KEY = "saved:listings:v1";
+const SESSION_HEALTH_CHECK_KEY = "saved:listings:health-check:last-run";
 const HEALTH_CHECK_LIMIT = 12;
 const ACTIVE_HEALTH_TTL_MS = 60 * 60 * 1000;
 const UNKNOWN_HEALTH_TTL_MS = 30 * 60 * 1000;
 const INACTIVE_HEALTH_TTL_MS = 6 * 60 * 60 * 1000;
+const SESSION_HEALTH_CHECK_INTERVAL_MS = 60 * 60 * 1000;
 
 let healthInFlight = false;
 
@@ -74,56 +76,79 @@ function mergeHealthResults(current: Listing[], checked: Listing[]): { next: Lis
   return { next, changed };
 }
 
-function scheduleSavedListingsHealthCheck(listings: Listing[]) {
-  if (healthInFlight || listings.length === 0) return;
+function readLastSessionHealthCheckAt(): number | null {
+  const raw = sessionStorage.getItem(SESSION_HEALTH_CHECK_KEY);
+  if (!raw) return null;
 
-  const stale = listings.filter(needsHealthCheck).slice(0, HEALTH_CHECK_LIMIT);
-  if (stale.length === 0) return;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function markSessionHealthCheck(now: number) {
+  sessionStorage.setItem(SESSION_HEALTH_CHECK_KEY, String(now));
+}
+
+function shouldRunSessionHealthCheck(now: number): boolean {
+  const lastRunAt = readLastSessionHealthCheckAt();
+  return lastRunAt == null || now - lastRunAt >= SESSION_HEALTH_CHECK_INTERVAL_MS;
+}
+
+export async function refreshSavedListingsHealthCheck(
+  listings = getSavedListings(),
+  options: { force?: boolean } = {},
+): Promise<Listing[]> {
+  if (healthInFlight || listings.length === 0) return listings;
+  const now = Date.now();
+
+  if (!options.force && !shouldRunSessionHealthCheck(now)) return listings;
+
+  const targets = (options.force ? listings : listings.filter(needsHealthCheck)).slice(0, HEALTH_CHECK_LIMIT);
+  if (targets.length === 0) return listings;
 
   healthInFlight = true;
-  window.setTimeout(async () => {
-    try {
-      const res = await fetch(`${API_BASE}/api/search/health`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ listings: stale }),
+  try {
+    const res = await fetch(`${API_BASE}/api/search/health`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ listings: targets, force: options.force === true }),
+    });
+    if (!res.ok) return listings;
+
+    const data = await res.json();
+    const checked: Listing[] = Array.isArray(data.listings) ? data.listings : [];
+    markSessionHealthCheck(now);
+    if (checked.length === 0) return listings;
+
+    const current = safeParse<Listing[]>(localStorage.getItem(LOCAL_KEY), []);
+    const { next, changed } = mergeHealthResults(current, checked);
+    if (changed.length === 0) return current;
+
+    setSavedListings(next);
+
+    if (isLoggedIn()) {
+      changed.forEach((listing) => {
+        fetch(`${API_BASE}/api/saved`, {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ listing }),
+        }).catch(() => {});
       });
-      if (!res.ok) return;
-
-      const data = await res.json();
-      const checked: Listing[] = Array.isArray(data.listings) ? data.listings : [];
-      if (checked.length === 0) return;
-
-      const current = safeParse<Listing[]>(localStorage.getItem(LOCAL_KEY), []);
-      const { next, changed } = mergeHealthResults(current, checked);
-      if (changed.length === 0) return;
-
-      setSavedListings(next);
-
-      if (isLoggedIn()) {
-        changed.forEach((listing) => {
-          fetch(`${API_BASE}/api/saved`, {
-            method: "POST",
-            credentials: "include",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ listing }),
-          }).catch(() => {});
-        });
-      }
-    } catch {
-      // Health checks are best-effort; stale saved data should never block the UI.
-    } finally {
-      healthInFlight = false;
     }
-  }, 0);
+
+    return next;
+  } catch {
+    // Health checks are best-effort; stale saved data should never block the UI.
+    return listings;
+  } finally {
+    healthInFlight = false;
+  }
 }
 
 // ── Public API — all sync (localStorage is the local cache) ──────────────────
 
 export function getSavedListings(): Listing[] {
-  const listings = safeParse<Listing[]>(localStorage.getItem(LOCAL_KEY), []);
-  scheduleSavedListingsHealthCheck(listings);
-  return listings;
+  return safeParse<Listing[]>(localStorage.getItem(LOCAL_KEY), []);
 }
 
 export function setSavedListings(next: Listing[]) {

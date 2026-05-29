@@ -21,6 +21,7 @@ import {
   publishPipelineStatus,
   subscribeToPipelineStatus,
 } from "../utils/pipelineStore";
+import { hasEbayCustomizableOptions } from "../utils/ebayVariations";
 import { getSavedListings } from "../utils/savedListings";
 import { getRecentlyViewed } from "../utils/recentlyViewed";
 import { getSearchCache } from "../utils/searchCache";
@@ -143,6 +144,7 @@ function getPriceBadge(price: number, priceLow: number, priceHigh: number): { la
 
 function getListingPriceBadge(listing: Listing): ReturnType<typeof getPriceBadge> | null {
   if (listing.acceptsOffers) return null;
+  if (hasEbayCustomizableOptions(listing)) return null;
   if (listing.price == null || listing.priceLow == null || listing.priceHigh == null) return null;
   return getPriceBadge(listing.price, listing.priceLow, listing.priceHigh);
 }

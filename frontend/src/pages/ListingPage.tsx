@@ -9,7 +9,8 @@ import type { EbayVariant } from "../utils/ebayApi";
 import "./styles/ListingPage.css";
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { getHighResImage, isDisplayableListingImage, PLACEHOLDER_IMAGE } from "../utils/imageHelpers";
-import { isSaved, toggleSaved, updateSavedListing } from "../utils/savedListings";
+import { hasEbayCustomizableOptions } from "../utils/ebayVariations";
+import { isSaved, refreshSavedListingsHealthCheck, toggleSaved, updateSavedListing } from "../utils/savedListings";
 import { recordView, updateRecentlyViewed } from "../utils/recentlyViewed";
 import { subscribeToAnalysis } from "../utils/analysisStore";
 
@@ -629,6 +630,7 @@ export default function ListingPage() {
   //   true  → prices differ, keep hidden
   //   false → all variants cost the same, the graph is valid, show normally
   const hidePriceGraph = !!listing.itemGroupId && variantPricesVary !== false;
+  const hidePriceBadge = hasEbayCustomizableOptions(listing);
 
   const ai          = analysisResult ?? listing;
   const unavailableLabel = availabilityLabel(ai.availabilityStatus ?? listing.availabilityStatus);
@@ -858,16 +860,18 @@ export default function ListingPage() {
                               : null;
                         return (
                           <div style={{ display: "flex", flexDirection: "column", gap: "6px", alignItems: "flex-start" }}>
-                            <div
-                              className="demo-score-bar-title"
-                              title={badge && !hidePriceGraph ? getPriceBadgeTitle(badge.label) : undefined}
-                              style={badge ? { color: badge.color, background: badge.bg, borderColor: `${badge.color}48` } : undefined}
-                            >
-                              {!hidePriceGraph && badge?.label === "GREAT PRICE" && <StarSparkles />}
-                              {!hidePriceGraph && badge?.label === "GOOD PRICE" && <GoodStarSparkles />}
-                              {!hidePriceGraph && badge?.label === "FAIR PRICE" && <FairStarSparkles />}
-                              {badge ? badge.label : "Price Data"}
-                            </div>
+                            {!hidePriceBadge && (
+                              <div
+                                className="demo-score-bar-title"
+                                title={badge && !hidePriceGraph ? getPriceBadgeTitle(badge.label) : undefined}
+                                style={badge ? { color: badge.color, background: badge.bg, borderColor: `${badge.color}48` } : undefined}
+                              >
+                                {!hidePriceGraph && badge?.label === "GREAT PRICE" && <StarSparkles />}
+                                {!hidePriceGraph && badge?.label === "GOOD PRICE" && <GoodStarSparkles />}
+                                {!hidePriceGraph && badge?.label === "FAIR PRICE" && <FairStarSparkles />}
+                                {badge ? badge.label : "Price Data"}
+                              </div>
+                            )}
                           </div>
                         );
                       })()}
@@ -993,6 +997,9 @@ export default function ListingPage() {
               href={displayBuyUrl}
               target="_blank"
               rel="noopener noreferrer"
+              onClick={() => {
+                refreshSavedListingsHealthCheck(undefined, { force: true }).catch(() => {});
+              }}
             >
               View on {sourceLabel(listing.source)} {"\u2192"}
             </a>

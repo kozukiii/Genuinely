@@ -264,16 +264,18 @@ Set "hasReliableMarketData" to false if the product has no standardized resale m
 SOURCE RULE:
 Set "source" to "pricecharting" for trading cards (Pokémon, Magic: The Gathering, Yu-Gi-Oh, sports cards, any collectible card). Set "source" to "serper" for everything else (electronics, golf clubs, sneakers, instruments, etc.).
 
-Return ONLY a JSON array (no markdown, no backticks, no extra text):
-[
-  {
-    "canonicalName": "exact product name with key specs",
-    "indices": [0, 3],
-    "serperQuery": "targeted used resale price search query",
-    "hasReliableMarketData": true,
-    "source": "serper"
-  }
-]
+Return ONLY a JSON object with a single key "groups" (no markdown, no backticks, no extra text):
+{
+  "groups": [
+    {
+      "canonicalName": "exact product name with key specs",
+      "indices": [0, 3],
+      "serperQuery": "targeted used resale price search query",
+      "hasReliableMarketData": true,
+      "source": "serper"
+    }
+  ]
+}
 `.trim();
 
 async function isCardQuery(query: string): Promise<boolean> {
@@ -311,18 +313,15 @@ async function groupListings(titles: string[], query: string): Promise<RawGroup[
       ],
       max_tokens: 1200,
       temperature: 0.1,
+      response_format: { type: "json_object" },
     });
     logUsage("groq", "llama-3.1-8b-instant", response.usage);
 
     const raw = (response.choices[0].message.content ?? "").trim();
-    const start = raw.indexOf("[");
-    const end = raw.lastIndexOf("]");
-    if (start === -1 || end === -1) throw new Error("No JSON array in grouping response");
+    const top = JSON.parse(raw);
+    if (!Array.isArray(top?.groups) || top.groups.length === 0) throw new Error("Empty groups array");
 
-    const parsed = JSON.parse(raw.slice(start, end + 1));
-    if (!Array.isArray(parsed) || parsed.length === 0) throw new Error("Empty groups array");
-
-    const groups = parsed
+    const groups = top.groups
       .filter((g: any) => typeof g.canonicalName === "string" && Array.isArray(g.indices) && typeof g.serperQuery === "string")
       .map((g: any): RawGroup => ({
         canonicalName: g.canonicalName,
@@ -332,7 +331,7 @@ async function groupListings(titles: string[], query: string): Promise<RawGroup[
         source: g.source === "pricecharting" ? "pricecharting" : "serper",
       }));
 
-    console.log("[groupListings] groups:", groups.map(g => ({
+    console.log("[groupListings] groups:", groups.map((g: RawGroup) => ({
       canonicalName: g.canonicalName,
       indices: g.indices,
       serperQuery: g.serperQuery,
@@ -414,7 +413,6 @@ RULES:
 `.trim();
 
 function parsePriceValue(raw: string): number | null {
-  // Find the first integer anywhere in the string so "around $1,200" / "~45" / "approx 80" all parse
   const match = raw.replace(/[$,]/g, "").match(/\d+/);
   const v = match ? parseInt(match[0], 10) : NaN;
   return isNaN(v) ? null : v;

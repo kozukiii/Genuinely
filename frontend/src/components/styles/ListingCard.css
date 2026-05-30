@@ -365,11 +365,10 @@
 
 .listing-location-row {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.35rem;
   margin-top: 0.55rem;
-  overflow: hidden;
   min-width: 0;
 }
 

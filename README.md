@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🛍️ Genuinely
+# Genuinely
 
 ### AI-powered deal hunting across secondhand marketplaces
 

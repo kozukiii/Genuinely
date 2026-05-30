@@ -37,7 +37,6 @@ function truncateTitle(s: string, n = 36) {
 }
 
 const PAGE_SIZE = 12;
-const PRELOAD_SIZE = PAGE_SIZE * 2; // fetch 2 pages upfront; analyze on demand per page
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
 const SEARCH_QUERY_KEY = "search:query";
@@ -763,26 +762,23 @@ export default function SearchPage() {
       setShowScamListings(false);
 
       const parsedLimit = activeFilters.limit !== "" ? Math.max(1, parseInt(activeFilters.limit, 10)) : undefined;
-      const fetchSize = parsedLimit ?? PRELOAD_SIZE;
+      const cap = parsedLimit ?? PAGE_SIZE;
       try {
-        const items = await fetchFromApi(q, fetchSize, activeFilters);
+        const items = await fetchFromApi(q, cap + 1, activeFilters);
+        const displayItems = items.slice(0, cap);
 
-        // With no custom limit: only mark/analyze page 1; page 2 stays raw until navigated to
-        const analyzeCount = parsedLimit ? items.length : PAGE_SIZE;
-        const withPending = items.map((l: Listing, i: number) =>
-          i < analyzeCount ? { ...l, analysisPending: true } : l
-        );
+        const withPending = displayItems.map((l: Listing) => ({ ...l, analysisPending: true }));
         setListings(withPending);
         setFetchingNew(false);
         setResultKey((k) => k + 1);
-        setHasMore(items.length >= fetchSize);
+        setHasMore(items.length > cap);
 
         sessionStorage.setItem(SEARCH_QUERY_KEY, q);
-        sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(items.map(stripQueryCategoryDebugInfo)));
+        sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(displayItems.map(stripQueryCategoryDebugInfo)));
         sessionStorage.setItem(SEARCH_TIMESTAMP_KEY, Date.now().toString());
         sessionStorage.setItem(SEARCH_PAGE_KEY, "1");
 
-        startAnalysis(q, items.slice(0, analyzeCount));
+        startAnalysis(q, displayItems);
       } catch (err) {
         setFetchingNew(false);
         setError(`Failed to load listings: ${err instanceof Error ? err.message : String(err)}`);
@@ -807,17 +803,16 @@ export default function SearchPage() {
         const offset = listingsRef.current.length;
         const newItems = await fetchFromApi(
           queryRef.current,
-          PRELOAD_SIZE,
+          PAGE_SIZE + 1,
           filtersRef.current,
           offset
         );
+        const displayNew = newItems.slice(0, PAGE_SIZE);
 
-        const pendingNew = newItems.map((l: Listing, i: number) =>
-          i < PAGE_SIZE ? { ...l, analysisPending: true } : l
-        );
+        const pendingNew = displayNew.map((l: Listing) => ({ ...l, analysisPending: true }));
         const combined = dedupeListings([...listingsRef.current, ...pendingNew]);
         setListings(combined);
-        setHasMore(newItems.length >= PRELOAD_SIZE);
+        setHasMore(newItems.length > PAGE_SIZE);
 
         // Clamp to last valid page so we never land on an empty page
         const newFiltered = applyFilters(combined, filtersRef.current);
@@ -827,7 +822,7 @@ export default function SearchPage() {
         sessionStorage.setItem(SEARCH_PAGE_KEY, String(targetPage));
         sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(combined.map(stripQueryCategoryDebugInfo)));
 
-        startAnalysis(queryRef.current, newItems.slice(0, PAGE_SIZE));
+        startAnalysis(queryRef.current, displayNew);
       } catch (err) {
         setError(`Failed to load more listings: ${err instanceof Error ? err.message : String(err)}`);
         return;

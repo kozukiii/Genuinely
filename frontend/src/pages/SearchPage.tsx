@@ -763,11 +763,13 @@ export default function SearchPage() {
 
       const parsedLimit = activeFilters.limit !== "" ? Math.max(1, parseInt(activeFilters.limit, 10)) : undefined;
       const cap = parsedLimit ?? PAGE_SIZE;
+      const fetchSize = parsedLimit ?? PAGE_SIZE;
       try {
         const items = await fetchFromApi(q, cap + 1, activeFilters);
         const displayItems = items.slice(0, cap);
 
         const withPending = displayItems.map((l: Listing) => ({ ...l, analysisPending: true }));
+        const withPending = items.map((l: Listing) => ({ ...l, analysisPending: true }));
         setListings(withPending);
         setFetchingNew(false);
         setResultKey((k) => k + 1);
@@ -779,6 +781,7 @@ export default function SearchPage() {
         sessionStorage.setItem(SEARCH_PAGE_KEY, "1");
 
         startAnalysis(q, displayItems);
+        startAnalysis(q, items);
       } catch (err) {
         setFetchingNew(false);
         setError(`Failed to load listings: ${err instanceof Error ? err.message : String(err)}`);
@@ -804,6 +807,7 @@ export default function SearchPage() {
         const newItems = await fetchFromApi(
           queryRef.current,
           PAGE_SIZE + 1,
+          PAGE_SIZE,
           filtersRef.current,
           offset
         );
@@ -813,6 +817,10 @@ export default function SearchPage() {
         const combined = dedupeListings([...listingsRef.current, ...pendingNew]);
         setListings(combined);
         setHasMore(newItems.length > PAGE_SIZE);
+        const pendingNew = newItems.map((l: Listing) => ({ ...l, analysisPending: true }));
+        const combined = dedupeListings([...listingsRef.current, ...pendingNew]);
+        setListings(combined);
+        setHasMore(newItems.length >= PAGE_SIZE);
 
         // Clamp to last valid page so we never land on an empty page
         const newFiltered = applyFilters(combined, filtersRef.current);
@@ -823,6 +831,7 @@ export default function SearchPage() {
         sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(combined.map(stripQueryCategoryDebugInfo)));
 
         startAnalysis(queryRef.current, displayNew);
+        startAnalysis(queryRef.current, newItems);
       } catch (err) {
         setError(`Failed to load more listings: ${err instanceof Error ? err.message : String(err)}`);
         return;

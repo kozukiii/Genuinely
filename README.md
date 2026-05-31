@@ -175,6 +175,7 @@ GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
 GOOGLE_CALLBACK_URL=
 JWT_SECRET=
+ANALYSIS_SIGNING_SECRET=   # optional — falls back to JWT_SECRET if unset
 SERPER_API_KEY=
 PROXY_URL=                # production only — not required for local dev
 ALLOWED_ORIGIN=
@@ -211,6 +212,14 @@ Genuinely includes several production hardening measures:
 - Rate limiting on public endpoints
 - Helmet.js security headers
 - Sanitized logging to avoid exposing sensitive tokens or credentials
+
+### Server-signed analysis trust boundary
+
+Listing analysis is treated as a server-controlled operation, so the client can never forge the data that drives AI scoring. When the backend returns listings, each one is stamped with an **HMAC-signed proof** (`analysisProof`) covering a canonical, derived-field-stripped representation of the listing, with a short expiry.
+
+When a client requests analysis, the server **re-verifies that signature** before doing any work — any tampering with prices, condition, seller signals, or other listing fields invalidates the proof and the request is rejected. Trusted scoring inputs that must not be client-supplied (system prompt, price range, price source, shipping estimate) are kept server-side behind a **single-use, TTL-bound context token** that is bound to the exact set of listing keys it was issued for.
+
+This keeps price fairness, trust scoring, and the AI prompt anchored to server-issued data rather than anything the browser sends, while signing keys are sourced from `ANALYSIS_SIGNING_SECRET` (falling back to `JWT_SECRET`).
 
 ---
 

@@ -97,6 +97,13 @@ export interface Listing {
   endedAt?: string;
   analysisSkipped?: boolean;
 
+  // Short-lived backend proof that the listing fields came from a trusted source fetch.
+  analysisProof?: {
+    expiresAt: number;
+    signature: string;
+  };
+  analysisQuery?: string;
+
   // eBay item-group variation support
   itemGroupHref?: string;
   itemGroupType?: string;

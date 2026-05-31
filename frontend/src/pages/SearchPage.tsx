@@ -22,6 +22,7 @@ import {
   subscribeToPipelineStatus,
 } from "../utils/pipelineStore";
 import { hasEbayCustomizableOptions } from "../utils/ebayVariations";
+import { getPriceBadge, getPriceBadgeTitle, PRICE_BADGE_ORDER, type PriceBadgeLabel } from "../utils/listingPresentation";
 import { getSavedListings } from "../utils/savedListings";
 import { getRecentlyViewed } from "../utils/recentlyViewed";
 import { getSearchCache } from "../utils/searchCache";
@@ -128,41 +129,11 @@ function stripQueryCategoryDebugInfo(listing: Listing): Listing {
 // ── Analysis pipeline ────────────────────────────────────────────────────────
 // Groups listings by product via context LLM, then batch-analyzes each group
 // in parallel. Calls setListings incrementally as each group resolves.
-const PRICE_BADGE_ORDER = ["GREAT PRICE", "GOOD PRICE", "FAIR PRICE", "HIGH PRICE", "RISKY PRICE"] as const;
-
-type PriceBadgeLabel = typeof PRICE_BADGE_ORDER[number];
-
-function getPriceBadge(price: number, priceLow: number, priceHigh: number): { label: PriceBadgeLabel; color: string; bg: string } {
-  const mid = (priceLow + priceHigh) / 2;
-  if (price < priceLow * 0.5) return { label: "RISKY PRICE", color: "#ef4444", bg: "rgba(239,68,68,0.08)" };
-  if (price < priceLow) return { label: "GREAT PRICE", color: "#a855f7", bg: "rgba(168,85,247,0.08)" };
-  if (price <= mid) return { label: "GOOD PRICE", color: "#22c55e", bg: "rgba(34,197,94,0.08)" };
-  if (price <= priceHigh) return { label: "FAIR PRICE", color: "#facc15", bg: "rgba(250,204,21,0.08)" };
-  return { label: "HIGH PRICE", color: "#ef4444", bg: "rgba(239,68,68,0.08)" };
-}
-
 function getListingPriceBadge(listing: Listing): ReturnType<typeof getPriceBadge> | null {
   if (listing.acceptsOffers) return null;
   if (hasEbayCustomizableOptions(listing)) return null;
   if (listing.price == null || listing.priceLow == null || listing.priceHigh == null) return null;
   return getPriceBadge(listing.price, listing.priceLow, listing.priceHigh);
-}
-
-function getPriceBadgeTitle(label: string): string {
-  switch (label) {
-    case "RISKY PRICE":
-      return "Far below the expected low price, which can be a risk signal.";
-    case "GREAT PRICE":
-      return "Under the expected low price, but still close enough to be reasonable.";
-    case "GOOD PRICE":
-      return "Below the middle of the expected market range.";
-    case "FAIR PRICE":
-      return "Within the expected market range, closer to the high side.";
-    case "HIGH PRICE":
-      return "Above the expected high price for similar listings.";
-    default:
-      return "Based on how the listing price compares with the expected market range.";
-  }
 }
 
 async function runAnalysisPipeline(
@@ -264,7 +235,7 @@ async function runAnalysisPipeline(
     specificity: string;
     indices: number[];
     context: string | null;
-    systemPrompt?: string;
+    contextToken?: string;
     priceLow?: number | null;
     priceHigh?: number | null;
     priceSource?: string | null;
@@ -288,31 +259,21 @@ async function runAnalysisPipeline(
     }
 
     try {
-      const listingsToScore = group.shippingEstimate != null
-        ? groupListings.map((l: Listing) =>
-            l.shippingPrice == null
-              ? { ...l, shippingPrice: group.shippingEstimate, shippingEstimated: true }
-              : l
-          )
-        : groupListings;
-
-      const res = await fetch(`${API_BASE}/api/search/batch-analyze`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          listings: listingsToScore,
-          systemPrompt: group.systemPrompt,
-          priceLow: group.priceLow ?? null,
-          priceHigh: group.priceHigh ?? null,
-          priceSource: group.priceSource ?? null,
-          priceChartingUrl: group.priceChartingUrl ?? null,
-          tcgPlayerUrl: group.tcgPlayerUrl ?? null,
-        }),
-        signal,
-      });
-      if (!res.ok) throw new Error(`batch-analyze HTTP ${res.status}`);
-      const scored: Listing[] = await res.json();
-      const stabilized = await retryUnscoredListings(scored);
+      const stabilized = group.contextToken
+        ? await (async () => {
+            const res = await fetch(`${API_BASE}/api/search/batch-analyze`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                listings: groupListings,
+                contextToken: group.contextToken,
+              }),
+              signal,
+            });
+            if (!res.ok) throw new Error(`batch-analyze HTTP ${res.status}`);
+            return retryUnscoredListings(await res.json() as Listing[]);
+          })()
+        : await retryUnscoredListings(groupListings);
 
       if (signal.aborted) return;
 
@@ -403,7 +364,7 @@ async function runAnalysisPipeline(
     const ctxRes = await fetch(`${API_BASE}/api/search/context`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query, listings: itemsToAnalyze }),
+      body: JSON.stringify({ listings: itemsToAnalyze }),
       signal,
     });
     if (!ctxRes.ok) throw new Error(`context HTTP ${ctxRes.status}`);

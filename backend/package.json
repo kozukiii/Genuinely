@@ -10,8 +10,8 @@
     "start": "node dist/server.js",
     "build": "tsc",
     "debug:marketplace": "ts-node src/scripts/dumpMarketplaceGraphql.ts",
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "test": "vitest run src",
+    "test:watch": "vitest src"
   },
   "dependencies": {
     "@types/better-sqlite3": "7.6.13",

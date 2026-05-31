@@ -10,6 +10,7 @@ import "./styles/ListingPage.css";
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { getHighResImage, isDisplayableListingImage, PLACEHOLDER_IMAGE } from "../utils/imageHelpers";
 import { hasEbayCustomizableOptions } from "../utils/ebayVariations";
+import { availabilityLabel, formatDeliveryType, getPriceBadge, getPriceBadgeTitle } from "../utils/listingPresentation";
 import { isSaved, refreshSavedListingsHealthCheck, toggleSaved, updateSavedListing } from "../utils/savedListings";
 import { recordView, updateRecentlyViewed } from "../utils/recentlyViewed";
 import { subscribeToAnalysis } from "../utils/analysisStore";
@@ -17,17 +18,6 @@ import { subscribeToAnalysis } from "../utils/analysisStore";
 function sourceLabel(source?: Listing["source"]) {
   if (source === "marketplace") return "Marketplace";
   return "eBay";
-}
-
-function availabilityLabel(status?: Listing["availabilityStatus"]) {
-  if (status === "sold") return "sold";
-  if (status === "ended") return "ended";
-  if (status === "removed") return "unavailable";
-  return null;
-}
-
-function formatDeliveryType(type: string): string {
-  return type.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 function looksLikeDebugPayload(value?: string | null) {
@@ -112,34 +102,6 @@ function computePriceFairness(price: number, low: number, high: number): number 
   }
   const overpayRatio = (price - high) / high;
   return Math.max(0, Math.round(75 - Math.pow(overpayRatio, 0.65) * 90));
-}
-
-function getPriceBadge(price: number, priceLow: number, priceHigh: number): { label: string; color: string; bg: string } {
-  const mid = (priceLow + priceHigh) / 2;
-  if (price < priceLow * 0.5)  return { label: "RISKY PRICE", color: "#ef4444", bg: "rgba(239,68,68,0.08)" };
-  if (price < priceLow)        return { label: "GREAT PRICE", color: "#a855f7", bg: "rgba(168,85,247,0.08)" };
-  if (price <= mid)             return { label: "GOOD PRICE",  color: "#22c55e", bg: "rgba(34,197,94,0.08)" };
-  if (price <= priceHigh)       return { label: "FAIR PRICE",  color: "#facc15", bg: "rgba(250,204,21,0.08)" };
-  return                               { label: "HIGH PRICE",  color: "#ef4444", bg: "rgba(239,68,68,0.08)" };
-}
-
-function getPriceBadgeTitle(label: string): string {
-  switch (label) {
-    case "RISKY PRICE":
-      return "Far below the expected low price, which can be a risk signal.";
-    case "GREAT PRICE":
-      return "Under the expected low price, but still close enough to be reasonable.";
-    case "GOOD PRICE":
-      return "Below the middle of the expected market range.";
-    case "FAIR PRICE":
-      return "Within the expected market range, closer to the high side.";
-    case "HIGH PRICE":
-      return "Above the expected high price for similar listings.";
-    case "No price to analyze":
-      return "No fixed listing price is available to compare against the market range.";
-    default:
-      return "Based on how the listing price compares with the expected market range.";
-  }
 }
 
 const STAR_DATA = [
@@ -768,7 +730,7 @@ export default function ListingPage() {
 
             {unavailableLabel && (
               <div className="page-availability-alert">
-                This listing appears to be {unavailableLabel}. Any score shown is historical.
+                This listing appears to be {unavailableLabel.toLowerCase()}. Any score shown is historical.
               </div>
             )}
 

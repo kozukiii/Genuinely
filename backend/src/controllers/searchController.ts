@@ -6,6 +6,7 @@ import { searchMarketplaceNormalized } from "../services/marketplaceService";
 import { scoreListings } from "../services/scoring/scoreListing";
 import { fetchMarketContext } from "../ai/listingContext";
 import { getLocationFromIp, extractClientIp, getMarketplaceSearchLocation } from "../utils/geoIp";
+import { signListingForAnalysis } from "../services/listingAnalysisProof";
 
 function clampInt(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
@@ -147,7 +148,9 @@ export async function searchAll(req: Request, res: Response) {
     }
   }
 
-  const finalItems = merged.slice(0, limit);
+  const finalItems = merged
+    .slice(0, limit)
+    .map((listing) => signListingForAnalysis({ ...listing, analysisQuery: query }));
   res.setHeader(
     "X-Ebay-Search-Status",
     useEbay ? (ebayUnavailable ? "unavailable" : "ok") : "not-requested"
@@ -160,7 +163,7 @@ export async function searchAll(req: Request, res: Response) {
   if (analyze) {
     const context = await contextPromise;
     const analyzed = await scoreListings(finalItems, context);
-    return res.json(analyzed);
+    return res.json(analyzed.map(signListingForAnalysis));
   }
 
   return res.json(finalItems);

@@ -7,6 +7,8 @@ import { getMarketplaceListingByGraphqlForAnalysis } from "../services/marketpla
 import { getLocationFromIp, extractClientIp } from "../utils/geoIp";
 import { deleteCachedAnalysis, readCacheStore } from "../services/analysisCache";
 import { applyCachedAnalysis, applyCachedAnalysisFromStore } from "../services/cachedAnalysisResult";
+import { consumeAnalysisContext, issueAnalysisContext } from "../services/analysisContextStore";
+import { analysisListingKey, signListingForAnalysis, verifyListingForAnalysis } from "../services/listingAnalysisProof";
 import {
   isInactiveAvailability,
   refreshListingAvailability,
@@ -106,6 +108,22 @@ async function scoreSingleListingWithContext(listing: any) {
   };
 }
 
+async function resolveTrustedListingForAnalysis(listing: any) {
+  const verified = verifyListingForAnalysis(listing);
+  if (verified) return verified;
+
+  if (listing?.source === "ebay") {
+    const numericId = String(listing.id ?? "").match(/\d{8,}/)?.[0];
+    if (numericId) return getEbayItemByNumericId(numericId, null);
+  }
+
+  if (listing?.source === "marketplace" && listing.id) {
+    return getMarketplaceListingByGraphqlForAnalysis(String(listing.id));
+  }
+
+  throw new Error("Listing proof is invalid or expired");
+}
+
 // GET /api/search?query=...&limit=16
 router.get("/", searchAll);
 
@@ -141,22 +159,27 @@ router.post("/analyze", async (req, res) => {
   if (!listing || !listing.id || !listing.source) {
     return res.status(400).json({ error: "Missing listing id or source" });
   }
-  let listingForAnalysis = listing;
+  let listingForAnalysis: any;
+  try {
+    listingForAnalysis = await resolveTrustedListingForAnalysis(listing);
+  } catch (err: any) {
+    return res.status(400).json({ error: err?.message ?? "Could not verify listing" });
+  }
   if (_reanalyze) {
-    const checked = await refreshListingAvailability(listing, { force: true });
+    const checked = await refreshListingAvailability(listingForAnalysis, { force: true });
     if (isInactiveAvailability(checked.availabilityStatus)) {
-      return res.json({
+      return res.json(signListingForAnalysis({
         ...checked,
         analysisSkipped: true,
         analyzedAt: new Date().toISOString(),
-      });
+      }));
     }
     listingForAnalysis = checked;
-    deleteCachedAnalysis(listing.source, listing.id);
+    deleteCachedAnalysis(listingForAnalysis.source, listingForAnalysis.id);
   }
   try {
     const result = await scoreSingleListingWithContext(listingForAnalysis);
-    return res.json({ ...result, analyzedAt: new Date().toISOString() });
+    return res.json(signListingForAnalysis({ ...result, analyzedAt: new Date().toISOString() }));
   } catch (err: any) {
     console.error("analyze error:", err);
     const message = err?.message ?? err?.error?.message ?? String(err);
@@ -202,7 +225,7 @@ router.post("/from-url", async (req, res) => {
     }
 
     const analyzed = await scoreSingleListingWithContext(listing);
-    return res.json({ ...analyzed, analyzedAt: new Date().toISOString() });
+    return res.json(signListingForAnalysis({ ...analyzed, analyzedAt: new Date().toISOString() }));
   } catch (err: any) {
     console.error("from-url error:", err);
     const message = err?.message ?? "Failed to fetch listing";
@@ -218,13 +241,20 @@ router.post("/from-url", async (req, res) => {
 // grouping, then a "group" event for each product group as its context finishes.
 // This lets the client start scoring each group without waiting for all groups.
 router.post("/context", async (req, res) => {
-  const { query, listings } = req.body;
-  if (!query || typeof query !== "string") {
-    return res.status(400).json({ error: "Missing query" });
-  }
+  const { listings } = req.body;
   if (!Array.isArray(listings)) {
     return res.status(400).json({ error: "listings must be an array" });
   }
+
+  const verifiedListings = listings.map(verifyListingForAnalysis);
+  if (verifiedListings.some((listing: any) => !listing)) {
+    return res.status(400).json({ error: "One or more listings have an invalid or expired proof" });
+  }
+  const signedQueries = new Set(verifiedListings.map((listing: any) => listing!.analysisQuery));
+  if (signedQueries.size !== 1 || typeof verifiedListings[0]!.analysisQuery !== "string") {
+    return res.status(400).json({ error: "Signed listings do not share one search query" });
+  }
+  const trustedQuery = verifiedListings[0]!.analysisQuery;
 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
@@ -232,9 +262,28 @@ router.post("/context", async (req, res) => {
   res.flushHeaders();
 
   try {
-    const titles: string[] = listings.map((l: any) => (typeof l.title === "string" ? l.title : ""));
-    for await (const event of streamGroupsAndContextualize(titles, query)) {
-      res.write(`data: ${JSON.stringify(event)}\n\n`);
+    const titles: string[] = verifiedListings.map((l: any) => (typeof l.title === "string" ? l.title : ""));
+    for await (const event of streamGroupsAndContextualize(titles, trustedQuery)) {
+      if (event.kind === "group") {
+        const { systemPrompt, ...publicGroup } = event.group;
+        const listingKeys = event.group.indices
+          .map((index) => verifiedListings[index])
+          .filter((listing): listing is Record<string, any> => !!listing)
+          .map(analysisListingKey);
+        const contextToken = issueAnalysisContext({
+          systemPrompt,
+          priceLow: event.group.priceLow,
+          priceHigh: event.group.priceHigh,
+          priceSource: event.group.priceSource,
+          priceChartingUrl: event.group.priceChartingUrl,
+          tcgPlayerUrl: event.group.tcgPlayerUrl,
+          shippingEstimate: event.group.shippingEstimate,
+          listingKeys,
+        });
+        res.write(`data: ${JSON.stringify({ ...event, group: { ...publicGroup, contextToken } })}\n\n`);
+      } else {
+        res.write(`data: ${JSON.stringify(event)}\n\n`);
+      }
     }
   } catch (err: any) {
     console.error("context SSE error:", err);
@@ -264,17 +313,43 @@ router.post("/cache-lookup", async (req, res) => {
 });
 
 // POST /api/search/batch-analyze
-// Accepts { listings, systemPrompt } — scores a batch with a pre-generated product-expert prompt.
-// systemPrompt replaces the static system prompt for this group of listings.
+// Scores a batch with a short-lived, single-use product context generated by /context.
 router.post("/batch-analyze", async (req, res) => {
-  const { listings, systemPrompt, priceLow, priceHigh, priceSource, priceChartingUrl, tcgPlayerUrl } = req.body;
+  const { listings, contextToken } = req.body;
   if (!Array.isArray(listings)) {
     return res.status(400).json({ error: "listings must be an array" });
   }
+  if (typeof contextToken !== "string" || !contextToken) {
+    return res.status(400).json({ error: "contextToken is required" });
+  }
 
   try {
-    const enriched = await Promise.all(listings.map((l: any) => enrichMarketplaceListing(l)));
-    const scored = await scoreListings(enriched, null, systemPrompt ?? null, priceLow ?? null, priceHigh ?? null);
+    const verifiedListings = listings.map(verifyListingForAnalysis);
+    if (verifiedListings.some((listing: any) => !listing)) {
+      return res.status(400).json({ error: "One or more listings have an invalid or expired proof" });
+    }
+
+    const listingKeys = verifiedListings.map((listing: any) => analysisListingKey(listing!));
+    const trustedContext = consumeAnalysisContext(contextToken, listingKeys);
+    if (!trustedContext) {
+      return res.status(409).json({ error: "Analysis context is invalid, expired, or already used" });
+    }
+
+    const listingsWithShipping = trustedContext.shippingEstimate == null
+      ? verifiedListings
+      : verifiedListings.map((listing: any) =>
+          listing!.shippingPrice == null
+            ? { ...listing!, shippingPrice: trustedContext.shippingEstimate, shippingEstimated: true }
+            : listing
+        );
+    const enriched = await Promise.all(listingsWithShipping.map((listing: any) => enrichMarketplaceListing(listing)));
+    const systemPrompt = trustedContext.systemPrompt;
+    const priceLow = trustedContext.priceLow;
+    const priceHigh = trustedContext.priceHigh;
+    const priceSource = trustedContext.priceSource;
+    const priceChartingUrl = trustedContext.priceChartingUrl;
+    const tcgPlayerUrl = trustedContext.tcgPlayerUrl;
+    const scored = await scoreListings(enriched, null, systemPrompt, priceLow, priceHigh);
 
     // Attach price range to every item so the frontend doesn't have to patch it client-side.
     // Without this, priceLow/priceHigh only exist in the request and never reach the listing cards.
@@ -290,7 +365,7 @@ router.post("/batch-analyze", async (req, res) => {
       ? scored.map((item: any) => ({ ...item, ...pricePatch, ...metaPatch }))
       : (Object.keys(metaPatch).length > 0 ? scored.map((item: any) => ({ ...item, ...metaPatch })) : scored);
 
-    return res.json(result);
+    return res.json(result.map(signListingForAnalysis));
   } catch (err: any) {
     console.error("batch-analyze error:", err);
     return res.status(500).json({ error: err?.message ?? "Batch analysis failed" });

@@ -5,11 +5,8 @@ import { useEffect, useRef, useState } from "react";
 import type { Listing } from "../types/Listing";
 import { hasEbayCustomizableOptions } from "../utils/ebayVariations";
 import { getHighResImage, isDisplayableListingImage, PLACEHOLDER_IMAGE } from "../utils/imageHelpers";
+import { availabilityLabel, formatDeliveryType, getPriceBadge, getPriceBadgeTitle } from "../utils/listingPresentation";
 import { isSaved, refreshSavedListingsHealthCheck, toggleSaved } from "../utils/savedListings";
-
-function formatDeliveryType(type: string): string {
-  return type.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
-}
 
 function abbreviateCondition(condition: string): string {
   const c = condition.toLowerCase();
@@ -26,13 +23,6 @@ function abbreviateCondition(condition: string): string {
 function sourceLabel(source: Listing["source"]) {
   if (source === "marketplace") return "Marketplace";
   return "eBay";
-}
-
-function availabilityLabel(status?: Listing["availabilityStatus"]) {
-  if (status === "sold") return "Sold";
-  if (status === "ended") return "Ended";
-  if (status === "removed") return "Unavailable";
-  return null;
 }
 
 const STAR_DATA = [
@@ -119,34 +109,6 @@ function GoodStarSparkles() {
       ))}
     </>
   );
-}
-
-function getPriceBadge(price: number, priceLow: number, priceHigh: number) {
-  const mid = (priceLow + priceHigh) / 2;
-  if (price < priceLow * 0.5) return { label: "RISKY PRICE",  color: "#ef4444" };
-  if (price < priceLow)       return { label: "GREAT PRICE",  color: "#a855f7" };
-  if (price <= mid)           return { label: "GOOD PRICE",   color: "#22c55e" };
-  if (price <= priceHigh)     return { label: "FAIR PRICE",   color: "#facc15" };
-  return                             { label: "HIGH PRICE",   color: "#ef4444" };
-}
-
-function getPriceBadgeTitle(label: string): string {
-  switch (label) {
-    case "RISKY PRICE":
-      return "Far below the expected low price, which can be a risk signal.";
-    case "GREAT PRICE":
-      return "Under the expected low price, but still close enough to be reasonable.";
-    case "GOOD PRICE":
-      return "Below the middle of the expected market range.";
-    case "FAIR PRICE":
-      return "Within the expected market range, closer to the high side.";
-    case "HIGH PRICE":
-      return "Above the expected high price for similar listings.";
-    case "No price to analyze":
-      return "No fixed listing price is available to compare against the market range.";
-    default:
-      return "Based on how the listing price compares with the expected market range.";
-  }
 }
 
 export default function ListingCard({ data }: { data: Listing }) {

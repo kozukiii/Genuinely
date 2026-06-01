@@ -1,1 +1,1 @@
-export type PriceSource = "serper" | "pricecharting";
+export type PriceSource = "serper" | "pricecharting" | "stockx";

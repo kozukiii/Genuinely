@@ -108,6 +108,10 @@ export default function AdminPage() {
             <span className="admin-card-name">Serper Source Matching</span>
             <span className="admin-card-note">Find PriceCharting links via Serper search</span>
           </Link>
+          <Link to="/admin/stockx-debug" className="admin-card admin-card--link">
+            <span className="admin-card-name">StockX Debug</span>
+            <span className="admin-card-note">Match eBay sneaker listings to StockX ask/bid</span>
+          </Link>
         </div>
       </section>
 

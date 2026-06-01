@@ -1,10 +1,65 @@
+import crypto from "crypto";
 import { Router } from "express";
 import { requireAuth, requireAdmin } from "../middleware/auth";
 import { fetchPriceChartingData, findPriceChartingMatch, scrapePriceChartingUrl } from "../priceSources/priceCharting";
+import { findStockXMatch } from "../priceSources/stockx";
+import {
+  STOCKX_AUTHORIZE_URL,
+  STOCKX_AUDIENCE,
+  STOCKX_SCOPE,
+  exchangeAuthCode,
+  isStockXConnected,
+} from "../services/stockxToken";
 import { getUsageSummary } from "../services/usageLogger";
 import { searchEbayNormalized } from "../services/ebayService";
 
 const router = Router();
+
+// ─── StockX OAuth callback (UNAUTHENTICATED, state-protected) ───────────────
+//
+// Registered BEFORE the admin auth middleware below, because the StockX redirect
+// is a cross-domain top-level navigation (e.g. through an HTTPS tunnel) that
+// won't carry our localhost auth cookie. Instead we protect it with a one-time
+// `state` token minted by the admin-only /stockx/auth-url route — standard OAuth
+// CSRF protection. Without a matching unexpired state, the callback is rejected.
+const stockxPendingStates = new Map<string, number>(); // state -> expiry (unix ms)
+const STOCKX_STATE_TTL_MS = 10 * 60 * 1000;
+
+function rememberStockxState(state: string) {
+  const now = Date.now();
+  for (const [s, exp] of stockxPendingStates) if (exp < now) stockxPendingStates.delete(s);
+  stockxPendingStates.set(state, now + STOCKX_STATE_TTL_MS);
+}
+
+function consumeStockxState(state: string): boolean {
+  const exp = stockxPendingStates.get(state);
+  if (exp === undefined) return false;
+  stockxPendingStates.delete(state);
+  return exp >= Date.now();
+}
+
+function stockxRedirectUriFor(req: import("express").Request): string {
+  if (process.env.STOCKX_REDIRECT_URI) return process.env.STOCKX_REDIRECT_URI;
+  return `${req.protocol}://${req.get("host")}/api/internal/stockx/oauth/callback`;
+}
+
+// Step 2 of the handshake: StockX redirects the browser here with ?code=&state=.
+router.get("/stockx/oauth/callback", async (req, res) => {
+  const code = typeof req.query.code === "string" ? req.query.code : "";
+  const state = typeof req.query.state === "string" ? req.query.state : "";
+  const oauthError = typeof req.query.error === "string" ? req.query.error : "";
+  if (oauthError) return res.status(400).send(`StockX OAuth error: ${oauthError}`);
+  if (!code) return res.status(400).send("Missing authorization code");
+  if (!consumeStockxState(state)) return res.status(403).send("Invalid or expired OAuth state");
+
+  try {
+    await exchangeAuthCode(code, stockxRedirectUriFor(req));
+    res.redirect(`${process.env.FRONTEND_URL ?? ""}/admin/stockx-debug?connected=1`);
+  } catch (err: any) {
+    console.error("[stockx] oauth callback error:", err?.message);
+    res.status(500).send(`StockX token exchange failed: ${err?.message ?? "unknown error"}`);
+  }
+});
 
 router.use(requireAuth, requireAdmin);
 
@@ -296,6 +351,52 @@ router.get("/serper/source-match", async (req, res) => {
     debugLines.push(`Error: ${message}`);
     console.error("[serper-source-match] error:", message);
     return res.status(500).json({ error: message, debugLines });
+  }
+});
+
+// ─── StockX ─────────────────────────────────────────────────────────────────
+// (The state-protected OAuth callback is registered near the top of this file,
+// before the admin auth middleware, since the StockX redirect can't carry our
+// auth cookie cross-domain.)
+
+router.get("/stockx/status", (_req, res) => {
+  res.json({ connected: isStockXConnected() });
+});
+
+// Step 1 of the one-time handshake: build the StockX authorize URL to send the
+// admin's browser to. Records a one-time `state` the callback will verify.
+router.get("/stockx/auth-url", (req, res) => {
+  const clientId = process.env.STOCKX_CLIENT_ID;
+  if (!clientId) return res.status(500).json({ error: "STOCKX_CLIENT_ID not configured" });
+
+  const state = crypto.randomUUID();
+  rememberStockxState(state);
+
+  const params = new URLSearchParams({
+    response_type: "code",
+    client_id: clientId,
+    redirect_uri: stockxRedirectUriFor(req),
+    scope: STOCKX_SCOPE,
+    audience: STOCKX_AUDIENCE,
+    state,
+  });
+  res.json({ url: `${STOCKX_AUTHORIZE_URL}?${params}` });
+});
+
+router.get("/stockx/match-title", async (req, res) => {
+  const title = typeof req.query.title === "string" ? req.query.title.trim() : "";
+  if (!title) return res.status(400).json({ error: "Missing title parameter" });
+
+  try {
+    console.log(`[stockx-debug] match-title title="${title}"`);
+    const result = await findStockXMatch(title);
+    console.log(`[stockx-debug] result found=${result.found} ask=${result.lowestAsk} bid=${result.highestBid}`);
+    result.debugLines?.forEach((line) => console.log(`[stockx-debug] ${line}`));
+    return res.json(result);
+  } catch (err: any) {
+    const message = err?.message ?? "Match failed";
+    console.error("[stockx-debug] match-title error:", message);
+    return res.status(500).json({ error: message, debugLines: [message] });
   }
 });
 

@@ -53,6 +53,18 @@ export default function StockXDebugPage() {
     else setError(data.error ?? "Failed to build StockX auth URL");
   }
 
+  async function disconnectStockX() {
+    try {
+      await fetch(`${API_BASE}/api/internal/stockx/disconnect`, {
+        method: "POST",
+        credentials: "include",
+      });
+      setConnected(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to disconnect StockX");
+    }
+  }
+
   async function runMatch(row: TitleRow) {
     setMatch(row.id, { status: "loading" });
     try {
@@ -133,6 +145,11 @@ export default function StockXDebugPage() {
           {connected === false && (
             <button className="admin-primary-button" type="button" onClick={connectStockX}>
               Connect StockX
+            </button>
+          )}
+          {connected === true && (
+            <button className="admin-primary-button" type="button" onClick={disconnectStockX}>
+              Sign out of StockX
             </button>
           )}
         </div>

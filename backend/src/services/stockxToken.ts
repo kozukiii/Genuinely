@@ -84,6 +84,23 @@ export function isStockXConnected(): boolean {
   return !!currentRefreshToken();
 }
 
+/**
+ * Forget the stored StockX tokens so the next lookup requires a fresh
+ * handshake. Clears both the in-memory cache and the persisted file. Note this
+ * only clears OUR side — it does not end the StockX browser session, so to
+ * switch accounts the user should also be re-prompted to log in (see the
+ * prompt=login param on the authorize URL).
+ */
+export function disconnectStockX(): void {
+  inMemory = null;
+  refreshPromise = null;
+  try {
+    if (fs.existsSync(CACHE_PATH)) fs.unlinkSync(CACHE_PATH);
+  } catch {
+    /* best-effort */
+  }
+}
+
 type TokenResponse = {
   access_token: string;
   refresh_token?: string;

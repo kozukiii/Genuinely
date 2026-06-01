@@ -9,6 +9,7 @@ import {
   STOCKX_SCOPE,
   exchangeAuthCode,
   isStockXConnected,
+  disconnectStockX,
 } from "../services/stockxToken";
 import { getUsageSummary } from "../services/usageLogger";
 import { searchEbayNormalized } from "../services/ebayService";
@@ -363,6 +364,12 @@ router.get("/stockx/status", (_req, res) => {
   res.json({ connected: isStockXConnected() });
 });
 
+// Forget our stored tokens so the next connect requires a fresh handshake.
+router.post("/stockx/disconnect", (_req, res) => {
+  disconnectStockX();
+  res.json({ connected: false });
+});
+
 // Step 1 of the one-time handshake: build the StockX authorize URL to send the
 // admin's browser to. Records a one-time `state` the callback will verify.
 router.get("/stockx/auth-url", (req, res) => {
@@ -379,6 +386,9 @@ router.get("/stockx/auth-url", (req, res) => {
     scope: STOCKX_SCOPE,
     audience: STOCKX_AUDIENCE,
     state,
+    // Force StockX to re-prompt for login instead of silently reusing the
+    // current browser session — lets the admin switch to a different account.
+    prompt: "login",
   });
   res.json({ url: `${STOCKX_AUTHORIZE_URL}?${params}` });
 });

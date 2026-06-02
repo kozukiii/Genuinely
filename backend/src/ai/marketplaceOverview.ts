@@ -3,6 +3,12 @@ import dotenv from "dotenv";
 import fetch from "node-fetch";
 import { logUsage } from "../services/usageLogger";
 import { extractBatchObjects } from "../utils/extractBatchObjects";
+import { stitchDataUrls, gridLayoutNote, type StitchResult } from "./stitchImages";
+
+export interface VisionBatchOpts {
+  /** When true, each listing's photos are stitched into a single grid image (1 image/listing). */
+  stitch?: boolean;
+}
 
 const MARKETPLACE_SCORE_KEYS = new Set([
   "priceFairness",
@@ -593,7 +599,7 @@ OUTPUT FORMAT — return ONLY this JSON object:
 }
 `.trim();
 
-async function _runMarketplaceBatch(listings: any[], allDataUrls: string[][], context?: string | null, systemPrompt?: string | null): Promise<string[]> {
+async function _runMarketplaceBatch(listings: any[], allDataUrls: string[][], context?: string | null, systemPrompt?: string | null, layouts?: (StitchResult | null)[]): Promise<string[]> {
   const contentParts: any[] = [];
 
   for (let i = 0; i < listings.length; i++) {
@@ -606,6 +612,7 @@ async function _runMarketplaceBatch(listings: any[], allDataUrls: string[][], co
     const availability = formatAvailability(listing);
     const batchDescription = clean(listing.fullDescription ?? listing.description);
     const dataUrls = allDataUrls[i];
+    const layout = layouts?.[i] ?? null;
     const batchPriceText = formatPriceForPrompt(listing.price, currency);
 
     contentParts.push({ type: "text", text: `=== LISTING ${i + 1} ===` });
@@ -616,12 +623,19 @@ async function _runMarketplaceBatch(listings: any[], allDataUrls: string[][], co
     contentParts.push({ type: "text", text: `Availability: ${availability}` });
     contentParts.push({ type: "text", text: `Listing URL: ${link}` });
     if (batchDescription) contentParts.push({ type: "text", text: `Description: ${batchDescription}` });
-    contentParts.push({ type: "text", text: `Images Attached: ${dataUrls.length}` });
 
-    if (dataUrls.length) {
-      contentParts.push({ type: "text", text: `[Images for Listing ${i + 1}]` });
-      for (const dataUrl of dataUrls) {
-        contentParts.push({ type: "image_url", image_url: { url: dataUrl } });
+    if (layout) {
+      // Stitched mode: a single composite image holds all of this listing's photos
+      contentParts.push({ type: "text", text: `Photos: ${layout.cellCount} (combined into the grid image below)` });
+      contentParts.push({ type: "text", text: `[Image grid for Listing ${i + 1}] ${gridLayoutNote(layout.cols, layout.rows, layout.cellCount)}` });
+      if (dataUrls[0]) contentParts.push({ type: "image_url", image_url: { url: dataUrls[0] } });
+    } else {
+      contentParts.push({ type: "text", text: `Images Attached: ${dataUrls.length}` });
+      if (dataUrls.length) {
+        contentParts.push({ type: "text", text: `[Images for Listing ${i + 1}]` });
+        for (const dataUrl of dataUrls) {
+          contentParts.push({ type: "image_url", image_url: { url: dataUrl } });
+        }
       }
     }
 
@@ -697,14 +711,30 @@ async function _runMarketplaceBatch(listings: any[], allDataUrls: string[][], co
   }
 }
 
-export async function batchAnalyzeMarketplaceListingsWithImages(listings: any[], context?: string | null, systemPrompt?: string | null): Promise<string[]> {
+export async function batchAnalyzeMarketplaceListingsWithImages(listings: any[], context?: string | null, systemPrompt?: string | null, opts?: VisionBatchOpts): Promise<string[]> {
   if (listings.length === 0) return [];
 
-  // Fetch all images for every listing in parallel, capped at the model's hard limit
+  const stitch = opts?.stitch === true;
+
+  // Fetch all images for every listing in parallel, capped at the model's hard limit.
+  // In stitch mode we fetch the raw photos then collapse them into a single grid image,
+  // so each listing contributes exactly one image block to the bin-packer.
+  const layouts = new Array<StitchResult | null>(listings.length).fill(null);
   const allDataUrls = await Promise.all(
-    listings.map(async (listing) => {
+    listings.map(async (listing, i) => {
       const imageUrls = getMarketplaceImageUrls(listing);
       const dataUrls = await fetchMarketplaceImageDataUrls(imageUrls, MODEL_IMAGE_LIMIT);
+
+      if (stitch && dataUrls.length > 0) {
+        const grid = await stitchDataUrls(dataUrls);
+        if (grid) {
+          layouts[i] = grid;
+          listing.__visionImageStats = { provided: imageUrls.length, attached: grid.cellCount, stitched: true };
+          console.warn(`[marketplace:visionImages] id=${listing.id ?? "unknown"} provided=${imageUrls.length} stitched=${grid.cellCount} (${grid.cols}x${grid.rows})`);
+          return [grid.dataUrl];
+        }
+      }
+
       listing.__visionImageStats = { provided: imageUrls.length, attached: dataUrls.length };
       console.warn(`[marketplace:visionImages] id=${listing.id ?? "unknown"} provided=${imageUrls.length} attached=${dataUrls.length}`);
       return dataUrls;
@@ -734,7 +764,8 @@ export async function batchAnalyzeMarketplaceListingsWithImages(listings: any[],
   for (const indices of batches) {
     const batchListings = indices.map((i) => listings[i]);
     const batchDataUrls = indices.map((i) => allDataUrls[i]);
-    const batchResults = await _runMarketplaceBatch(batchListings, batchDataUrls, context, systemPrompt);
+    const batchLayouts = indices.map((i) => layouts[i]);
+    const batchResults = await _runMarketplaceBatch(batchListings, batchDataUrls, context, systemPrompt, batchLayouts);
     indices.forEach((origIdx, batchIdx) => { results[origIdx] = batchResults[batchIdx]; });
   }
 

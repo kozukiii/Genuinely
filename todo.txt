@@ -1,0 +1,20 @@
+StockX integration — follow-ups
+================================
+
+[ ] Add payment info (billing + shipping) for a StockX account.
+    - The market-data endpoint 400s with "Please setup valid billing and
+      shipping information on www.stockx.com" until the connected account is
+      complete. Search + variants work without it; pricing (ask/bid) does not.
+    - Either complete billing/shipping on the current account, or use the
+      "Sign out of StockX" button + reconnect with a billing-complete account
+      (prompt=login forces the account picker).
+
+[ ] Decide if StockX's built-in fuzzy /catalog/search is good enough, or if we
+    need a Serper-style matching layer like we built for PriceCharting.
+    - Right now findStockXMatch() just takes the first product from
+      /catalog/search?query=<title>. Test how well that matches messy eBay/FB
+      sneaker titles (colorways, nicknames, "DS", size noise, etc.).
+    - If accuracy is poor, mirror the PriceCharting approach: use Serper to find
+      the canonical stockx.com/<urlKey> link, then resolve productId from the
+      urlKey. See backend/src/routes/internalRoutes.ts /serper/source-match and
+      frontend/src/pages/SerperSourceMatchDemoPage.tsx for the pattern.

@@ -12,7 +12,11 @@ import {
   disconnectStockX,
 } from "../services/stockxToken";
 import { getUsageSummary } from "../services/usageLogger";
-import { searchEbayNormalized } from "../services/ebayService";
+import { searchEbayNormalized, getEbayItemByNumericId } from "../services/ebayService";
+import { getMarketplaceListingByGraphqlForAnalysis } from "../services/marketplaceService";
+import { batchAnalyzeListingsWithImages } from "../ai/ebayOverview";
+import { batchAnalyzeMarketplaceListingsWithImages } from "../ai/marketplaceOverview";
+import { extractStructuredAnalysis, validateAnalysis } from "../utils/extractStructuredAnalysis";
 
 const router = Router();
 
@@ -196,6 +200,109 @@ router.get("/usage", async (_req, res) => {
   const groq = fetchGroqUsage();
 
   res.json({ providers: [serper, groq, proxycheap] });
+});
+
+// ─── Grid-stitch A/B comparison (admin debug) ───────────────────────────────
+//
+// Rugged side-by-side harness for the image-grid-stitching experiment. Fetches
+// the given listings, scores them BOTH ways (per-image vs. one stitched grid per
+// listing) using identical prompts/context, and returns both score sets so we can
+// eyeball whether stitching degrades the detail-sensitive scores (conditionHonesty).
+
+const EBAY_KEYS = new Set(["priceFairness", "conditionHonesty", "shippingFairness", "descriptionQuality"]);
+const MP_KEYS = new Set(["priceFairness", "sellerTrust", "conditionHonesty", "shippingFairness", "descriptionQuality"]);
+
+function parseScores(raw: string, keys: Set<string>) {
+  const extracted = extractStructuredAnalysis(raw);
+  const validated = extracted ? validateAnalysis(extracted, keys) : null;
+  return {
+    scores: validated?.scores ?? null,
+    overview: validated?.overview ?? "",
+    highlights: validated?.highlights ?? [],
+  };
+}
+
+// POST { source: "ebay"|"marketplace", ids: string[] }
+// Scores every listing twice (stitch off / stitch on) with no product context,
+// so the only variable is the image packing strategy.
+// Accept a bare numeric id OR a pasted eBay/Marketplace listing URL.
+function extractListingId(raw: string, source: "ebay" | "marketplace"): string | null {
+  const ebayMatch = raw.match(/ebay\.com\/itm\/(?:[^/?#]+\/)?(\d{8,})/);
+  if (ebayMatch) return ebayMatch[1];
+  const mpMatch = raw.match(/facebook\.com\/marketplace\/item\/(\d+)/);
+  if (mpMatch) return mpMatch[1];
+  const bare = raw.match(/^\d{6,}$/) ? raw : raw.match(/(\d{6,})/)?.[1];
+  return bare ?? null;
+}
+
+router.post("/grid-compare/run", async (req, res) => {
+  const source = req.body?.source === "marketplace" ? "marketplace" : "ebay";
+  const ids: string[] = Array.isArray(req.body?.ids)
+    ? req.body.ids
+        .map((x: any) => extractListingId(String(x).trim(), source))
+        .filter((x: string | null): x is string => !!x)
+    : [];
+
+  if (ids.length === 0) return res.status(400).json({ error: "ids must be a non-empty array (numeric IDs or listing URLs)" });
+  if (ids.length > 10) return res.status(400).json({ error: "max 10 listings per run" });
+
+  try {
+    // Fetch each listing
+    const fetched = await Promise.all(
+      ids.map(async (id) => {
+        try {
+          const listing = source === "ebay"
+            ? await getEbayItemByNumericId(id)
+            : await getMarketplaceListingByGraphqlForAnalysis(id);
+          return { id, listing };
+        } catch (err: any) {
+          return { id, listing: null, error: err?.message ?? "fetch failed" };
+        }
+      })
+    );
+
+    const listings = fetched.filter((f) => f.listing).map((f) => f.listing);
+    if (listings.length === 0) {
+      return res.status(502).json({ error: "no listings could be fetched", fetched });
+    }
+
+    const keys = source === "ebay" ? EBAY_KEYS : MP_KEYS;
+    const runBatch = source === "ebay"
+      ? batchAnalyzeListingsWithImages
+      : batchAnalyzeMarketplaceListingsWithImages;
+
+    // Fresh clones per run so __visionImageStats from one run can't leak into the other
+    const clone = (arr: any[]) => arr.map((l) => structuredClone(l));
+
+    const perImageInput = clone(listings);
+    const t0 = Date.now();
+    const perImageRaw = await runBatch(perImageInput, null, null, { stitch: false });
+    const perImageMs = Date.now() - t0;
+
+    const stitchedInput = clone(listings);
+    const t1 = Date.now();
+    const stitchedRaw = await runBatch(stitchedInput, null, null, { stitch: true });
+    const stitchedMs = Date.now() - t1;
+
+    const results = listings.map((listing: any, i: number) => ({
+      id: ids[fetched.findIndex((f) => f.listing === listing)] ?? listing.id ?? null,
+      title: listing.title ?? null,
+      url: listing.link ?? listing.url ?? null,
+      imageUrls: (Array.isArray(listing.imageUrls) ? listing.imageUrls : listing.images ?? []).slice(0, 8),
+      perImage: { ...parseScores(perImageRaw[i] ?? "{}", keys), stats: perImageInput[i]?.__visionImageStats ?? null },
+      stitched: { ...parseScores(stitchedRaw[i] ?? "{}", keys), stats: stitchedInput[i]?.__visionImageStats ?? null },
+    }));
+
+    return res.json({
+      source,
+      timing: { perImageMs, stitchedMs },
+      fetchErrors: fetched.filter((f) => !f.listing),
+      results,
+    });
+  } catch (err: any) {
+    console.error("[grid-compare] error:", err);
+    return res.status(500).json({ error: err?.message ?? "compare failed" });
+  }
 });
 
 router.get("/ebay/sold-prices", async (req, res) => {

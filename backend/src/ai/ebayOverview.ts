@@ -3,6 +3,12 @@ import dotenv from "dotenv";
 import { calculatePriceFairness } from "../services/scoring/priceFairnessScore";
 import { extractBatchObjects } from "../utils/extractBatchObjects";
 import { validateAnalysis, EMPTY_ANALYSIS } from "../utils/extractStructuredAnalysis";
+import { stitchBuffers, gridLayoutNote, type StitchResult } from "./stitchImages";
+
+export interface VisionBatchOpts {
+  /** When true, each listing's photos are stitched into a single grid image (1 image/listing). */
+  stitch?: boolean;
+}
 
 const EBAY_SCORE_KEYS = new Set([
   "priceFairness",
@@ -418,7 +424,9 @@ OUTPUT FORMAT — return ONLY this JSON object:
 
 const MAX_IMAGES_PER_BATCH = 5;
 
-type BatchEntry = { listing: any; imageCount: number };
+// In stitch mode a listing's photos are collapsed into a single composite image,
+// so each listing costs exactly 1 image block regardless of how many photos it has.
+type BatchEntry = { listing: any; imageCount: number; stitched?: StitchResult | null };
 
 function getListingImageUrls(listing: any): string[] {
   return (
@@ -430,28 +438,51 @@ function getListingImageUrls(listing: any): string[] {
   ).filter((u: any) => typeof u === "string" && u.trim());
 }
 
-function buildImageAwareBatches(listings: any[]): BatchEntry[][] {
+async function fetchImageBuffer(url: string): Promise<Buffer | null> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8_000);
+    const res = await fetch(url, { signal: controller.signal as any });
+    clearTimeout(timer);
+    if (!res.ok) return null;
+    const ct = res.headers.get("content-type") || "";
+    if (ct && !ct.toLowerCase().startsWith("image/")) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    return buf.length > 0 ? buf : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Fetch + stitch a listing's photos into one grid image. Returns null if nothing decodes. */
+async function stitchListing(listing: any): Promise<StitchResult | null> {
+  const urls = getListingImageUrls(listing).slice(0, MAX_IMAGES_PER_BATCH);
+  if (urls.length === 0) return null;
+  const buffers = (await Promise.all(urls.map(fetchImageBuffer))).filter((b): b is Buffer => b !== null);
+  if (buffers.length === 0) return null;
+  return stitchBuffers(buffers);
+}
+
+function buildImageAwareBatches(entries: BatchEntry[]): BatchEntry[][] {
   const batches: BatchEntry[][] = [];
   let current: BatchEntry[] = [];
   let currentTotal = 0;
 
-  for (const listing of listings) {
-    const available = getListingImageUrls(listing).length;
-    // Cap any single listing at MAX_IMAGES_PER_BATCH
-    const imgCount = Math.min(available, MAX_IMAGES_PER_BATCH);
+  for (const entry of entries) {
+    const imgCount = entry.imageCount;
 
     if (imgCount === 0) {
       // No images — always fits, just append
-      current.push({ listing, imageCount: 0 });
+      current.push(entry);
       continue;
     }
 
     if (currentTotal + imgCount <= MAX_IMAGES_PER_BATCH) {
-      current.push({ listing, imageCount: imgCount });
+      current.push(entry);
       currentTotal += imgCount;
     } else {
       if (current.length > 0) batches.push(current);
-      current = [{ listing, imageCount: imgCount }];
+      current = [entry];
       currentTotal = imgCount;
     }
   }
@@ -479,6 +510,7 @@ async function _runEbayBatch(entries: BatchEntry[], context?: string | null, sys
     const shortDesc = clean(listing.shortDescription) ?? "";
     const rawDesc = listing.description || listing.fullDescription || "";
     const description = clean(stripHtml(rawDesc)) ?? "";
+    const stitched = entries[i].stitched ?? null;
     const imageUrls = getListingImageUrls(listing).slice(0, imageCount);
 
     const isVariation = isVariationListing(listing);
@@ -499,13 +531,16 @@ async function _runEbayBatch(entries: BatchEntry[], context?: string | null, sys
     contentParts.push({ type: "text", text: `Short Description: ${shortDesc}` });
     contentParts.push({ type: "text", text: `Description: ${description}` });
     contentParts.push({ type: "text", text: `Listing URL: ${link}` });
-    contentParts.push({ type: "text", text: `Images Provided: ${imageUrls.length}` });
+    contentParts.push({ type: "text", text: `Images Provided: ${stitched ? stitched.cellCount : imageUrls.length}` });
     contentParts.push({ type: "text", text: `Suggested Price Fairness: ${isVariation ? "N/A — variation listing" : (suggestedPriceFairness ?? "N/A")}` });
     if (isVariation) {
       contentParts.push({ type: "text", text: `IMPORTANT: Variation listing — do NOT include priceFairness in this listing's scores. Omit the key. Score only: conditionHonesty, shippingFairness, descriptionQuality.` });
     }
 
-    if (imageUrls.length > 0) {
+    if (stitched) {
+      contentParts.push({ type: "text", text: `[Image grid for Listing ${i + 1}] ${gridLayoutNote(stitched.cols, stitched.rows, stitched.cellCount)}` });
+      contentParts.push({ type: "image_url", image_url: { url: stitched.dataUrl } });
+    } else if (imageUrls.length > 0) {
       contentParts.push({ type: "text", text: `[Images for Listing ${i + 1}]` });
       for (const url of imageUrls) {
         contentParts.push({ type: "image_url", image_url: { url } });
@@ -583,10 +618,32 @@ async function _runEbayBatch(entries: BatchEntry[], context?: string | null, sys
   }
 }
 
-export async function batchAnalyzeListingsWithImages(listings: any[], context?: string | null, systemPrompt?: string | null): Promise<string[]> {
+export async function batchAnalyzeListingsWithImages(listings: any[], context?: string | null, systemPrompt?: string | null, opts?: VisionBatchOpts): Promise<string[]> {
   if (listings.length === 0) return [];
 
-  const batches = buildImageAwareBatches(listings);
+  const stitch = opts?.stitch === true;
+
+  // Build a batch entry per listing. In stitch mode we fetch + collapse each
+  // listing's photos into one grid image up front, so it costs a single image block.
+  const entries: BatchEntry[] = await Promise.all(
+    listings.map(async (listing): Promise<BatchEntry> => {
+      const available = getListingImageUrls(listing).length;
+      if (stitch) {
+        const grid = await stitchListing(listing);
+        if (grid) {
+          listing.__visionImageStats = { provided: available, attached: grid.cellCount, stitched: true };
+          console.warn(`[ebay:visionImages] id=${listing.id ?? "unknown"} stitched=${grid.cellCount} (${grid.cols}x${grid.rows})`);
+          return { listing, imageCount: 1, stitched: grid };
+        }
+        // Stitch failed (no decodable images) — fall through to URL mode
+      }
+      const attached = Math.min(available, MAX_IMAGES_PER_BATCH);
+      listing.__visionImageStats = { provided: available, attached, stitched: false };
+      return { listing, imageCount: attached };
+    })
+  );
+
+  const batches = buildImageAwareBatches(entries);
   const results: string[] = [];
   for (const batch of batches) {
     const batchResults = await _runEbayBatch(batch, context, systemPrompt);

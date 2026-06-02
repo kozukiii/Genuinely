@@ -18,6 +18,7 @@ import EbaySoldPricesPage from "./pages/EbaySoldPricesPage";
 import PriceChartingDebugPage from "./pages/PriceChartingDebugPage";
 import SerperSourceMatchDemoPage from "./pages/SerperSourceMatchDemoPage";
 import StockXDebugPage from "./pages/StockXDebugPage";
+import GridStitchDebugPage from "./pages/GridStitchDebugPage";
 
 import "./pages/styles/HomePage.css";
 
@@ -65,6 +66,7 @@ function AppRoutes() {
       <Route path="/admin/pricecharting-debug" element={<PriceChartingDebugPage />} />
       <Route path="/admin/serper-source-match" element={<SerperSourceMatchDemoPage />} />
       <Route path="/admin/stockx-debug" element={<StockXDebugPage />} />
+      <Route path="/admin/grid-stitch" element={<GridStitchDebugPage />} />
     </Routes>
   );
 }

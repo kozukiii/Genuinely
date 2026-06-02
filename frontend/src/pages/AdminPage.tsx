@@ -112,6 +112,10 @@ export default function AdminPage() {
             <span className="admin-card-name">StockX Debug</span>
             <span className="admin-card-note">Match eBay sneaker listings to StockX ask/bid</span>
           </Link>
+          <Link to="/admin/grid-stitch" className="admin-card admin-card--link">
+            <span className="admin-card-name">Grid Stitch A/B</span>
+            <span className="admin-card-note">Per-image vs. stitched-grid vision scoring side by side</span>
+          </Link>
         </div>
       </section>
 

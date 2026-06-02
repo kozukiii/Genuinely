@@ -150,7 +150,7 @@ export async function scoreMarketplaceListings(listings: any[], context?: string
   if (listings.length === 0) return [];
 
   const resultMap = new Map<number, any>();
-  const rawStrings = await batchAnalyzeMarketplaceListingsWithImages(listings, context, systemPrompt);
+  const rawStrings = await batchAnalyzeMarketplaceListingsWithImages(listings, context, systemPrompt, { stitch: true });
   const toCache: Parameters<typeof setCachedAnalysisBatch>[0] = [];
 
   for (let i = 0; i < listings.length; i++) {

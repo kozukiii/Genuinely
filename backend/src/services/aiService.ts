@@ -154,7 +154,7 @@ export async function analyzeItemsWithAI(items: any[], context?: string | null, 
   for (let start = 0; start < analyzeIndices.length; start += BATCH_SIZE) {
     const batchIndices = analyzeIndices.slice(start, start + BATCH_SIZE);
     const chunk = batchIndices.map((i) => items[i]);
-    const rawStrings = await batchAnalyzeListingsWithImages(chunk, context, systemPrompt);
+    const rawStrings = await batchAnalyzeListingsWithImages(chunk, context, systemPrompt, { stitch: true });
 
     const toCache: Parameters<typeof setCachedAnalysisBatch>[0] = [];
 

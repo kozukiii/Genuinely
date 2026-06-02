@@ -982,6 +982,12 @@ async function fetchMarketplaceListingByContainerQuery(listingId: string): Promi
         return null;
       }
 
+      // The media query carries the full photo gallery; the container only has
+      // the primary thumbnail. Anything other than a 200 with a populated media
+      // payload means we'd build a "successful" listing with just 1 image. A
+      // real listing always returns media on a 200, so a non-200 OR an empty
+      // media payload both mean we got throttled — evict the proxy and retry the
+      // whole fetch on a fresh one rather than silently returning a partial.
       let media: any = null;
       if (mediaRes.status === 200) {
         const mediaJson = await parseJsonWithTimeout<any>(
@@ -994,8 +1000,13 @@ async function fetchMarketplaceListingByContainerQuery(listingId: string): Promi
           throw new Error("Marketplace rate limit exceeded");
         }
         media = mediaJson?.data?.viewer?.marketplace_product_details_page ?? null;
-      } else {
-        console.warn(`[marketplace:mediaQuery] HTTP ${mediaRes.status} for listing ${listingId}`);
+      }
+
+      if (!media) {
+        console.warn(`[marketplace:mediaQuery] no media for listing ${listingId} (HTTP ${mediaRes.status}) — treating as throttle, will reroute`);
+        markProxyRateLimited(getResponseProxyUrl(mediaRes));
+        if (attempt < 1) continue;
+        // Out of retries: return the degraded listing rather than dropping it entirely.
       }
 
       return { details, media };

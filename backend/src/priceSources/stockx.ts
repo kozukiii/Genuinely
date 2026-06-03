@@ -55,12 +55,15 @@ type StockXVariant = {
   sizeChart?: { displayOptions?: { size?: string; type?: string }[] };
 };
 
+// StockX returns these amounts as either numbers or numeric strings depending
+// on the endpoint/version, so the raw shape is number | string. Use toNumber().
+type StockXAmount = number | string | null;
 type StockXMarketData = {
-  lowestAskAmount?: number | null;
-  highestBidAmount?: number | null;
-  flexLowestAskAmount?: number | null;
-  sellFasterAmount?: number | null;
-  earnMoreAmount?: number | null;
+  lowestAskAmount?: StockXAmount;
+  highestBidAmount?: StockXAmount;
+  flexLowestAskAmount?: StockXAmount;
+  sellFasterAmount?: StockXAmount;
+  earnMoreAmount?: StockXAmount;
   currencyCode?: string;
 };
 
@@ -87,6 +90,13 @@ export function extractSize(title: string): string | null {
     }
   }
   return null;
+}
+
+/** Coerce a StockX amount (number | string | null | undefined) to number|null. */
+function toNumber(v: unknown): number | null {
+  if (v == null) return null;
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) ? n : null;
 }
 
 function normalizeSize(raw: string): string {
@@ -176,8 +186,10 @@ export async function findStockXMatch(rawTitle: string): Promise<StockXMatchResu
   const market = await sxFetch<StockXMarketData>(
     `/catalog/products/${product.productId}/variants/${chosen.variantId}/market-data?${new URLSearchParams({ currencyCode: "USD" })}`
   );
-  const lowestAsk = market.lowestAskAmount ?? null;
-  const highestBid = market.highestBidAmount ?? null;
+  // StockX returns these amounts as strings in some responses; coerce to a
+  // real number (or null) so downstream scoring/formatting can rely on it.
+  const lowestAsk = toNumber(market.lowestAskAmount);
+  const highestBid = toNumber(market.highestBidAmount);
   debugLines.push(`Size ${usedSize ?? "?"} — lowest ask: ${lowestAsk ?? "n/a"}, highest bid: ${highestBid ?? "n/a"}`);
 
   return {

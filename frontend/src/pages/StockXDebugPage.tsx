@@ -239,7 +239,12 @@ function MatchCell({ match }: { match: MatchState | undefined }) {
   }
 
   const sizeMismatch = match.detectedSize && match.size && match.detectedSize !== match.size;
-  const fmt = (n: number | null) => (n != null ? `$${n.toFixed(2)}` : "—");
+  // StockX sometimes returns amounts as strings, so coerce before formatting
+  // (a bare n.toFixed() throws and blanks the page when n is a string).
+  const fmt = (n: number | null) => {
+    const num = typeof n === "number" ? n : Number(n);
+    return n != null && Number.isFinite(num) ? `$${num.toFixed(2)}` : "—";
+  };
 
   return (
     <span className="admin-debug-found">

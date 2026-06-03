@@ -157,7 +157,12 @@ export async function findStockXMatch(rawTitle: string): Promise<StockXMatchResu
     return { ...empty, detectedSize };
   }
 
-  const productUrl = product.urlKey ? `${STOCKX_PRODUCT_BASE}/${product.urlKey}` : null;
+  // Prefer the direct product page (urlKey), but the catalog search response
+  // doesn't always include it — fall back to a StockX search by style ID, then
+  // by title, so the UI always has a usable link.
+  const productUrl = product.urlKey
+    ? `${STOCKX_PRODUCT_BASE}/${product.urlKey}`
+    : `${STOCKX_PRODUCT_BASE}/search?s=${encodeURIComponent(product.styleId ?? product.title ?? cleanTitle)}`;
   debugLines.push(`Matched product: ${product.title ?? product.productId} (${product.styleId ?? "no style"})`);
 
   // 2) Variants

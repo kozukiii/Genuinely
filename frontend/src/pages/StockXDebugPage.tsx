@@ -249,9 +249,11 @@ function MatchCell({ match }: { match: MatchState | undefined }) {
   return (
     <span className="admin-debug-found">
       {match.productUrl ? (
-        <a className="admin-debug-check" href={match.productUrl} target="_blank" rel="noreferrer">✓</a>
+        <a className="admin-debug-check" href={match.productUrl} target="_blank" rel="noreferrer">
+          ✓ {match.productTitle ?? "View on StockX"}
+        </a>
       ) : (
-        <span className="admin-debug-check">✓</span>
+        <span className="admin-debug-check">✓ {match.productTitle}</span>
       )}
       <span className="admin-debug-grade">
         {match.size != null && `Size ${match.size}`}

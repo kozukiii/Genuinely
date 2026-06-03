@@ -493,9 +493,11 @@ router.get("/stockx/auth-url", (req, res) => {
     scope: STOCKX_SCOPE,
     audience: STOCKX_AUDIENCE,
     state,
-    // Force StockX to re-prompt for login instead of silently reusing the
-    // current browser session — lets the admin switch to a different account.
-    prompt: "login",
+    // NOTE: do NOT send prompt=login here. StockX's OAuth (Auth0) tenant
+    // rejects the unsupported param with a generic
+    // `error=server_error&error_description=Internal error` redirect before
+    // issuing a code. To switch accounts, sign out at stockx.com / use a
+    // separate browser session instead.
   });
   res.json({ url: `${STOCKX_AUTHORIZE_URL}?${params}` });
 });

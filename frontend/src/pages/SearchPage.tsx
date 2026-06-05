@@ -244,9 +244,10 @@ async function runAnalysisPipeline(
     shippingEstimate?: number | null;
   };
 
+  let groupsDone = 0;
   let groupsTotal = 0;
   const coveredIndices = new Set<number>();
-  const collectedGroups: Group[] = [];
+  const scoringPromises: Promise<void>[] = [];
 
   // Apply freshly-scored listings: persist to sessionStorage (survives unmount),
   // notify any open ListingPage, and update React state. Price range/source are
@@ -306,8 +307,47 @@ async function runAnalysisPipeline(
     });
   }
 
-  // Stream context: COLLECT every group (don't score yet) so the whole search can
-  // be scored in a single combined batch instead of one batch job per group.
+  async function scoreGroup(group: Group): Promise<void> {
+    const groupListings = group.indices.map((i) => itemsToAnalyze[i]).filter(Boolean);
+
+    if (groupListings.length === 0) {
+      groupsDone++;
+      onStatus?.({ phase: "scoring", groupsDone, groupsTotal });
+      return;
+    }
+
+    try {
+      const stabilized = group.contextToken
+        ? await (async () => {
+            const res = await fetch(`${API_BASE}/api/search/batch-analyze`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                listings: groupListings,
+                contextToken: group.contextToken,
+              }),
+              signal,
+            });
+            if (!res.ok) throw new Error(`batch-analyze HTTP ${res.status}`);
+            return retryUnscoredListings(await res.json() as Listing[]);
+          })()
+        : await retryUnscoredListings(groupListings);
+
+      if (signal.aborted) return;
+      applyScoredListings(stabilized);
+      groupsDone++;
+      onStatus?.({ phase: "scoring", groupsDone, groupsTotal });
+    } catch (err: unknown) {
+      if ((err as { name?: string })?.name === "AbortError") return;
+      console.error(`[analysis] batch-analyze failed for group "${group.canonicalName}":`, err);
+      groupsDone++;
+      onStatus?.({ phase: "scoring", groupsDone, groupsTotal });
+      applyScoringFailure(groupListings);
+    }
+  }
+
+  // Stream context and score each group as soon as it is ready. The backend
+  // /batch-analyze route still uses Groq Batch API for each submitted group.
   try {
     const ctxRes = await fetch(`${API_BASE}/api/search/context`, {
       method: "POST",
@@ -334,10 +374,10 @@ async function runAnalysisPipeline(
           const event = JSON.parse(trimmed.slice(6));
           if (event.kind === "meta") {
             groupsTotal = event.total;
-            onStatus?.({ phase: "scoring", groupsDone: 0, groupsTotal });
+            onStatus?.({ phase: "scoring", groupsDone, groupsTotal });
           } else if (event.kind === "group") {
             (event.group.indices as number[]).forEach((i) => coveredIndices.add(i));
-            collectedGroups.push(event.group);
+            scoringPromises.push(scoreGroup(event.group));
           }
         } catch { /* skip malformed SSE line */ }
       }
@@ -345,10 +385,11 @@ async function runAnalysisPipeline(
   } catch (err: unknown) {
     if ((err as { name?: string })?.name === "AbortError") return;
     console.error("[analysis] context stream failed:", err);
-    // Fallback: one no-context group covering everything.
-    collectedGroups.length = 0;
+    // Fallback: score everything as one no-context group.
     coveredIndices.clear();
-    collectedGroups.push({ canonicalName: query, specificity: "broad", indices: itemsToAnalyze.map((_, i) => i), context: null });
+    groupsTotal = 1;
+    onStatus?.({ phase: "scoring", groupsDone: 0, groupsTotal });
+    scoringPromises.push(scoreGroup({ canonicalName: query, specificity: "broad", indices: itemsToAnalyze.map((_, i) => i), context: null }));
   }
 
   if (signal.aborted) return;
@@ -356,48 +397,12 @@ async function runAnalysisPipeline(
   // Any indices the LLM didn't assign to a group — score with no context.
   const orphanIndices = itemsToAnalyze.map((_, i) => i).filter((i) => !coveredIndices.has(i));
   if (orphanIndices.length > 0) {
-    collectedGroups.push({ canonicalName: "", specificity: "broad", indices: orphanIndices, context: null });
+    groupsTotal++;
+    onStatus?.({ phase: "scoring", groupsDone, groupsTotal });
+    scoringPromises.push(scoreGroup({ canonicalName: "", specificity: "broad", indices: orphanIndices, context: null }));
   }
 
-  // One combined request: each group carries its listings + its contextToken.
-  const reqGroups = collectedGroups
-    .map((g) => ({ contextToken: g.contextToken, listings: g.indices.map((i) => itemsToAnalyze[i]).filter(Boolean) }))
-    .filter((g) => g.listings.length > 0);
-  const allGroupListings = reqGroups.flatMap((g) => g.listings) as Listing[];
-
-  if (reqGroups.length === 0) {
-    onStatus?.({ phase: "done", listingsScored: items.length });
-    return;
-  }
-
-  try {
-    const res = await fetch(`${API_BASE}/api/search/batch-analyze-all`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ groups: reqGroups }),
-      signal,
-    });
-    if (!res.ok) throw new Error(`batch-analyze-all HTTP ${res.status}`);
-    const data = await res.json() as { listings: Listing[] };
-    if (signal.aborted) return;
-
-    // Repair any listing the batch left unscored via per-listing /analyze.
-    const stabilized = await retryUnscoredListings(data.listings ?? []);
-    if (signal.aborted) return;
-    applyScoredListings(stabilized);
-  } catch (err: unknown) {
-    if ((err as { name?: string })?.name === "AbortError") return;
-    console.error("[analysis] combined batch-analyze-all failed — repairing per-listing:", err);
-    // Last-resort fallback: score each listing individually via /analyze.
-    try {
-      const recovered = await retryUnscoredListings(allGroupListings);
-      if (signal.aborted) return;
-      applyScoredListings(recovered.filter((l) => l.aiScore != null));
-      applyScoringFailure(recovered.filter((l) => l.aiScore == null));
-    } catch {
-      applyScoringFailure(allGroupListings);
-    }
-  }
+  await Promise.all(scoringPromises);
 
   onStatus?.({ phase: "done", listingsScored: items.length });
 }

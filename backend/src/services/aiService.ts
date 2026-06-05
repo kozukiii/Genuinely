@@ -217,3 +217,44 @@ export async function analyzeItemsWithAI(items: any[], context?: string | null, 
     return { ...result, aiScores: updatedScores, aiScore: updatedAiScore };
   });
 }
+
+/**
+ * Score a single eBay item from a pre-fetched raw analysis string. Used by the
+ * combined cross-group batch path, where every listing's raw output comes back
+ * from ONE batch job and is parsed here with its own group's context. Mirrors
+ * the parse + cache + deterministic priceFairness override of analyzeItemsWithAI.
+ */
+export function scoreEbayItemFromRaw(
+  item: any,
+  raw: string,
+  context?: string | null,
+  systemPrompt?: string | null,
+  priceLow?: number | null,
+  priceHigh?: number | null,
+): any {
+  const parsed = parseAIAnalysis(item, raw ?? "{}");
+  const base = { ...item, ...parsed, systemPrompt: systemPrompt ?? EBAY_BATCH_SYSTEM_PROMPT };
+
+  if (item.id && item.source) {
+    setCachedAnalysis(item.source, item.id, {
+      aiScore: parsed.aiScore, aiScores: parsed.aiScores, overview: parsed.overview, highlights: parsed.highlights,
+    });
+  }
+
+  const itemIdStr = String(item.id ?? item.itemId ?? "");
+  const itemIsVariation = !!item.itemGroupId || /^v1\|\d+\|[1-9]\d*$/.test(itemIdStr);
+  if (itemIsVariation) return base;
+
+  const fairness = calculatePriceFairness(item.price, context, priceLow, priceHigh);
+  if (fairness === null || !base.aiScores) return base;
+  const updatedScores = { ...base.aiScores, priceFairness: fairness };
+  const updatedAiScore = average([
+    updatedScores.priceFairness,
+    updatedScores.sellerTrust,
+    updatedScores.conditionHonesty,
+    updatedScores.shippingFairness,
+    updatedScores.locationRisk,
+    updatedScores.descriptionQuality,
+  ]);
+  return { ...base, aiScores: updatedScores, aiScore: updatedAiScore };
+}

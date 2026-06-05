@@ -147,6 +147,30 @@ function parseMarketplaceAnalysis(listing: any, analysis: string, context?: stri
   };
 }
 
+/**
+ * Score a single Marketplace listing from a pre-fetched raw analysis string.
+ * Used by the combined cross-group batch path; mirrors scoreMarketplaceListings'
+ * per-item parse + cache.
+ */
+export function scoreMarketplaceListingFromRaw(
+  listing: any,
+  raw: string,
+  context?: string | null,
+  systemPrompt?: string | null,
+  priceLow?: number | null,
+  priceHigh?: number | null,
+): any {
+  const parsed = parseMarketplaceAnalysis(listing, raw ?? "{}", context, priceLow, priceHigh);
+  const result = { ...parsed, systemPrompt: systemPrompt ?? MARKETPLACE_BATCH_SYSTEM_PROMPT };
+
+  if (listing.id && listing.source) {
+    setCachedAnalysis(listing.source, listing.id, {
+      aiScore: result.aiScore, aiScores: result.aiScores, overview: result.overview, highlights: result.highlights,
+    });
+  }
+  return result;
+}
+
 export async function scoreMarketplaceListings(listings: any[], context?: string | null, systemPrompt?: string | null, priceLow?: number | null, priceHigh?: number | null) {
   if (listings.length === 0) return [];
 

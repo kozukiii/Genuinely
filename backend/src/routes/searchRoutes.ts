@@ -5,6 +5,7 @@ import { groupAndContextualize, streamGroupsAndContextualize } from "../ai/listi
 import { getEbayItemByNumericId } from "../services/ebayService";
 import { getMarketplaceListingByGraphqlForAnalysis } from "../services/marketplaceService";
 import { getLocationFromIp, extractClientIp } from "../utils/geoIp";
+import { scoreGroupsInOneBatch, type ScoringGroup } from "../services/scoring/scoreGroupsBatch";
 import { deleteCachedAnalysis, readCacheStore } from "../services/analysisCache";
 import { applyCachedAnalysis, applyCachedAnalysisFromStore } from "../services/cachedAnalysisResult";
 import { consumeAnalysisContext, issueAnalysisContext } from "../services/analysisContextStore";
@@ -184,6 +185,91 @@ router.post("/analyze", async (req, res) => {
     console.error("analyze error:", err);
     const message = err?.message ?? err?.error?.message ?? String(err);
     return res.status(500).json({ error: message });
+  }
+});
+
+// POST /api/search/batch-analyze-all
+// Scores EVERY product group of a search in a single Groq batch job. The client
+// gathers all groups (with their per-group contextTokens) from /context, then
+// makes this one call instead of one /batch-analyze per group — collapsing N
+// serialized batch lifecycles into one. Returns a flat array of scored listings;
+// the client matches them back by id/source.
+router.post("/batch-analyze-all", async (req, res) => {
+  const groups = Array.isArray(req.body?.groups) ? req.body.groups : null;
+  if (!groups) return res.status(400).json({ error: "groups must be an array" });
+
+  try {
+    const scoringGroups: ScoringGroup[] = [];
+    const groupMeta: Array<{ count: number; priceLow?: number | null; priceHigh?: number | null; priceSource?: string | null; priceChartingUrl?: string | null; tcgPlayerUrl?: string | null }> = [];
+
+    for (const group of groups) {
+      const listings = Array.isArray(group?.listings) ? group.listings : [];
+      if (listings.length === 0) continue;
+
+      const verified = listings.map(verifyListingForAnalysis);
+      if (verified.some((l: any) => !l)) {
+        return res.status(400).json({ error: "One or more listings have an invalid or expired proof" });
+      }
+
+      // Consume this group's single-use context token. If it's missing/expired,
+      // degrade that group to no-context scoring rather than failing the whole call.
+      let trusted: ReturnType<typeof consumeAnalysisContext> = null;
+      if (typeof group.contextToken === "string" && group.contextToken) {
+        const listingKeys = verified.map((l: any) => analysisListingKey(l));
+        trusted = consumeAnalysisContext(group.contextToken, listingKeys);
+        if (!trusted) console.warn("[batch-analyze-all] context token invalid/expired — scoring group without context");
+      }
+
+      const withShipping = trusted?.shippingEstimate == null
+        ? verified
+        : verified.map((l: any) =>
+            l.shippingPrice == null
+              ? { ...l, shippingPrice: trusted!.shippingEstimate, shippingEstimated: true }
+              : l
+          );
+      const enriched = await Promise.all(withShipping.map((l: any) => enrichMarketplaceListing(l)));
+
+      scoringGroups.push({
+        listings: enriched,
+        context: null,
+        systemPrompt: trusted?.systemPrompt ?? null,
+        priceLow: trusted?.priceLow ?? null,
+        priceHigh: trusted?.priceHigh ?? null,
+      });
+      groupMeta.push({
+        count: enriched.length,
+        priceLow: trusted?.priceLow,
+        priceHigh: trusted?.priceHigh,
+        priceSource: trusted?.priceSource,
+        priceChartingUrl: trusted?.priceChartingUrl,
+        tcgPlayerUrl: trusted?.tcgPlayerUrl,
+      });
+    }
+
+    const scored = await scoreGroupsInOneBatch(scoringGroups);
+
+    // Re-attach each group's price range + source to its listings, then sign.
+    const out: any[] = [];
+    let cursor = 0;
+    for (const meta of groupMeta) {
+      const slice = scored.slice(cursor, cursor + meta.count);
+      cursor += meta.count;
+
+      const pricePatch: Record<string, number> = {};
+      if (meta.priceLow  != null) pricePatch.priceLow  = meta.priceLow;
+      if (meta.priceHigh != null) pricePatch.priceHigh = meta.priceHigh;
+      const metaPatch = {
+        ...(meta.priceSource     ? { priceSource: meta.priceSource }         : {}),
+        ...(meta.priceChartingUrl ? { priceChartingUrl: meta.priceChartingUrl } : {}),
+        ...(meta.tcgPlayerUrl    ? { tcgPlayerUrl: meta.tcgPlayerUrl }        : {}),
+      };
+      for (const item of slice) out.push(signListingForAnalysis({ ...item, ...pricePatch, ...metaPatch }));
+    }
+
+    return res.json({ listings: out });
+  } catch (err: any) {
+    console.error("batch-analyze-all error:", err);
+    return res.status(500).json({ error: err?.message ?? "Combined batch analysis failed" });
   }
 });
 

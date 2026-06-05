@@ -244,122 +244,70 @@ async function runAnalysisPipeline(
     shippingEstimate?: number | null;
   };
 
-  let groupsDone = 0;
   let groupsTotal = 0;
   const coveredIndices = new Set<number>();
-  const scoringPromises: Promise<void>[] = [];
+  const collectedGroups: Group[] = [];
 
-  async function scoreGroup(group: Group): Promise<void> {
-    const groupListings = group.indices.map((i) => itemsToAnalyze[i]).filter(Boolean);
-
-    if (groupListings.length === 0) {
-      groupsDone++;
-      onStatus?.({ phase: "scoring", groupsDone, groupsTotal });
-      return;
-    }
-
+  // Apply freshly-scored listings: persist to sessionStorage (survives unmount),
+  // notify any open ListingPage, and update React state. Price range/source are
+  // already attached server-side by /batch-analyze-all.
+  function applyScoredListings(stabilized: Listing[]) {
     try {
-      const stabilized = group.contextToken
-        ? await (async () => {
-            const res = await fetch(`${API_BASE}/api/search/batch-analyze`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                listings: groupListings,
-                contextToken: group.contextToken,
-              }),
-              signal,
-            });
-            if (!res.ok) throw new Error(`batch-analyze HTTP ${res.status}`);
-            return retryUnscoredListings(await res.json() as Listing[]);
-          })()
-        : await retryUnscoredListings(groupListings);
-
-      if (signal.aborted) return;
-
-      // Attach price range and source from the context group onto every scored listing
-      const priceRange: Partial<Listing> = {};
-      if (group.priceLow         != null) priceRange.priceLow         = group.priceLow;
-      if (group.priceHigh        != null) priceRange.priceHigh        = group.priceHigh;
-      if (group.priceSource      != null) priceRange.priceSource      = group.priceSource;
-      if (group.priceChartingUrl != null) priceRange.priceChartingUrl = group.priceChartingUrl;
-      if (group.tcgPlayerUrl     != null) priceRange.tcgPlayerUrl     = group.tcgPlayerUrl;
-
-      // Persist to sessionStorage directly — this runs even if SearchPage is
-      // unmounted (e.g. user navigated to a listing while analysis was running).
-      try {
-        const raw = sessionStorage.getItem(SEARCH_LISTINGS_KEY);
-        if (raw) {
-          const stored: Listing[] = JSON.parse(raw);
-          if (Array.isArray(stored)) {
-            for (const s of stabilized) {
-              const idx = stored.findIndex((l) => l.id === s.id && l.source === s.source);
-              if (idx !== -1) stored[idx] = {
-                ...stripQueryCategoryDebugInfo({ ...s, ...priceRange } as Listing),
-                analysisPending: undefined,
-              };
-            }
-            sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(stored));
+      const raw = sessionStorage.getItem(SEARCH_LISTINGS_KEY);
+      if (raw) {
+        const stored: Listing[] = JSON.parse(raw);
+        if (Array.isArray(stored)) {
+          for (const s of stabilized) {
+            const idx = stored.findIndex((l) => l.id === s.id && l.source === s.source);
+            if (idx !== -1) stored[idx] = { ...stripQueryCategoryDebugInfo(s as Listing), analysisPending: undefined };
           }
+          sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(stored));
         }
-      } catch { /* ignore sessionStorage errors */ }
+      }
+    } catch { /* ignore sessionStorage errors */ }
 
-      // Notify any ListingPage currently viewing one of these listings
+    for (const s of stabilized) publishAnalysisResult(s as Listing);
+
+    setListings((prev) => {
+      const updated = [...prev];
       for (const s of stabilized) {
-        publishAnalysisResult({ ...s, ...priceRange } as Listing);
+        const idx = updated.findIndex((l) => l.id === s.id && l.source === s.source);
+        if (idx !== -1) updated[idx] = { ...s, analysisPending: false };
       }
-
-      // Update React state — no-op if SearchPage is unmounted, but that's OK
-      // since sessionStorage is already updated above.
-      setListings((prev) => {
-        const updated = [...prev];
-        for (const s of stabilized) {
-          const idx = updated.findIndex((l) => l.id === s.id && l.source === s.source);
-          if (idx !== -1) updated[idx] = { ...s, ...priceRange, analysisPending: false };
-        }
-        return updated;
-      });
-      groupsDone++;
-      onStatus?.({ phase: "scoring", groupsDone, groupsTotal });
-    } catch (err: unknown) {
-      if ((err as { name?: string })?.name === "AbortError") return;
-      console.error(`[analysis] batch-analyze failed for group "${group.canonicalName}":`, err);
-      groupsDone++;
-      onStatus?.({ phase: "scoring", groupsDone, groupsTotal });
-
-      // Clear pending in sessionStorage directly (same reason as above)
-      try {
-        const raw = sessionStorage.getItem(SEARCH_LISTINGS_KEY);
-        if (raw) {
-          const stored: Listing[] = JSON.parse(raw);
-          if (Array.isArray(stored)) {
-            for (const l of groupListings) {
-              const idx = stored.findIndex((u) => u.id === l.id && u.source === l.source);
-              if (idx !== -1) stored[idx] = { ...stored[idx], analysisPending: undefined };
-            }
-            sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(stored));
-          }
-        }
-      } catch { /* ignore sessionStorage errors */ }
-
-      // Let any subscribed ListingPage know the analysis failed
-      for (const l of groupListings) {
-        publishAnalysisFailure(l);
-      }
-
-      // Update React state
-      setListings((prev) => {
-        const updated = [...prev];
-        for (const l of groupListings) {
-          const idx = updated.findIndex((u) => u.id === l.id && u.source === l.source);
-          if (idx !== -1) updated[idx] = { ...updated[idx], analysisPending: false };
-        }
-        return updated;
-      });
-    }
+      return updated;
+    });
   }
 
-  // Stream context: fire scoreGroup for each group as soon as its context arrives
+  // Clear the pending flag for listings whose scoring failed outright.
+  function applyScoringFailure(failed: Listing[]) {
+    try {
+      const raw = sessionStorage.getItem(SEARCH_LISTINGS_KEY);
+      if (raw) {
+        const stored: Listing[] = JSON.parse(raw);
+        if (Array.isArray(stored)) {
+          for (const l of failed) {
+            const idx = stored.findIndex((u) => u.id === l.id && u.source === l.source);
+            if (idx !== -1) stored[idx] = { ...stored[idx], analysisPending: undefined };
+          }
+          sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(stored));
+        }
+      }
+    } catch { /* ignore sessionStorage errors */ }
+
+    for (const l of failed) publishAnalysisFailure(l);
+
+    setListings((prev) => {
+      const updated = [...prev];
+      for (const l of failed) {
+        const idx = updated.findIndex((u) => u.id === l.id && u.source === l.source);
+        if (idx !== -1) updated[idx] = { ...updated[idx], analysisPending: false };
+      }
+      return updated;
+    });
+  }
+
+  // Stream context: COLLECT every group (don't score yet) so the whole search can
+  // be scored in a single combined batch instead of one batch job per group.
   try {
     const ctxRes = await fetch(`${API_BASE}/api/search/context`, {
       method: "POST",
@@ -386,10 +334,10 @@ async function runAnalysisPipeline(
           const event = JSON.parse(trimmed.slice(6));
           if (event.kind === "meta") {
             groupsTotal = event.total;
-            onStatus?.({ phase: "scoring", groupsDone, groupsTotal });
+            onStatus?.({ phase: "scoring", groupsDone: 0, groupsTotal });
           } else if (event.kind === "group") {
             (event.group.indices as number[]).forEach((i) => coveredIndices.add(i));
-            scoringPromises.push(scoreGroup(event.group));
+            collectedGroups.push(event.group);
           }
         } catch { /* skip malformed SSE line */ }
       }
@@ -397,26 +345,59 @@ async function runAnalysisPipeline(
   } catch (err: unknown) {
     if ((err as { name?: string })?.name === "AbortError") return;
     console.error("[analysis] context stream failed:", err);
-    // Fallback: score everything as one no-context group
-    groupsTotal = 1;
-    onStatus?.({ phase: "scoring", groupsDone: 0, groupsTotal: 1 });
-    scoringPromises.push(scoreGroup({
-      canonicalName: query,
-      specificity: "broad",
-      indices: itemsToAnalyze.map((_, i) => i),
-      context: null,
-    }));
+    // Fallback: one no-context group covering everything.
+    collectedGroups.length = 0;
+    coveredIndices.clear();
+    collectedGroups.push({ canonicalName: query, specificity: "broad", indices: itemsToAnalyze.map((_, i) => i), context: null });
   }
 
-  // Any indices the LLM didn't assign to a group — score with no context
+  if (signal.aborted) return;
+
+  // Any indices the LLM didn't assign to a group — score with no context.
   const orphanIndices = itemsToAnalyze.map((_, i) => i).filter((i) => !coveredIndices.has(i));
   if (orphanIndices.length > 0) {
-    groupsTotal++;
-    onStatus?.({ phase: "scoring", groupsDone, groupsTotal });
-    scoringPromises.push(scoreGroup({ canonicalName: "", specificity: "broad", indices: orphanIndices, context: null }));
+    collectedGroups.push({ canonicalName: "", specificity: "broad", indices: orphanIndices, context: null });
   }
 
-  await Promise.all(scoringPromises);
+  // One combined request: each group carries its listings + its contextToken.
+  const reqGroups = collectedGroups
+    .map((g) => ({ contextToken: g.contextToken, listings: g.indices.map((i) => itemsToAnalyze[i]).filter(Boolean) }))
+    .filter((g) => g.listings.length > 0);
+  const allGroupListings = reqGroups.flatMap((g) => g.listings) as Listing[];
+
+  if (reqGroups.length === 0) {
+    onStatus?.({ phase: "done", listingsScored: items.length });
+    return;
+  }
+
+  try {
+    const res = await fetch(`${API_BASE}/api/search/batch-analyze-all`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ groups: reqGroups }),
+      signal,
+    });
+    if (!res.ok) throw new Error(`batch-analyze-all HTTP ${res.status}`);
+    const data = await res.json() as { listings: Listing[] };
+    if (signal.aborted) return;
+
+    // Repair any listing the batch left unscored via per-listing /analyze.
+    const stabilized = await retryUnscoredListings(data.listings ?? []);
+    if (signal.aborted) return;
+    applyScoredListings(stabilized);
+  } catch (err: unknown) {
+    if ((err as { name?: string })?.name === "AbortError") return;
+    console.error("[analysis] combined batch-analyze-all failed — repairing per-listing:", err);
+    // Last-resort fallback: score each listing individually via /analyze.
+    try {
+      const recovered = await retryUnscoredListings(allGroupListings);
+      if (signal.aborted) return;
+      applyScoredListings(recovered.filter((l) => l.aiScore != null));
+      applyScoringFailure(recovered.filter((l) => l.aiScore == null));
+    } catch {
+      applyScoringFailure(allGroupListings);
+    }
+  }
 
   onStatus?.({ phase: "done", listingsScored: items.length });
 }

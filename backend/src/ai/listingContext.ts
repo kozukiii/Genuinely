@@ -455,6 +455,27 @@ function parseEngineeredOutput(raw: string): { systemPrompt: string | null; pric
   return { systemPrompt, priceLow, priceHigh };
 }
 
+function buildTradingCardSystemPrompt(canonicalName: string, priceLow: number | null, priceHigh: number | null, priceSource: string | null): string {
+  const priceLabel = priceLow != null && priceHigh != null
+    ? (priceLow === priceHigh ? `$${priceLow.toFixed(2)}` : `$${priceLow.toFixed(2)}-$${priceHigh.toFixed(2)}`)
+    : "the verified market range provided with this request";
+  const sourceLabel = priceSource ?? "PriceCharting/TCGPlayer";
+
+  return `
+You are an expert evaluating secondhand marketplace listings for: ${canonicalName}.
+
+AUTHORITATIVE PRICE DATA: The verified market price for this card is ${priceLabel} (source: ${sourceLabel}). Use this as the sole basis for priceFairness scoring when a price range is present.
+
+Before assigning any scores, describe exactly what you see in the images regarding this card's physical condition. Check corners, edges, surface, holo area, centering, bends, creases, whitening, scratches, print lines, ink marks, and whether the photos are clear enough to verify condition.
+
+PRICE FAIRNESS: at or below the low end is strong, near the middle is fair, and above the high end should be penalized based on condition and extras. If the price is below 50% of the low end, set priceFairness to 0 because extreme underpricing is a risk signal, not a deal.
+CONDITION HONESTY: compare seller claims against visible card condition. Any visible whitening, scratching, bend, crease, dent, or surface issue under a "new", "mint", "near mint", or equivalent claim should cap conditionHonesty at 50 or below. Blurry, distant, sleeved-only, or angled photos that hide surfaces should be penalized.
+DESCRIPTION QUALITY: reward exact set name, card number, rarity, language, edition, condition details, disclosed flaws, and whether the card is raw or graded. Penalize vague titles, missing set/card identifiers, and condition claims without evidence.
+SELLER TRUST: consider feedback, account signals, listing consistency, realistic pricing, and whether the seller provides enough photos to authenticate the card.
+SHIPPING FAIRNESS: raw cards should ship protected in sleeve/toploader/cardboard or equivalent; expensive or graded cards should have tracked secure packaging. Penalize high shipping that is not justified by protection or tracking.
+`.trim();
+}
+
 async function engineerPrompt(
   canonicalName: string,
   marketData: string,
@@ -654,6 +675,24 @@ async function processOneGroup(
       priceChartingUrl,
       tcgPlayerUrl,
       shippingEstimate: isPriceCharting ? 4 : null,
+    };
+  }
+
+  if (isPriceCharting) {
+    const systemPrompt = buildTradingCardSystemPrompt(group.canonicalName, priceLow, priceHigh, priceSource);
+    console.log(`[group] "${group.canonicalName}" deterministic trading-card context priceLow=${priceLow} priceHigh=${priceHigh} priceSource=${priceSource}`);
+    return {
+      canonicalName: group.canonicalName,
+      specificity: "specific",
+      indices: group.indices,
+      systemPrompt,
+      priceLow,
+      priceHigh,
+      source: group.source,
+      priceSource,
+      priceChartingUrl,
+      tcgPlayerUrl,
+      shippingEstimate: 4,
     };
   }
 

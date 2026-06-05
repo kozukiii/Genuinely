@@ -4,7 +4,7 @@ import type { Listing } from "../types/listing";
 import { searchEbayNormalized } from "./ebayService";
 import { searchMarketplaceListings } from "./marketplaceService";
 import { scoreListings } from "./scoring/scoreListing";
-import { fetchMarketContext } from "../ai/listingContext";
+import { groupAndContextualize } from "../ai/listingContext";
 
 const CACHE_PATH = path.join(process.env.DATA_DIR ?? path.join(process.cwd(), "data"), "featured.json");
 const TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -71,8 +71,42 @@ async function buildFeatured(): Promise<FeaturedCache> {
     .then(() => console.log("[init] Marketplace initialized"))
     .catch(() => console.log("[init] Marketplace initialization failed"));
 
-  const context = await fetchMarketContext(shuffled.join(", ")).catch(() => null);
-  const scored = await scoreListings(raw, context);
+  // Run the same per-product analysis framework the search path uses: group the
+  // listings by exact product, do market research per group (Serper / PriceCharting),
+  // then score each group with its own expert system prompt and price range. This is
+  // what produces the price-range chart — the legacy flat-context path did not.
+  const titles = raw.map((l) => (typeof l.title === "string" ? l.title : ""));
+  const groups = await groupAndContextualize(titles, shuffled.join(", ")).catch(() => []);
+
+  const scoredGroups = await Promise.all(
+    groups.map(async (group) => {
+      const groupListings = group.indices
+        .map((index) => raw[index])
+        .filter((l): l is Listing => !!l);
+      if (groupListings.length === 0) return [] as Listing[];
+
+      const scored = await scoreListings(
+        groupListings,
+        null,
+        group.systemPrompt ?? null,
+        group.priceLow ?? null,
+        group.priceHigh ?? null,
+      );
+
+      // Attach the group's price range / source so the frontend can render the chart,
+      // mirroring what /batch-analyze does for the search path.
+      return scored.map((listing: any) => ({
+        ...listing,
+        ...(group.priceLow != null ? { priceLow: group.priceLow } : {}),
+        ...(group.priceHigh != null ? { priceHigh: group.priceHigh } : {}),
+        ...(group.priceSource ? { priceSource: group.priceSource } : {}),
+        ...(group.priceChartingUrl ? { priceChartingUrl: group.priceChartingUrl } : {}),
+        ...(group.tcgPlayerUrl ? { tcgPlayerUrl: group.tcgPlayerUrl } : {}),
+      }));
+    })
+  );
+
+  const scored = scoredGroups.flat();
 
   // Only keep listings that actually got a score
   const withScores = scored.filter((l) => l.aiScore != null);

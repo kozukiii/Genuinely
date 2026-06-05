@@ -15,6 +15,7 @@ import { getUsageSummary } from "../services/usageLogger";
 import { searchEbayNormalized, getEbayItemByNumericId } from "../services/ebayService";
 import { getMarketplaceListingByGraphqlForAnalysis } from "../services/marketplaceService";
 import { batchAnalyzeListingsWithImages } from "../ai/ebayOverview";
+import { submitEbayBatch, getEbayBatchStatus } from "../ai/ebayBatchApi";
 import { batchAnalyzeMarketplaceListingsWithImages } from "../ai/marketplaceOverview";
 import { extractStructuredAnalysis, validateAnalysis } from "../utils/extractStructuredAnalysis";
 
@@ -302,6 +303,116 @@ router.post("/grid-compare/run", async (req, res) => {
   } catch (err: any) {
     console.error("[grid-compare] error:", err);
     return res.status(500).json({ error: err?.message ?? "compare failed" });
+  }
+});
+
+// ─── eBay Batch API test harness (admin debug) ──────────────────────────────
+//
+// A/B comparison of the synchronous analysis route vs. Groq's async Batch API.
+// To make the comparison a TRUE click→populated-UI measurement, the search runs
+// ONCE up front (shared prep, excluded from the timers), then the client fires
+// /sync-analyze and /batch-submit IN PARALLEL from a single t0 and times each
+// column to when it actually renders. Neither path gates the other.
+
+// runId -> the fetched listings, so both parallel calls score the SAME listings.
+const ebayRunListings = new Map<string, { query: string; listings: any[]; createdAt: number }>();
+// batchId -> batch run state for status polling.
+const ebayBatchMeta = new Map<string, { query: string; submittedAt: number; completedAt: number | null }>();
+
+// Evict run/batch entries older than this so the admin maps don't grow unbounded.
+const EBAY_RUN_TTL_MS = 60 * 60 * 1000;
+function pruneEbayRuns() {
+  const cutoff = Date.now() - EBAY_RUN_TTL_MS;
+  for (const [k, v] of ebayRunListings) if (v.createdAt < cutoff) ebayRunListings.delete(k);
+  for (const [k, v] of ebayBatchMeta) if (v.submittedAt < cutoff) ebayBatchMeta.delete(k);
+}
+
+// Step 1 — shared search. Fetches listings once and stashes them under a runId.
+router.post("/ebay-batch-test/search", async (req, res) => {
+  const query = typeof req.body?.query === "string" ? req.body.query.trim() : "";
+  const limit = Math.min(Math.max(Number(req.body?.limit) || 8, 1), 20);
+  if (!query) return res.status(400).json({ error: "query is required" });
+
+  try {
+    pruneEbayRuns();
+    const listings = await searchEbayNormalized(query, limit);
+    if (listings.length === 0) return res.status(404).json({ error: "no eBay listings found for query" });
+
+    const runId = crypto.randomUUID();
+    ebayRunListings.set(runId, { query, listings, createdAt: Date.now() });
+
+    return res.json({
+      runId,
+      query,
+      count: listings.length,
+      listings: listings.map((l: any) => ({
+        title: l.title ?? null,
+        url: l.link ?? l.url ?? null,
+        price: l.price ?? null,
+        currency: l.currency ?? "USD",
+        condition: l.condition ?? null,
+        image: (Array.isArray(l.imageUrls) ? l.imageUrls[0] : Array.isArray(l.images) ? l.images[0] : null) ?? null,
+      })),
+    });
+  } catch (err: any) {
+    console.error("[ebay-batch-test] search error:", err);
+    return res.status(500).json({ error: err?.message ?? "search failed" });
+  }
+});
+
+// Step 2a — synchronous route. Returns when scoring is done (the response IS the paint).
+router.post("/ebay-batch-test/sync-analyze", async (req, res) => {
+  const runId = typeof req.body?.runId === "string" ? req.body.runId : "";
+  const run = ebayRunListings.get(runId);
+  if (!run) return res.status(404).json({ error: "unknown or expired runId" });
+
+  try {
+    // Cloned so __visionImageStats can't leak into the batch-API listings.
+    const syncInput = run.listings.map((l: any) => structuredClone(l));
+    const syncStart = Date.now();
+    const syncRaw = await batchAnalyzeListingsWithImages(syncInput, null, null, { stitch: false });
+    const syncMs = Date.now() - syncStart;
+    const results = syncRaw.map((raw, i) => ({ index: i, ...parseScores(raw, EBAY_KEYS) }));
+    return res.json({ serverMs: syncMs, results });
+  } catch (err: any) {
+    console.error("[ebay-batch-test] sync-analyze error:", err);
+    return res.status(500).json({ error: err?.message ?? "sync-analyze failed" });
+  }
+});
+
+// Step 2b — batch submit. Returns a batchId fast; the client then polls /status.
+router.post("/ebay-batch-test/batch-submit", async (req, res) => {
+  const runId = typeof req.body?.runId === "string" ? req.body.runId : "";
+  const run = ebayRunListings.get(runId);
+  if (!run) return res.status(404).json({ error: "unknown or expired runId" });
+
+  try {
+    const batchId = await submitEbayBatch(run.listings);
+    ebayBatchMeta.set(batchId, { query: run.query, submittedAt: Date.now(), completedAt: null });
+    return res.json({ batchId });
+  } catch (err: any) {
+    console.error("[ebay-batch-test] batch-submit error:", err);
+    return res.status(500).json({ error: err?.message ?? "batch-submit failed" });
+  }
+});
+
+router.get("/ebay-batch-test/status", async (req, res) => {
+  const batchId = typeof req.query.id === "string" ? req.query.id : "";
+  if (!batchId) return res.status(400).json({ error: "id is required" });
+
+  try {
+    const status = await getEbayBatchStatus(batchId);
+    const meta = ebayBatchMeta.get(batchId);
+
+    // Freeze the batch timer the first time we observe a terminal state.
+    const terminal = ["completed", "failed", "expired", "cancelled"].includes(status.status);
+    if (meta && terminal && meta.completedAt === null) meta.completedAt = Date.now();
+    const elapsedMs = meta ? (meta.completedAt ?? Date.now()) - meta.submittedAt : null;
+
+    return res.json({ ...status, query: meta?.query ?? null, elapsedMs });
+  } catch (err: any) {
+    console.error("[ebay-batch-test] status error:", err);
+    return res.status(500).json({ error: err?.message ?? "status failed" });
   }
 });
 

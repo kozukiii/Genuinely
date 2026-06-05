@@ -169,7 +169,12 @@ function isVariationListing(listing: any): boolean {
   return /^v1\|\d+\|[1-9]\d*$/.test(id);
 }
 
-export async function analyzeListingWithImages(listing: any, context?: string | null) {
+/**
+ * Build the exact system+user message array used to analyze a single eBay listing.
+ * Extracted so both the synchronous path (analyzeListingWithImages) and the
+ * Groq Batch API path (ebayBatchApi.ts) score listings with an identical prompt.
+ */
+export function buildEbayAnalysisMessages(listing: any, context?: string | null): any[] {
   const isVariation = isVariationListing(listing);
   const title = clean(listing.title) ?? "Untitled";
   const currency = clean(listing.currency) ?? "USD";
@@ -304,6 +309,12 @@ HIGHLIGHTS RULES:
       image_url: { url },
     });
   }
+
+  return messages;
+}
+
+export async function analyzeListingWithImages(listing: any, context?: string | null) {
+  const messages = buildEbayAnalysisMessages(listing, context);
 
   const response = await groq.chat.completions.create({
     model: "meta-llama/llama-4-scout-17b-16e-instruct",

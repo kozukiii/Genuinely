@@ -14,31 +14,43 @@ import { getStockXToken, stockxApiKey } from "../services/stockxToken";
 const STOCKX_API_BASE = "https://api.stockx.com/v2";
 const STOCKX_PRODUCT_BASE = "https://stockx.com";
 
-// Serialise outbound StockX calls. The official allotment allows ~1 req/sec, so
-// we queue callers the same way priceCharting.ts serialises through _pcQueue.
-let _sxQueue: Promise<void> = Promise.resolve();
+// Rate-limit outbound StockX calls to the official ~1 req/sec. We gate on
+// request *start* times (not a trailing sleep) so a call returns as soon as
+// StockX responds — the previous trailing setTimeout added a full second of
+// latency to every call on the critical path, which is what made 5-title
+// batches blow past Render's request timeout.
 const MIN_SPACING_MS = 1000;
+const REQUEST_TIMEOUT_MS = 8000; // fail one slow call fast instead of hanging the batch
+let _sxGate: Promise<void> = Promise.resolve();
+let _lastStart = 0;
+
+/** Serialise scheduling so consecutive request starts are >= MIN_SPACING_MS apart. */
+function awaitSlot(): Promise<void> {
+  const slot = _sxGate.then(async () => {
+    const wait = _lastStart + MIN_SPACING_MS - Date.now();
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    _lastStart = Date.now();
+  });
+  _sxGate = slot.then(() => undefined, () => undefined);
+  return slot;
+}
 
 async function sxFetch<T>(pathAndQuery: string): Promise<T> {
-  const run = _sxQueue.then(async () => {
-    const token = await getStockXToken();
-    const res = await fetch(`${STOCKX_API_BASE}${pathAndQuery}`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "x-api-key": stockxApiKey(),
-        Accept: "application/json",
-      },
-    });
-    await new Promise((r) => setTimeout(r, MIN_SPACING_MS));
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      throw new Error(`StockX ${pathAndQuery} failed: HTTP ${res.status} ${body.slice(0, 200)}`);
-    }
-    return (await res.json()) as T;
+  await awaitSlot();
+  const token = await getStockXToken();
+  const res = await fetch(`${STOCKX_API_BASE}${pathAndQuery}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "x-api-key": stockxApiKey(),
+      Accept: "application/json",
+    },
+    timeout: REQUEST_TIMEOUT_MS,
   });
-  // Keep the queue chain alive even if this call rejects.
-  _sxQueue = run.then(() => undefined, () => undefined);
-  return run;
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`StockX ${pathAndQuery} failed: HTTP ${res.status} ${body.slice(0, 200)}`);
+  }
+  return (await res.json()) as T;
 }
 
 type StockXProduct = {

@@ -200,7 +200,13 @@ async function fetchMarketplaceImageDataUrls(imageUrls: string[], limit: number)
   return results.filter((u): u is string => u !== null).slice(0, limit);
 }
 
-export async function analyzeMarketplaceListingWithImages(listing: any, context?: string | null) {
+/**
+ * Build the system+user message array for a single Marketplace listing.
+ * Async because Marketplace images must be fetched through the proxy and
+ * base64-embedded (the Facebook CDN won't serve them to Groq by URL).
+ * Shared by the synchronous path and the Groq Batch API path.
+ */
+export async function buildMarketplaceAnalysisMessages(listing: any, context?: string | null): Promise<any[]> {
   const title = clean(listing.title) ?? "Untitled";
   const currency = clean(listing.currency) ?? "USD";
   const link = clean(listing.link ?? listing.url) ?? "";
@@ -459,6 +465,12 @@ HIGHLIGHTS RULES:
       });
     }
   }
+
+  return messages;
+}
+
+export async function analyzeMarketplaceListingWithImages(listing: any, context?: string | null) {
+  const messages = await buildMarketplaceAnalysisMessages(listing, context);
 
   const response = await groq.chat.completions.create({
     model: "meta-llama/llama-4-scout-17b-16e-instruct",

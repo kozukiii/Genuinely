@@ -116,6 +116,10 @@ export default function AdminPage() {
             <span className="admin-card-name">Grid Stitch A/B</span>
             <span className="admin-card-note">Per-image vs. stitched-grid vision scoring side by side</span>
           </Link>
+          <Link to="/admin/ebay-batch-test" className="admin-card admin-card--link">
+            <span className="admin-card-name">eBay Batch API Test</span>
+            <span className="admin-card-note">eBay search scored via Groq async Batch API (separate TPM pool)</span>
+          </Link>
         </div>
       </section>
 

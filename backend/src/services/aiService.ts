@@ -1,4 +1,5 @@
 import { analyzeListingWithImages, batchAnalyzeListingsWithImages, EBAY_BATCH_SYSTEM_PROMPT } from "../ai/ebayOverview";
+import { batchAnalyzeListingsViaBatchApi } from "../ai/ebayBatchApi";
 import { extractStructuredAnalysis, validateAnalysis, EMPTY_ANALYSIS } from "../utils/extractStructuredAnalysis";
 import { parseEbaySellerData, calculateSellerTrust } from "./scoring/sellerTrustScore";
 import { calculatePriceFairness } from "./scoring/priceFairnessScore";
@@ -10,6 +11,19 @@ const EBAY_SCORE_KEYS = new Set([
   "shippingFairness",
   "descriptionQuality",
 ]);
+
+// Live eBay scoring runs through Groq's async Batch API (separate TPM pool,
+// ~50% cost) so concurrent searches don't serialize against the synchronous
+// TPM bucket. The synchronous packed call remains only as a safety net if the
+// batch job times out or errors — not as a toggle.
+async function scoreChunkRaw(chunk: any[], context?: string | null, systemPrompt?: string | null): Promise<string[]> {
+  try {
+    return await batchAnalyzeListingsViaBatchApi(chunk, context, systemPrompt);
+  } catch (err) {
+    console.error("[aiService] Groq Batch API path failed — falling back to synchronous:", err);
+    return batchAnalyzeListingsWithImages(chunk, context, systemPrompt, { stitch: true });
+  }
+}
 
 // Helper for safe average
 function average(nums: Array<number | null | undefined>) {
@@ -154,7 +168,7 @@ export async function analyzeItemsWithAI(items: any[], context?: string | null, 
   for (let start = 0; start < analyzeIndices.length; start += BATCH_SIZE) {
     const batchIndices = analyzeIndices.slice(start, start + BATCH_SIZE);
     const chunk = batchIndices.map((i) => items[i]);
-    const rawStrings = await batchAnalyzeListingsWithImages(chunk, context, systemPrompt, { stitch: true });
+    const rawStrings = await scoreChunkRaw(chunk, context, systemPrompt);
 
     const toCache: Parameters<typeof setCachedAnalysisBatch>[0] = [];
 

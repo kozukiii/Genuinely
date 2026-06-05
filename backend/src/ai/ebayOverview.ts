@@ -3,7 +3,7 @@ import dotenv from "dotenv";
 import { calculatePriceFairness } from "../services/scoring/priceFairnessScore";
 import { extractBatchObjects } from "../utils/extractBatchObjects";
 import { validateAnalysis, EMPTY_ANALYSIS } from "../utils/extractStructuredAnalysis";
-import { stitchBuffers, gridLayoutNote, type StitchResult } from "./stitchImages";
+import { stitchBuffers, gridLayoutNote, planImageBlocks, MAX_CELLS, type StitchResult } from "./stitchImages";
 
 export interface VisionBatchOpts {
   /** When true, each listing's photos are stitched into a single grid image (1 image/listing). */
@@ -174,7 +174,35 @@ function isVariationListing(listing: any): boolean {
  * Extracted so both the synchronous path (analyzeListingWithImages) and the
  * Groq Batch API path (ebayBatchApi.ts) score listings with an identical prompt.
  */
-export function buildEbayAnalysisMessages(listing: any, context?: string | null): any[] {
+// Pack a listing's photos into ≤5 image blocks: raw single-photo blocks while
+// they fit, stitched grids for the overflow so no photo is dropped. eBay images
+// are public URLs, so single blocks stay as URLs (no fetch); only grouped photos
+// are fetched + stitched.
+async function buildEbayImageBlocks(urls: string[]): Promise<{ blocks: any[]; stitchedAny: boolean }> {
+  const groups = planImageBlocks(urls.length, 5, MAX_CELLS);
+  const blocks: any[] = [];
+  let stitchedAny = false;
+
+  for (const g of groups) {
+    if (g.length === 1) {
+      blocks.push({ type: "image_url", image_url: { url: urls[g[0]] } });
+      continue;
+    }
+    const buffers = (await Promise.all(g.map((i) => fetchImageBuffer(urls[i])))).filter((b): b is Buffer => b !== null);
+    const stitched = buffers.length ? await stitchBuffers(buffers) : null;
+    if (stitched) {
+      blocks.push({ type: "image_url", image_url: { url: stitched.dataUrl } });
+      stitchedAny = true;
+    } else {
+      // Fetch/stitch failed — fall back to one representative raw URL for the group.
+      blocks.push({ type: "image_url", image_url: { url: urls[g[0]] } });
+    }
+  }
+
+  return { blocks, stitchedAny };
+}
+
+export async function buildEbayAnalysisMessages(listing: any, context?: string | null): Promise<any[]> {
   const isVariation = isVariationListing(listing);
   const title = clean(listing.title) ?? "Untitled";
   const currency = clean(listing.currency) ?? "USD";
@@ -303,18 +331,20 @@ HIGHLIGHTS RULES:
     },
   ];
 
-  for (const url of imageUrls.slice(0, 5)) {
+  const { blocks, stitchedAny } = await buildEbayImageBlocks(imageUrls);
+  if (stitchedAny) {
     messages[1].content.push({
-      type: "image_url",
-      image_url: { url },
+      type: "text",
+      text: "NOTE ON IMAGES: some images below are grids combining multiple separate photos of this SAME item (read left-to-right, top-to-bottom; white padding is letterboxing). Treat every photo/cell as the same listing — multiple angles are normal, not suspicious.",
     });
   }
+  for (const block of blocks) messages[1].content.push(block);
 
   return messages;
 }
 
 export async function analyzeListingWithImages(listing: any, context?: string | null) {
-  const messages = buildEbayAnalysisMessages(listing, context);
+  const messages = await buildEbayAnalysisMessages(listing, context);
 
   const response = await groq.chat.completions.create({
     model: "meta-llama/llama-4-scout-17b-16e-instruct",

@@ -3,7 +3,7 @@ import dotenv from "dotenv";
 import fetch from "node-fetch";
 import { logUsage } from "../services/usageLogger";
 import { extractBatchObjects } from "../utils/extractBatchObjects";
-import { stitchDataUrls, gridLayoutNote, type StitchResult } from "./stitchImages";
+import { stitchDataUrls, gridLayoutNote, planImageBlocks, MAX_CELLS, type StitchResult } from "./stitchImages";
 
 export interface VisionBatchOpts {
   /** When true, each listing's photos are stitched into a single grid image (1 image/listing). */
@@ -200,6 +200,35 @@ async function fetchMarketplaceImageDataUrls(imageUrls: string[], limit: number)
   return results.filter((u): u is string => u !== null).slice(0, limit);
 }
 
+// Upper bound on photos fetched per listing. 5 blocks × MAX_CELLS is the hard
+// capacity, but each base64 fetch goes through the proxy and is slow, so we cap
+// lower to bound latency. Overflow beyond this is dropped.
+const MARKETPLACE_IMAGE_FETCH_CAP = 10;
+
+// Pack already-fetched Marketplace data URLs into ≤5 image blocks: raw single
+// blocks while they fit, stitched grids for the overflow so no photo is dropped.
+async function buildMarketplaceImageBlocks(dataUrls: string[]): Promise<{ blocks: any[]; stitchedAny: boolean }> {
+  const groups = planImageBlocks(dataUrls.length, 5, MAX_CELLS);
+  const blocks: any[] = [];
+  let stitchedAny = false;
+
+  for (const g of groups) {
+    if (g.length === 1) {
+      blocks.push({ type: "image_url", image_url: { url: dataUrls[g[0]] } });
+      continue;
+    }
+    const grid = await stitchDataUrls(g.map((i) => dataUrls[i]));
+    if (grid) {
+      blocks.push({ type: "image_url", image_url: { url: grid.dataUrl } });
+      stitchedAny = true;
+    } else {
+      blocks.push({ type: "image_url", image_url: { url: dataUrls[g[0]] } });
+    }
+  }
+
+  return { blocks, stitchedAny };
+}
+
 /**
  * Build the system+user message array for a single Marketplace listing.
  * Async because Marketplace images must be fetched through the proxy and
@@ -219,8 +248,11 @@ export async function buildMarketplaceAnalysisMessages(listing: any, context?: s
   const availability = formatAvailability(listing);
 
   const imageUrls = getMarketplaceImageUrls(listing);
-  const dataUrls = await fetchMarketplaceImageDataUrls(imageUrls, 3);
-  listing.__visionImageStats = { provided: imageUrls.length, attached: dataUrls.length };
+  // Fetch more than the 5-block budget so overflow photos can be stitched in
+  // rather than dropped. Capped to bound proxy-fetch cost (base64 images are slow).
+  const dataUrls = await fetchMarketplaceImageDataUrls(imageUrls, MARKETPLACE_IMAGE_FETCH_CAP);
+  const { blocks: imageBlocks, stitchedAny } = await buildMarketplaceImageBlocks(dataUrls);
+  listing.__visionImageStats = { provided: imageUrls.length, attached: dataUrls.length, stitched: stitchedAny };
 
   const priceText = formatPriceForPrompt(listing.price, currency);
 
@@ -457,14 +489,13 @@ HIGHLIGHTS RULES:
     },
   ];
 
-  if (dataUrls.length) {
-    for (const dataUrl of dataUrls) {
-      messages[1].content.push({
-        type: "image_url",
-        image_url: { url: dataUrl },
-      });
-    }
+  if (stitchedAny) {
+    messages[1].content.push({
+      type: "text",
+      text: "NOTE ON IMAGES: some images below are grids combining multiple separate photos of this SAME item (read left-to-right, top-to-bottom; white padding is letterboxing). Treat every photo/cell as the same listing — multiple angles are normal, not suspicious.",
+    });
   }
+  for (const block of imageBlocks) messages[1].content.push(block);
 
   return messages;
 }

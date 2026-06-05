@@ -159,15 +159,15 @@ export async function batchAnalyzeListingsViaBatchApi(
 ): Promise<string[]> {
   if (listings.length === 0) return [];
 
-  const messagesList = listings.map((listing) => {
-    const messages = buildEbayAnalysisMessages(listing, context);
+  const messagesList = await Promise.all(listings.map(async (listing) => {
+    const messages = await buildEbayAnalysisMessages(listing, context);
     // When a group-specific system prompt is supplied (price ranges, condition
     // signals from /context), prepend it to the generic per-listing instructions.
     if (systemPrompt && messages[0]?.role === "system") {
       messages[0].content = `${systemPrompt}\n\n${messages[0].content}`;
     }
     return messages;
-  });
+  }));
 
   return runRawChatBatch(messagesList, "ebay-live", opts);
 }

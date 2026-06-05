@@ -12,9 +12,32 @@ import sharp from "sharp";
 // (4 photos) and keep cells large to preserve enough detail for condition
 // inspection (scratches, wear, print lines).
 
-const MAX_CELLS = 4;          // 2×2 — past this, per-cell detail degrades too far
+export const MAX_CELLS = 4;  // 2×2 — past this, per-cell detail degrades too far
 const CELL_PX = 1024;         // each cell is CELL_PX × CELL_PX (2048² grid ≈ 4.2MP, well under Groq's limit)
 const BG = { r: 255, g: 255, b: 255, alpha: 1 };
+
+// Groq caps a request at 5 image blocks. Distribute a listing's photos across up
+// to `maxBlocks` blocks, preferring raw single-photo blocks (best detail) and
+// only grouping into stitched grids once there are more photos than blocks — so
+// no photo is dropped. Returns index groups; a group of 1 = raw, >1 = stitched.
+// Capacity is maxBlocks × maxCells photos; anything beyond that is truncated.
+export function planImageBlocks(count: number, maxBlocks = 5, maxCells = MAX_CELLS): number[][] {
+  const n = Math.min(count, maxBlocks * maxCells);
+  if (n <= 0) return [];
+  if (n <= maxBlocks) return Array.from({ length: n }, (_, i) => [i]);
+
+  const base = Math.floor(n / maxBlocks);
+  const extra = n % maxBlocks;
+  const blocks: number[][] = [];
+  let idx = 0;
+  for (let b = 0; b < maxBlocks; b++) {
+    const size = base + (b < extra ? 1 : 0);
+    const group: number[] = [];
+    for (let k = 0; k < size; k++) group.push(idx++);
+    blocks.push(group);
+  }
+  return blocks;
+}
 
 export interface StitchResult {
   /** data: URL of the composite JPEG */

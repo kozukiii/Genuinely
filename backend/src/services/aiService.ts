@@ -14,14 +14,22 @@ const EBAY_SCORE_KEYS = new Set([
 
 // Live eBay scoring runs through Groq's async Batch API (separate TPM pool,
 // ~50% cost) so concurrent searches don't serialize against the synchronous
-// TPM bucket. The synchronous packed call remains only as a safety net if the
-// batch job times out or errors — not as a toggle.
-async function scoreChunkRaw(chunk: any[], context?: string | null, systemPrompt?: string | null): Promise<string[]> {
+// TPM bucket — all listings in ONE batch job, no chunking. The synchronous
+// packed call remains only as a safety net on timeout/error; it has a per-call
+// image cap, so the fallback still goes 8 at a time.
+const SYNC_FALLBACK_CHUNK = 8;
+
+async function scoreAllRaw(items: any[], context?: string | null, systemPrompt?: string | null): Promise<string[]> {
   try {
-    return await batchAnalyzeListingsViaBatchApi(chunk, context, systemPrompt);
+    return await batchAnalyzeListingsViaBatchApi(items, context, systemPrompt);
   } catch (err) {
-    console.error("[aiService] Groq Batch API path failed — falling back to synchronous:", err);
-    return batchAnalyzeListingsWithImages(chunk, context, systemPrompt, { stitch: true });
+    console.error("[aiService] Groq Batch API path failed — falling back to synchronous chunks:", err);
+    const raw: string[] = [];
+    for (let start = 0; start < items.length; start += SYNC_FALLBACK_CHUNK) {
+      const chunk = items.slice(start, start + SYNC_FALLBACK_CHUNK);
+      raw.push(...await batchAnalyzeListingsWithImages(chunk, context, systemPrompt, { stitch: true }));
+    }
+    return raw;
   }
 }
 
@@ -159,41 +167,33 @@ export async function analyzeItemWithAI(merged: any, context?: string | null) {
 export async function analyzeItemsWithAI(items: any[], context?: string | null, systemPrompt?: string | null, priceLow?: number | null, priceHigh?: number | null) {
   if (items.length === 0) return [];
 
-  // Read store once — avoids N synchronous disk reads for N items
   const resultMap = new Map<number, any>();
-  const analyzeIndices = items.map((_, i) => i);
 
-  // Score items in batches of 8, one cache write per chunk.
-  const BATCH_SIZE = 8;
-  for (let start = 0; start < analyzeIndices.length; start += BATCH_SIZE) {
-    const batchIndices = analyzeIndices.slice(start, start + BATCH_SIZE);
-    const chunk = batchIndices.map((i) => items[i]);
-    const rawStrings = await scoreChunkRaw(chunk, context, systemPrompt);
+  // Score EVERY listing in a single Batch API job (no per-call image cap, so no
+  // need to chunk). On timeout/error, fall back to the synchronous packed call,
+  // which DOES have an image cap and so must still go 8 at a time.
+  const rawStrings = await scoreAllRaw(items, context, systemPrompt);
 
-    const toCache: Parameters<typeof setCachedAnalysisBatch>[0] = [];
+  const toCache: Parameters<typeof setCachedAnalysisBatch>[0] = [];
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const parsed = parseAIAnalysis(item, rawStrings[i] ?? "{}");
 
-    for (let j = 0; j < chunk.length; j++) {
-      const item = chunk[j];
-      const origIdx = batchIndices[j];
-      const parsed = parseAIAnalysis(item, rawStrings[j]);
+    resultMap.set(i, {
+      ...item,
+      ...parsed,
+      systemPrompt: systemPrompt ?? EBAY_BATCH_SYSTEM_PROMPT,
+    });
 
-      resultMap.set(origIdx, {
-        ...item,
-        ...parsed,
-        systemPrompt: systemPrompt ?? EBAY_BATCH_SYSTEM_PROMPT,
+    if (item.id && item.source) {
+      toCache.push({
+        source: item.source,
+        id: item.id,
+        result: { aiScore: parsed.aiScore, aiScores: parsed.aiScores, overview: parsed.overview, highlights: parsed.highlights },
       });
-
-      if (item.id && item.source) {
-        toCache.push({
-          source: item.source,
-          id: item.id,
-          result: { aiScore: parsed.aiScore, aiScores: parsed.aiScores, overview: parsed.overview, highlights: parsed.highlights },
-        });
-      }
     }
-
-    setCachedAnalysisBatch(toCache);
   }
+  setCachedAnalysisBatch(toCache);
 
   return items.map((item, i) => {
     const result = resultMap.get(i)!;

@@ -6,8 +6,8 @@ import LinkAnalysisModal from "../components/LinkAnalysisModal";
 import ListingCard from "../components/ListingCard";
 import SkeletonCard from "../components/SkeletonCard";
 import FiltersSidebar, { type FilterState } from "../components/FiltersSidebar";
-import type { Listing } from "../types/Listing";
-import LoadingBar, { type PipelineStatus } from "../components/LoadingBar";
+import type { Listing, ListingSource } from "../types/Listing";
+import LoadingBar, { type PipelineStatus, type PipelinePhase } from "../components/LoadingBar";
 import RefineResultsSidebar from "../components/RefineResultsSidebar";
 import "./styles/HomePage.css";
 import { addToSearchCache } from "../utils/searchCache";
@@ -19,7 +19,9 @@ import {
 } from "../utils/analysisStore";
 import {
   publishPipelineStatus,
+  resetPipelineStatuses,
   subscribeToPipelineStatus,
+  type PipelineStatusMap,
 } from "../utils/pipelineStore";
 import { hasEbayCustomizableOptions } from "../utils/ebayVariations";
 import { getPriceBadge, getPriceBadgeTitle, PRICE_BADGE_ORDER, type PriceBadgeLabel } from "../utils/listingPresentation";
@@ -46,6 +48,70 @@ const SEARCH_TIMESTAMP_KEY = "search:ts";
 const SEARCH_PAGE_KEY = "search:page";
 const SEARCH_FILTERS_KEY = "search:filters";
 const SEARCH_PENDING_KEY = "search:pending";
+
+// Per-source loading bars. Order = render order; label = bar title.
+const SOURCE_ORDER: ListingSource[] = ["ebay", "marketplace"];
+const SOURCE_LABELS: Record<ListingSource, string> = {
+  ebay: "eBay",
+  marketplace: "Facebook Marketplace",
+};
+
+// Progress ordering so we can pick the "lagging" source to drive the single bar.
+const PHASE_RANK: Record<PipelinePhase, number> = {
+  idle: 0, fetching: 1, context: 2, scoring: 3, retrying: 4, done: 5,
+};
+
+// What a source is currently waiting on, for narration.
+function phaseDetail(phase: PipelinePhase): string {
+  switch (phase) {
+    case "fetching": return "listing info";
+    case "context":  return "market prices";
+    case "scoring":
+    case "retrying": return "scores";
+    default:         return "analysis";
+  }
+}
+
+// Collapse the per-source pipelines into ONE bar: the bar tracks the lagging
+// source (so it completes when the slow one does), and the label narrates what
+// each source is doing — e.g. "eBay ready — waiting for Facebook Marketplace
+// listing info…". Returns null when nothing is active.
+function deriveCombinedBar(statuses: PipelineStatusMap): { status: PipelineStatus; label?: string } | null {
+  const active = SOURCE_ORDER.filter((s) => statuses[s]);
+  if (active.length === 0) return null;
+
+  // Single source: pass its status straight through, no narration.
+  if (active.length === 1) {
+    return { status: statuses[active[0]]!, label: undefined };
+  }
+
+  // Two sources: bar follows the laggard; sum counts; take the longer elapsed.
+  const laggard = active.reduce((a, b) => (PHASE_RANK[statuses[a]!.phase] <= PHASE_RANK[statuses[b]!.phase] ? a : b));
+  const leader = active.find((s) => s !== laggard)!;
+  const lagStatus = statuses[laggard]!;
+  const ledStatus = statuses[leader]!;
+
+  const combined: PipelineStatus = {
+    phase: lagStatus.phase,
+    combined: true,
+    listingsScored: (statuses.ebay?.listingsScored ?? 0) + (statuses.marketplace?.listingsScored ?? 0),
+    elapsedSeconds: Math.max(statuses.ebay?.elapsedSeconds ?? 0, statuses.marketplace?.elapsedSeconds ?? 0),
+  };
+
+  // Same phase → no narration; let LoadingBar's default label/animation run.
+  if (lagStatus.phase === ledStatus.phase) return { status: combined, label: undefined };
+
+  // Leader finished, laggard still working → emphasize the wait.
+  if (ledStatus.phase === "done") {
+    return {
+      status: combined,
+      label: `${SOURCE_LABELS[leader]} ready — waiting for ${SOURCE_LABELS[laggard]} ${phaseDetail(lagStatus.phase)}…`,
+    };
+  }
+
+  // Both mid-flight at different stages → call out whichever is behind.
+  return { status: combined, label: `Waiting for ${SOURCE_LABELS[laggard]} ${phaseDetail(lagStatus.phase)}…` };
+}
 
 const DEFAULT_FILTERS: FilterState = {
   minPrice: "",
@@ -120,8 +186,11 @@ function stripQueryCategoryDebugInfo(listing: Listing): Listing {
     /\n*\s*QUERY CATEGORY:\s*(pokemon|other)\s*$/i,
     ""
   );
+  // Drop the heavy base64 vision-debug images before this listing can be written
+  // to sessionStorage (this helper is applied on every persistence path).
+  const { debugVisionImages, ...rest } = listing;
   return {
-    ...listing,
+    ...rest,
     ...(cleanedDebugInfo ? { debugInfo: cleanedDebugInfo } : { debugInfo: undefined }),
   };
 }
@@ -508,7 +577,7 @@ export default function SearchPage() {
     setRefineExiting(true);
     setTimeout(() => { setRefineOpen(false); setRefineExiting(false); }, 280);
   }
-  const [pipelineStatus, setPipelineStatus] = useState<PipelineStatus>({ phase: "idle" });
+  const [pipelineStatuses, setPipelineStatuses] = useState<PipelineStatusMap>({});
 
   useEffect(() => {
     const update = () => setSavedVersion((v) => v + 1);
@@ -523,7 +592,7 @@ export default function SearchPage() {
   }, [filters, hydrated]);
 
   // Keep pipelineStatus in sync with the module-level store (survives unmount/remount)
-  useEffect(() => subscribeToPipelineStatus(setPipelineStatus), []);
+  useEffect(() => subscribeToPipelineStatus(setPipelineStatuses), []);
 
   // Merge search cache + recently viewed + saved, dedupe, shuffle
   const shelfItems = useMemo(() => {
@@ -560,7 +629,7 @@ export default function SearchPage() {
   const listingsRef = useRef(listings);
   listingsRef.current = listings;
 
-  const pipelineStartRef = useRef<number | null>(null);
+  const pipelineStartRef = useRef<Partial<Record<ListingSource, number>>>({});
 
   // All active analysis controllers — all cancelled on new search/filter
   const analysisControllersRef = useRef<AbortController[]>([]);
@@ -608,23 +677,49 @@ export default function SearchPage() {
     }
 
     const toAnalyze = items.filter((l) => !savedMap.has(`${l.source}:${l.id}`));
-    if (toAnalyze.length === 0) return;
 
-    const ctrl = new AbortController();
-    analysisControllersRef.current.push(ctrl);
-    const onStatus = (s: import("../components/LoadingBar").PipelineStatus) => {
-      if (s.phase === "done") {
-        const elapsedSeconds = pipelineStartRef.current != null
-          ? parseFloat(((Date.now() - pipelineStartRef.current) / 1000).toFixed(1))
-          : undefined;
-        publishPipelineStatus({ ...s, elapsedSeconds, combined: true });
-      } else {
-        publishPipelineStatus({ ...s, combined: true });
+    // Run each source as its own parallel pipeline (separate grouping → context →
+    // combined batch) so eBay returns fast while Facebook's slower fetch lags
+    // visibly behind, each driving its own loading bar.
+    const sources = SOURCE_ORDER.filter((source) =>
+      items.some((l) => l.source === source)
+    );
+
+    // Prune the board to sources that actually returned results, so a selected
+    // source with zero items doesn't leave a bar stuck on "fetching".
+    resetPipelineStatuses(sources);
+
+    for (const source of sources) {
+      const sourceItems = toAnalyze.filter((l) => l.source === source);
+
+      // Source had results but they were all already analyzed/saved — show its bar
+      // completing immediately rather than leaving it stuck on "fetching".
+      if (sourceItems.length === 0) {
+        const count = items.filter((l) => l.source === source).length;
+        publishPipelineStatus(source, { phase: "done", listingsScored: count, elapsedSeconds: 0, combined: true });
+        continue;
       }
-    };
-    runAnalysisPipeline(query, toAnalyze, setListings, ctrl.signal, onStatus, true).finally(() => {
-      analysisControllersRef.current = analysisControllersRef.current.filter((c) => c !== ctrl);
-    });
+
+      pipelineStartRef.current[source] = Date.now();
+      const ctrl = new AbortController();
+      analysisControllersRef.current.push(ctrl);
+
+      const onStatus = (s: import("../components/LoadingBar").PipelineStatus) => {
+        if (s.phase === "done") {
+          const startedAt = pipelineStartRef.current[source];
+          const elapsedSeconds = startedAt != null
+            ? parseFloat(((Date.now() - startedAt) / 1000).toFixed(1))
+            : undefined;
+          publishPipelineStatus(source, { ...s, elapsedSeconds, combined: true });
+        } else {
+          publishPipelineStatus(source, { ...s, combined: true });
+        }
+      };
+
+      runAnalysisPipeline(query, sourceItems, setListings, ctrl.signal, onStatus, true).finally(() => {
+        analysisControllersRef.current = analysisControllersRef.current.filter((c) => c !== ctrl);
+      });
+    }
   }
 
   const filtered = useMemo(
@@ -738,8 +833,10 @@ export default function SearchPage() {
 
       // Cancel any in-flight analysis from a previous search
       abortAllAnalysis();
-      pipelineStartRef.current = Date.now();
-      publishPipelineStatus({ phase: "fetching" });
+      pipelineStartRef.current = {};
+      // Show a "fetching" bar for each selected source until results split per-source.
+      const selectedSources = SOURCE_ORDER.filter((source) => activeFilters.sources[source]);
+      resetPipelineStatuses(selectedSources.length > 0 ? selectedSources : SOURCE_ORDER);
       sessionStorage.removeItem(SEARCH_PENDING_KEY);
 
       if (listingsRef.current.length > 0) {
@@ -958,6 +1055,16 @@ export default function SearchPage() {
       />
       {linkModalOpen && <LinkAnalysisModal onClose={() => setLinkModalOpen(false)} />}
 
+      {(() => {
+        const combined = deriveCombinedBar(pipelineStatuses);
+        if (!combined) return null;
+        return (
+          <div className="search-loadbars">
+            <LoadingBar status={combined.status} label={combined.label} />
+          </div>
+        );
+      })()}
+
       <div className="search-controls">
         <button
           className="mobile-filter-toggle"
@@ -1024,7 +1131,6 @@ export default function SearchPage() {
             </div>
           )}
 
-          <LoadingBar status={pipelineStatus} />
 
           {refineOpen && (availableHighlightBadges.length > 0 || availablePriceBadges.length > 0) && (
             <div className={`highlight-filter-chips${refineExiting ? " highlight-filter-chips--exiting" : " highlight-filter-chips--open"}`}>

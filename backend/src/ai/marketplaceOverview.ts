@@ -1,9 +1,15 @@
 import OpenAI from "openai";
 import dotenv from "dotenv";
 import fetch from "node-fetch";
+import sharp from "sharp";
 import { logUsage } from "../services/usageLogger";
 import { extractBatchObjects } from "../utils/extractBatchObjects";
 import { stitchDataUrls, gridLayoutNote, planImageBlocks, MAX_CELLS, type StitchResult } from "./stitchImages";
+
+// Longest-edge cap for inline Marketplace photos before base64 embedding. Keeps a
+// 5-block request comfortably under Groq's 4MB base64 limit while staying legible
+// for condition assessment.
+const MAX_IMAGE_PX = 1024;
 
 export interface VisionBatchOpts {
   /** When true, each listing's photos are stitched into a single grid image (1 image/listing). */
@@ -183,10 +189,24 @@ async function fetchImageAsDataUrl(url: string): Promise<string | null> {
       const contentType = res.headers.get("content-type") || "image/jpeg";
       if (!contentType.toLowerCase().startsWith("image/")) return null;
 
-      const buffer = Buffer.from(await res.arrayBuffer());
-      if (buffer.length === 0) return null;
+      const raw = Buffer.from(await res.arrayBuffer());
+      if (raw.length === 0) return null;
 
-      return `data:${contentType};base64,${buffer.toString("base64")}`;
+      // Downscale to a fixed max dimension and re-encode as JPEG. Groq caps a
+      // base64-image request at 4MB total; full-res Facebook photos (sent inline,
+      // since the FB CDN won't serve them to Groq by URL) blow that on photo-heavy
+      // listings. A fixed cap keeps every image visible without dropping any.
+      try {
+        const jpeg = await sharp(raw)
+          .rotate()
+          .resize(MAX_IMAGE_PX, MAX_IMAGE_PX, { fit: "inside", withoutEnlargement: true })
+          .jpeg({ quality: 80 })
+          .toBuffer();
+        return `data:image/jpeg;base64,${jpeg.toString("base64")}`;
+      } catch {
+        // If re-encoding fails, fall back to the original bytes.
+        return `data:${contentType};base64,${raw.toString("base64")}`;
+      }
     } catch (err: any) {
       if (attempt < 1 && err?.type !== "aborted") continue;
       return null;
@@ -227,6 +247,20 @@ async function buildMarketplaceImageBlocks(dataUrls: string[]): Promise<{ blocks
   }
 
   return { blocks, stitchedAny };
+}
+
+/**
+ * Build the exact vision images (single photos + stitched grids, as base64 data
+ * URLs) that the scoring model receives for a Marketplace listing — for on-demand
+ * debug inspection. Mirrors the image pipeline in buildMarketplaceAnalysisMessages.
+ */
+export async function getMarketplaceVisionImages(listing: any): Promise<string[]> {
+  const imageUrls = getMarketplaceImageUrls(listing);
+  const dataUrls = await fetchMarketplaceImageDataUrls(imageUrls, MARKETPLACE_IMAGE_FETCH_CAP);
+  const { blocks } = await buildMarketplaceImageBlocks(dataUrls);
+  return blocks
+    .map((b: any) => b?.image_url?.url)
+    .filter((u: any): u is string => typeof u === "string");
 }
 
 /**

@@ -32,6 +32,7 @@ pnpm-debug.log*
 
 # --- TEMP ---
 *.local
+docs/worklog/
 
 # --- OS STUFF ---
 Thumbs.db

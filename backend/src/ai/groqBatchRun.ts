@@ -41,7 +41,7 @@ export async function runRawChatBatch(
   if (messagesList.length === 0) return [];
   const timeoutMs = opts?.timeoutMs ?? 90_000;
   const pollMs = opts?.pollMs ?? 1500;
-  const maxTokens = opts?.maxTokens ?? 1000;
+  const maxTokens = opts?.maxTokens ?? 1500;
 
   const jsonl = messagesList
     .map((messages, i) => JSON.stringify({

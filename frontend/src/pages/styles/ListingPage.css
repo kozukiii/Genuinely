@@ -780,6 +780,24 @@
   box-shadow: var(--shadow-soft);
 }
 
+.debug-vision-grid {
+  margin-top: 1rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+  padding: 1rem;
+  background: #0e0e0e;
+  border-radius: 8px;
+  border: 1px solid rgba(57, 255, 157, 0.18);
+}
+
+.debug-vision-img {
+  width: 100%;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: #000;
+}
+
 .ai-debug-toggle {
   margin-top: 1rem;
   border: none;

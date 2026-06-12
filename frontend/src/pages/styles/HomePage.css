@@ -219,6 +219,14 @@ h6 {
 /* =========================
    Search controls row (limit selector polish)
    ========================= */
+.home-page .search-loadbars {
+  width: 100%;
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .home-page .search-controls {
   display: flex;
   gap: 12px;

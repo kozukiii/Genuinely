@@ -202,6 +202,23 @@ async function buildEbayImageBlocks(urls: string[]): Promise<{ blocks: any[]; st
   return { blocks, stitchedAny };
 }
 
+/**
+ * Build the exact vision images (raw photo URLs + stitched grids) the scoring
+ * model receives for an eBay listing — for on-demand debug inspection. Mirrors
+ * the image pipeline in buildEbayAnalysisMessages.
+ */
+export async function getEbayVisionImages(listing: any): Promise<string[]> {
+  const imageUrls: string[] = Array.isArray(listing.imageUrls)
+    ? listing.imageUrls.filter((u: any) => typeof u === "string" && u.trim())
+    : Array.isArray(listing.images)
+      ? listing.images.filter((u: any) => typeof u === "string" && u.trim())
+      : [];
+  const { blocks } = await buildEbayImageBlocks(imageUrls);
+  return blocks
+    .map((b: any) => b?.image_url?.url)
+    .filter((u: any): u is string => typeof u === "string");
+}
+
 export async function buildEbayAnalysisMessages(listing: any, context?: string | null): Promise<any[]> {
   const isVariation = isVariationListing(listing);
   const title = clean(listing.title) ?? "Untitled";

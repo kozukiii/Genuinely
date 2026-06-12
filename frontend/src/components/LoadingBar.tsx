@@ -49,7 +49,9 @@ function phaseTarget(phase: PipelinePhase, groupsDone: number, groupsTotal: numb
 const CONTEXT_CRAWL_SPEED = 0.006;
 const CONTEXT_CRAWL_ZONE  = 8;
 
-export default function LoadingBar({ status }: { status: PipelineStatus }) {
+export default function LoadingBar(
+  { status, title, label }: { status: PipelineStatus; title?: string; label?: string },
+) {
   const { phase, groupsDone = 0, groupsTotal = 0 } = status;
 
   const [visible, setVisible]   = useState(false);
@@ -157,6 +159,9 @@ export default function LoadingBar({ status }: { status: PipelineStatus }) {
   let displayLabel: string;
   if (phase === "done" && summary) {
     displayLabel = `Analyzed ${summary.count} listing${summary.count !== 1 ? "s" : ""} in ${summary.elapsed}s`;
+  } else if (label) {
+    // Caller-supplied narration (e.g. per-source status) overrides the generic label.
+    displayLabel = label;
   } else if (phase === "scoring" && status.combined) {
     displayLabel = SCORING_STEPS[scoringStep];
   } else if (phase === "scoring" && groupsTotal > 1) {
@@ -173,6 +178,7 @@ export default function LoadingBar({ status }: { status: PipelineStatus }) {
 
   return (
     <div className="lb-wrap">
+      {title && <span className="lb-title">{title}</span>}
       <div className="lb-track">
         <div className="lb-fill" style={{ width: `${barWidth}%` }} />
       </div>

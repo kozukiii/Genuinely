@@ -14,6 +14,7 @@ import { availabilityLabel, formatDeliveryType, getPriceBadge, getPriceBadgeTitl
 import { isSaved, refreshSavedListingsHealthCheck, toggleSaved, updateSavedListing } from "../utils/savedListings";
 import { recordView, updateRecentlyViewed } from "../utils/recentlyViewed";
 import { subscribeToAnalysis } from "../utils/analysisStore";
+import { stripVisionDebug } from "../utils/stripDebug";
 
 function sourceLabel(source?: Listing["source"]) {
   if (source === "marketplace") return "Marketplace";
@@ -265,7 +266,37 @@ export default function ListingPage() {
   const [showRaw,     setShowRaw]     = useState(false);
   const [showContext, setShowContext] = useState(false);
   const [showPrompt,  setShowPrompt]  = useState(false);
+  const [showVision,  setShowVision]  = useState(false);
+  const [visionImages, setVisionImages] = useState<string[] | null>(null);
+  const [visionLoading, setVisionLoading] = useState(false);
+  const [visionError, setVisionError] = useState<string | null>(null);
   const [activeTab,   setActiveTab]   = useState<"overview" | "details">("overview");
+
+  // Lazily fetch the exact images the scoring model receives. Built on demand so
+  // the base64 never rides along in analysis responses or hits client storage.
+  async function loadVisionImages() {
+    if (showVision) { setShowVision(false); return; }
+    if (visionImages) { setShowVision(true); return; }
+    if (!listing?.id) return;
+
+    setVisionLoading(true);
+    setVisionError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/search/vision-debug`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(listing),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setVisionImages(Array.isArray(data.images) ? data.images : []);
+      setShowVision(true);
+    } catch (err) {
+      setVisionError(`Couldn't load images: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setVisionLoading(false);
+    }
+  }
   const [imageIndex,  setImageIndex]  = useState(0);
   const [viewerOpen,  setViewerOpen]  = useState(false);
   const [saved,       setSaved]       = useState(false);
@@ -472,7 +503,7 @@ export default function ListingPage() {
           const stored: Listing[] = JSON.parse(raw);
           if (Array.isArray(stored)) {
             const idx = stored.findIndex((l) => l.id === enriched.id && l.source === enriched.source);
-            if (idx !== -1) stored[idx] = { ...enriched, analysisPending: false };
+            if (idx !== -1) stored[idx] = { ...stripVisionDebug(enriched), analysisPending: false };
             sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(stored));
           }
         }
@@ -1056,6 +1087,28 @@ export default function ListingPage() {
                       {showRaw ? "Hide raw AI output \u2191" : "Show raw AI output \u2193"}
                     </button>
                     {showRaw && <pre className="debug-block">{ai.rawAnalysis}</pre>}
+
+                    <>
+                      <button className="ai-debug-toggle" onClick={loadVisionImages}>
+                        {visionLoading
+                          ? "Loading images sent to AI\u2026"
+                          : showVision
+                            ? "Hide images sent to AI \u2191"
+                            : `Show images sent to AI${visionImages ? ` (${visionImages.length})` : ""} \u2193`}
+                      </button>
+                      {showVision && visionImages && (
+                        visionImages.length > 0 ? (
+                          <div className="debug-vision-grid">
+                            {visionImages.map((src, i) => (
+                              <img key={i} className="debug-vision-img" src={src} alt={`Vision input ${i + 1}`} loading="lazy" />
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="debug-block">No images were sent to the model for this listing.</p>
+                        )
+                      )}
+                      {visionError && <p className="debug-block">{visionError}</p>}
+                    </>
                   </>
                 )}
               </>

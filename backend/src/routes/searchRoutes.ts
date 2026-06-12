@@ -15,6 +15,8 @@ import {
   refreshListingAvailability,
   refreshListingsAvailability,
 } from "../services/listingHealth";
+import { getEbayVisionImages } from "../ai/ebayOverview";
+import { getMarketplaceVisionImages } from "../ai/marketplaceOverview";
 
 const router = Router();
 
@@ -185,6 +187,30 @@ router.post("/analyze", async (req, res) => {
     console.error("analyze error:", err);
     const message = err?.message ?? err?.error?.message ?? String(err);
     return res.status(500).json({ error: message });
+  }
+});
+
+// POST /api/search/vision-debug - returns the exact image blocks sent to the model.
+// Built on demand because Marketplace images are large inline data URLs.
+router.post("/vision-debug", async (req, res) => {
+  const listing = req.body;
+  if (!listing || !listing.id || !listing.source) {
+    return res.status(400).json({ error: "Missing listing id or source" });
+  }
+
+  try {
+    const trusted = await resolveTrustedListingForAnalysis(listing);
+    const images =
+      trusted.source === "ebay"
+        ? await getEbayVisionImages(trusted)
+        : trusted.source === "marketplace"
+          ? await getMarketplaceVisionImages(trusted)
+          : [];
+
+    return res.json({ images });
+  } catch (err: any) {
+    console.error("vision-debug error:", err);
+    return res.status(500).json({ error: err?.message ?? "Failed to build vision debug images" });
   }
 });
 

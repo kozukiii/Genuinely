@@ -1,4 +1,5 @@
 import type { Listing } from "../types/Listing";
+import { stripVisionDebug } from "./stripDebug";
 
 const KEY = "recent:listings:v1";
 const MAX = 12;
@@ -17,15 +18,16 @@ export function getRecentlyViewed(): Listing[] {
 
 export function recordView(listing: Listing) {
   const current = getRecentlyViewed().filter((l) => l.id !== listing.id);
-  const next = [listing, ...current].slice(0, MAX);
+  const next = [stripVisionDebug(listing), ...current].slice(0, MAX);
   localStorage.setItem(KEY, JSON.stringify(next));
 }
 
 export function updateRecentlyViewed(listing: Listing) {
   const current = getRecentlyViewed();
   if (!current.some((l) => l.id === listing.id)) return;
+  const patch = stripVisionDebug(listing);
   localStorage.setItem(
     KEY,
-    JSON.stringify(current.map((l) => (l.id === listing.id ? listing : l)))
+    JSON.stringify(current.map((l) => (l.id === listing.id ? patch : l)))
   );
 }

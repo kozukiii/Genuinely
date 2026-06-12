@@ -1,10 +1,11 @@
 import type { Listing } from "../types/Listing";
+import { stripVisionDebug } from "./stripDebug";
 
 const KEY = "genuinely:search_cache";
 const CAP = 150;
 
 export function addToSearchCache(listings: Listing[]): void {
-  const scored = listings.filter((l) => l.aiScore != null);
+  const scored = listings.filter((l) => l.aiScore != null).map(stripVisionDebug);
   if (scored.length === 0) return;
 
   try {

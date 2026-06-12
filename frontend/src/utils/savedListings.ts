@@ -1,4 +1,5 @@
 import type { Listing } from "../types/Listing";
+import { stripVisionDebug } from "./stripDebug";
 
 const API_BASE  = import.meta.env.VITE_API_BASE_URL ?? "";
 const LOCAL_KEY = "saved:listings:v1";
@@ -152,7 +153,7 @@ export function getSavedListings(): Listing[] {
 }
 
 export function setSavedListings(next: Listing[]) {
-  localStorage.setItem(LOCAL_KEY, JSON.stringify(next));
+  localStorage.setItem(LOCAL_KEY, JSON.stringify(next.map(stripVisionDebug)));
   notify();
 }
 

@@ -55,6 +55,11 @@ export interface Listing {
   marketContext?: string;
   systemPrompt?: string;
 
+  // Exact images sent to the vision model (single photos + stitched grids), as
+  // base64 data URLs, for debug inspection. In-memory only — never persisted to
+  // localStorage/sessionStorage (too large; would blow the storage quota).
+  debugVisionImages?: string[];
+
   // Market price range from context analysis
   priceLow?: number;
   priceHigh?: number;

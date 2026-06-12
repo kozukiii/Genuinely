@@ -13,7 +13,9 @@ import sharp from "sharp";
 // inspection (scratches, wear, print lines).
 
 export const MAX_CELLS = 4;  // 2×2 — past this, per-cell detail degrades too far
-const CELL_PX = 1024;         // each cell is CELL_PX × CELL_PX (2048² grid ≈ 4.2MP, well under Groq's limit)
+const CELL_PX = 768;          // each cell CELL_PX² (2×2 → 1536² grid). Sized so 5 stitched
+                              // blocks stay well under Groq's 4MB base64 *request body* cap —
+                              // the binding limit is total bytes, not per-image megapixels.
 const BG = { r: 255, g: 255, b: 255, alpha: 1 };
 
 // Groq caps a request at 5 image blocks. Distribute a listing's photos across up

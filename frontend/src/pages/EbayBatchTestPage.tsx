@@ -8,6 +8,7 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
 const EBAY_KEYS = ["priceFairness", "conditionHonesty", "shippingFairness", "descriptionQuality"];
 const POLL_MS = 1000;
+type Scheme = "serper" | "groq";
 
 interface SubmitListing {
   title: string | null;
@@ -36,15 +37,42 @@ interface StatusResponse {
   providerProcessingMs: number | null;
 }
 
+interface ContextResponse {
+  scheme: Scheme;
+  context: string | null;
+  elapsedMs: number;
+  tokens: number | null;
+}
+
+interface LaneState {
+  context: ContextResponse | null;
+  status: StatusResponse | null;
+  contextPaintedMs: number | null;
+  batchSubmittedMs: number | null;
+  error: string | null;
+}
+
+const emptyLane = (): LaneState => ({
+  context: null,
+  status: null,
+  contextPaintedMs: null,
+  batchSubmittedMs: null,
+  error: null,
+});
+
 function fmtMs(ms: number | null): string {
-  if (ms == null) return "—";
+  if (ms == null) return "-";
   if (ms < 1000) return `${Math.round(ms)} ms`;
   return `${(ms / 1000).toFixed(1)} s`;
 }
 
+function schemeLabel(scheme: Scheme) {
+  return scheme === "serper" ? "Serper context" : "Groq web context";
+}
+
 function ScoreCell({ r }: { r: ResultRow | undefined }) {
-  if (!r) return <p className="admin-card-note">⏳ awaiting…</p>;
-  if (r.error) return <p className="admin-error">⚠ {r.error}</p>;
+  if (!r) return <p className="admin-card-note">awaiting...</p>;
+  if (r.error) return <p className="admin-error">Error: {r.error}</p>;
   return (
     <>
       {r.scores && (
@@ -52,7 +80,7 @@ function ScoreCell({ r }: { r: ResultRow | undefined }) {
           {EBAY_KEYS.map((k) => (
             <span key={k} className="admin-card-note" style={{ fontVariantNumeric: "tabular-nums" }}>
               {k.replace("Fairness", "").replace("Honesty", "").replace("Quality", "")}:{" "}
-              <strong>{r.scores?.[k] ?? "—"}</strong>
+              <strong>{r.scores?.[k] ?? "-"}</strong>
             </span>
           ))}
         </div>
@@ -62,7 +90,7 @@ function ScoreCell({ r }: { r: ResultRow | undefined }) {
         <ul style={{ margin: "6px 0 0", paddingLeft: 16 }}>
           {r.highlights.map((h, hi) => (
             <li key={hi} className="admin-card-note" style={{ color: h.positive ? "#1aad54" : "#d9534f" }}>
-              {h.positive ? "✓" : "✕"} {h.label}
+              {h.positive ? "yes" : "no"} {h.label}
             </li>
           ))}
         </ul>
@@ -77,52 +105,77 @@ export default function EbayBatchTestPage() {
   const [limit, setLimit] = useState(8);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
   const [listings, setListings] = useState<SubmitListing[]>([]);
-  const [syncResults, setSyncResults] = useState<ResultRow[] | null>(null);
-  const [status, setStatus] = useState<StatusResponse | null>(null);
+  const [lanes, setLanes] = useState<Record<Scheme, LaneState>>({ serper: emptyLane(), groq: emptyLane() });
 
-  // All timers measured from a single shared t0 (button click), in the browser.
   const t0Ref = useRef<number>(0);
-  const [nowMs, setNowMs] = useState(0);                 // live ticker for in-flight columns
-  const [syncPaintedMs, setSyncPaintedMs] = useState<number | null>(null);
-  const [batchPaintedMs, setBatchPaintedMs] = useState<number | null>(null);
-
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [nowMs, setNowMs] = useState(0);
+  const pollRefs = useRef<Partial<Record<Scheme, ReturnType<typeof setInterval>>>>({});
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   function stopTimers() {
-    if (pollRef.current) clearInterval(pollRef.current);
+    for (const timer of Object.values(pollRefs.current)) {
+      if (timer) clearInterval(timer);
+    }
+    pollRefs.current = {};
     if (tickRef.current) clearInterval(tickRef.current);
-    pollRef.current = null;
     tickRef.current = null;
   }
+
   useEffect(() => stopTimers, []);
 
-  function maybeStopTicker(syncDone: boolean, batchDone: boolean) {
-    if (syncDone && batchDone && tickRef.current) {
-      clearInterval(tickRef.current);
-      tickRef.current = null;
-    }
+  function updateLane(scheme: Scheme, patch: Partial<LaneState>) {
+    setLanes((prev) => ({ ...prev, [scheme]: { ...prev[scheme], ...patch } }));
   }
 
-  async function poll(id: string) {
+  async function poll(scheme: Scheme, id: string) {
     try {
       const res = await fetch(`${API_BASE}/api/internal/ebay-batch-test/status?id=${encodeURIComponent(id)}`, {
         credentials: "include",
       });
       const json: StatusResponse = await res.json();
       if (!res.ok) throw new Error((json as any).error ?? `${res.status}`);
-      setStatus(json);
+      updateLane(scheme, { status: json });
       const terminal = ["completed", "failed", "expired", "cancelled"].includes(json.status);
       if (terminal) {
-        // First terminal observation = when the batch column actually paints.
-        setBatchPaintedMs((prev) => prev ?? Date.now() - t0Ref.current);
-        if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+        const timer = pollRefs.current[scheme];
+        if (timer) clearInterval(timer);
+        delete pollRefs.current[scheme];
       }
     } catch (e: any) {
-      setError(e.message);
-      if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+      updateLane(scheme, { error: e.message });
+      const timer = pollRefs.current[scheme];
+      if (timer) clearInterval(timer);
+      delete pollRefs.current[scheme];
+    }
+  }
+
+  async function runLane(scheme: Scheme, runId: string) {
+    try {
+      const contextRes = await fetch(`${API_BASE}/api/internal/ebay-batch-test/context/${scheme}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ runId }),
+      });
+      const contextJson = await contextRes.json();
+      if (!contextRes.ok) throw new Error(contextJson.error ?? `${scheme} context ${contextRes.status}`);
+      updateLane(scheme, { context: contextJson, contextPaintedMs: Date.now() - t0Ref.current });
+
+      const submitRes = await fetch(`${API_BASE}/api/internal/ebay-batch-test/batch-submit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ runId, scheme }),
+      });
+      const submitJson = await submitRes.json();
+      if (!submitRes.ok) throw new Error(submitJson.error ?? `${scheme} batch ${submitRes.status}`);
+      updateLane(scheme, { batchSubmittedMs: Date.now() - t0Ref.current });
+
+      await poll(scheme, submitJson.batchId);
+      pollRefs.current[scheme] = setInterval(() => poll(scheme, submitJson.batchId), POLL_MS);
+    } catch (e: any) {
+      updateLane(scheme, { error: e.message });
     }
   }
 
@@ -134,14 +187,10 @@ export default function EbayBatchTestPage() {
     setRunning(true);
     setError(null);
     setListings([]);
-    setSyncResults(null);
-    setStatus(null);
-    setSyncPaintedMs(null);
-    setBatchPaintedMs(null);
+    setLanes({ serper: emptyLane(), groq: emptyLane() });
     setNowMs(0);
 
     try {
-      // ── Shared prep: search ONCE (excluded from the timers) ──
       const searchRes = await fetch(`${API_BASE}/api/internal/ebay-batch-test/search`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -153,40 +202,9 @@ export default function EbayBatchTestPage() {
       setListings(searchJson.listings ?? []);
       const runId: string = searchJson.runId;
 
-      // ── Single starting gun for both columns ──
       t0Ref.current = Date.now();
       tickRef.current = setInterval(() => setNowMs(Date.now() - t0Ref.current), 100);
-
-      // Column A: synchronous route — paints when its response lands.
-      const syncP = (async () => {
-        const res = await fetch(`${API_BASE}/api/internal/ebay-batch-test/sync-analyze`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({ runId }),
-        });
-        const json = await res.json();
-        if (!res.ok) throw new Error(json.error ?? `sync ${res.status}`);
-        setSyncResults(json.results ?? []);
-        setSyncPaintedMs(Date.now() - t0Ref.current);
-      })();
-
-      // Column B: batch submit (fast) then poll until terminal — paints on completion.
-      const batchP = (async () => {
-        const res = await fetch(`${API_BASE}/api/internal/ebay-batch-test/batch-submit`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({ runId }),
-        });
-        const json = await res.json();
-        if (!res.ok) throw new Error(json.error ?? `batch ${res.status}`);
-        await poll(json.batchId);
-        pollRef.current = setInterval(() => poll(json.batchId), POLL_MS);
-      })();
-
-      // Stop the live ticker once both settle (success or failure).
-      await Promise.allSettled([syncP, batchP]);
+      await Promise.allSettled([runLane("serper", runId), runLane("groq", runId)]);
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -194,36 +212,38 @@ export default function EbayBatchTestPage() {
     }
   }
 
-  // Stop the shared ticker once both columns have painted.
   useEffect(() => {
-    maybeStopTicker(syncPaintedMs != null, batchPaintedMs != null);
-  }, [syncPaintedMs, batchPaintedMs]);
+    const done = (["serper", "groq"] as Scheme[]).every((scheme) => lanes[scheme].batchSubmittedMs || lanes[scheme].error);
+    if (done && tickRef.current) {
+      clearInterval(tickRef.current);
+      tickRef.current = null;
+    }
+  }, [lanes]);
 
   if (loading) return null;
   if (!user?.isAdmin) {
     return (
       <main className="admin-page">
-        <p className="admin-forbidden">403 — Forbidden</p>
+        <p className="admin-forbidden">403 - Forbidden</p>
       </main>
     );
   }
 
-  const syncTimer = syncPaintedMs ?? (listings.length ? nowMs : null);
-  const batchTimer = batchPaintedMs ?? (listings.length ? nowMs : null);
-  const syncByIndex = new Map<number, ResultRow>();
-  syncResults?.forEach((r) => syncByIndex.set(r.index, r));
-  const batchByIndex = new Map<number, ResultRow>();
-  status?.results?.forEach((r) => batchByIndex.set(r.index, r));
-  const batchTerminal = status && ["completed", "failed", "expired", "cancelled"].includes(status.status);
+  const byScheme = (scheme: Scheme) => {
+    const map = new Map<number, ResultRow>();
+    lanes[scheme].status?.results?.forEach((r) => map.set(r.index, r));
+    return map;
+  };
+  const serperByIndex = byScheme("serper");
+  const groqByIndex = byScheme("groq");
 
   return (
     <main className="admin-page">
-      <Link to="/admin" className="admin-card-note" style={{ textDecoration: "underline" }}>← Back to Admin</Link>
-      <h1 className="admin-heading">eBay Batch API — A/B Timing</h1>
-      <p className="admin-card-note" style={{ maxWidth: 700, marginBottom: 16 }}>
-        Search runs once (shared, not timed). Then both columns fire <strong>in parallel from a single t0</strong>,
-        and each timer measures true click→painted in the browser — including network and poll latency.
-        <strong> Synchronous</strong> = original route (shared TPM bucket); <strong>Batch API</strong> = async, separate TPM pool, ~50% token cost.
+      <Link to="/admin" className="admin-card-note" style={{ textDecoration: "underline" }}>Back to Admin</Link>
+      <h1 className="admin-heading">eBay Context + Batch Analysis Test</h1>
+      <p className="admin-card-note" style={{ maxWidth: 760, marginBottom: 16 }}>
+        Search runs once and is not timed. Then Serper context and Groq web context run side by side.
+        Each lane submits the same eBay listings to the same Groq Batch analysis path after its context lands.
       </p>
 
       <form onSubmit={handleSubmit} style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 24 }}>
@@ -231,7 +251,7 @@ export default function EbayBatchTestPage() {
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="e.g. callaway ai smoke driver"
+          placeholder="e.g. ping sigma 3 putter"
           style={{ flex: "1 1 320px", padding: "10px 12px", fontSize: 15 }}
         />
         <input
@@ -244,7 +264,7 @@ export default function EbayBatchTestPage() {
           title="Number of listings"
         />
         <button type="submit" disabled={running} style={{ padding: "10px 20px", fontSize: 15 }}>
-          {running ? "Running…" : "Search & Compare"}
+          {running ? "Running..." : "Search & Compare"}
         </button>
       </form>
 
@@ -254,27 +274,38 @@ export default function EbayBatchTestPage() {
         <>
           <section className="admin-section">
             <div className="admin-cards" style={{ gridTemplateColumns: "repeat(2, 1fr)" }}>
-              <div className="admin-card">
-                <span className="admin-card-name">Synchronous route</span>
-                <p className="admin-heading" style={{ margin: "6px 0", fontVariantNumeric: "tabular-nums" }}>{fmtMs(syncTimer)}</p>
-                <span className="admin-card-note">
-                  {syncPaintedMs != null ? "painted" : "running…"}
-                  {syncResults ? ` · ${listings.length} listings` : ""}
-                </span>
-              </div>
-              <div className="admin-card">
-                <span className="admin-card-name">Batch API</span>
-                <p className="admin-heading" style={{ margin: "6px 0", fontVariantNumeric: "tabular-nums" }}>{fmtMs(batchTimer)}</p>
-                <span className="admin-card-note">
-                  {batchPaintedMs != null ? "painted" : status ? `${status.status} · ${status.counts.completed}/${status.counts.total} (polling…)` : "submitting…"}
-                </span>
-                {batchTerminal && status?.providerMs != null && (
-                  <span className="admin-card-note" style={{ marginTop: 4 }}>
-                    Groq-measured: <strong>{fmtMs(status.providerMs)}</strong> total
-                    {status.providerProcessingMs != null ? ` · ${fmtMs(status.providerProcessingMs)} compute` : ""}
-                  </span>
-                )}
-              </div>
+              {(["serper", "groq"] as Scheme[]).map((scheme) => {
+                const lane = lanes[scheme];
+                const terminal = lane.status && ["completed", "failed", "expired", "cancelled"].includes(lane.status.status);
+                return (
+                  <div key={scheme} className="admin-card">
+                    <span className="admin-card-name">{schemeLabel(scheme)}</span>
+                    <p className="admin-heading" style={{ margin: "6px 0", fontVariantNumeric: "tabular-nums" }}>
+                      {fmtMs(lane.batchSubmittedMs ?? (lane.error ? null : nowMs))}
+                    </p>
+                    <span className="admin-card-note">
+                      context: <strong>{fmtMs(lane.contextPaintedMs)}</strong>
+                      {lane.context?.tokens != null ? ` · ${lane.context.tokens} tokens` : ""}
+                    </span>
+                    <span className="admin-card-note" style={{ marginTop: 4 }}>
+                      batch: {lane.batchSubmittedMs != null ? "submitted to Groq Batch" : lane.status ? `${lane.status.status} · ${lane.status.counts.completed}/${lane.status.counts.total}` : lane.context ? "submitting..." : "waiting for context..."}
+                    </span>
+                    {terminal && lane.status?.providerMs != null && (
+                      <span className="admin-card-note" style={{ marginTop: 4 }}>
+                        Groq batch measured: <strong>{fmtMs(lane.status.providerMs)}</strong>
+                        {lane.status.providerProcessingMs != null ? ` · ${fmtMs(lane.status.providerProcessingMs)} compute` : ""}
+                      </span>
+                    )}
+                    {lane.error && <p className="admin-error">{lane.error}</p>}
+                    {lane.context?.context && (
+                      <details style={{ marginTop: 8 }}>
+                        <summary className="admin-card-note">context preview</summary>
+                        <pre className="admin-card-note" style={{ whiteSpace: "pre-wrap", maxHeight: 180, overflow: "auto" }}>{lane.context.context}</pre>
+                      </details>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </section>
 
@@ -290,19 +321,19 @@ export default function EbayBatchTestPage() {
                       {l.title ?? "Untitled"}
                     </a>
                     <p className="admin-card-note" style={{ margin: "4px 0 0" }}>
-                      {l.price != null ? `${l.price} ${l.currency}` : "—"} · {l.condition ?? "—"}
+                      {l.price != null ? `${l.price} ${l.currency}` : "-"} · {l.condition ?? "-"}
                     </p>
                   </div>
                 </div>
 
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
                   <div style={{ borderRight: "1px solid #2a2a2a", paddingRight: 16 }}>
-                    <p className="admin-card-note" style={{ fontWeight: 600, marginBottom: 4 }}>Synchronous</p>
-                    <ScoreCell r={syncByIndex.get(i)} />
+                    <p className="admin-card-note" style={{ fontWeight: 600, marginBottom: 4 }}>Serper context + batch</p>
+                    <ScoreCell r={serperByIndex.get(i)} />
                   </div>
                   <div>
-                    <p className="admin-card-note" style={{ fontWeight: 600, marginBottom: 4 }}>Batch API</p>
-                    <ScoreCell r={batchByIndex.get(i)} />
+                    <p className="admin-card-note" style={{ fontWeight: 600, marginBottom: 4 }}>Groq web context + batch</p>
+                    <ScoreCell r={groqByIndex.get(i)} />
                   </div>
                 </div>
               </div>

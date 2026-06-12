@@ -39,14 +39,22 @@ function indexFromCustomId(id: string): number {
  * Returns the batch id to poll. eBay image URLs are public, so we embed them
  * directly (no base64) to keep the JSONL small.
  */
-export async function submitEbayBatch(listings: any[], context?: string | null): Promise<string> {
-  const lines = listings.map((listing, i) => ({
+export async function submitEbayBatch(listings: any[], context?: string | null, systemPrompt?: string | null): Promise<string> {
+  const messagesList = await Promise.all(listings.map(async (listing) => {
+    const messages = await buildEbayAnalysisMessages(listing, context);
+    if (systemPrompt && messages[0]?.role === "system") {
+      messages[0].content = `${systemPrompt}\n\n${messages[0].content}`;
+    }
+    return messages;
+  }));
+
+  const lines = messagesList.map((messages, i) => ({
     custom_id: customIdFor(i),
     method: "POST",
     url: "/v1/chat/completions",
     body: {
       model: MODEL,
-      messages: buildEbayAnalysisMessages(listing, context),
+      messages,
       max_tokens: 1000,
       temperature: 0.2,
       response_format: { type: "json_object" },

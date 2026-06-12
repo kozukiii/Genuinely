@@ -210,6 +210,29 @@ export function toggleSaved(listing: Listing): boolean {
   return !exists;
 }
 
+// Re-fetch live source content for saved stubs that lack it. Returns a map keyed
+// by `source:id`. Best-effort: removed/unavailable listings are simply omitted.
+async function hydrateListings(stubs: Listing[]): Promise<Map<string, Listing>> {
+  const out = new Map<string, Listing>();
+  if (stubs.length === 0) return out;
+
+  try {
+    const res = await fetch(`${API_BASE}/api/saved/hydrate`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ items: stubs.map((l) => ({ source: l.source, id: l.id })) }),
+    });
+    if (!res.ok) return out;
+
+    const data = await res.json();
+    const listings: Listing[] = Array.isArray(data.listings) ? data.listings : [];
+    for (const listing of listings) out.set(listingKey(listing), listing);
+  } catch { /* hydration is best-effort */ }
+
+  return out;
+}
+
 // ── Called by AuthContext after login to merge local guest saves with server ──
 
 export async function syncFromServer(): Promise<void> {
@@ -226,12 +249,34 @@ export async function syncFromServer(): Promise<void> {
       }).catch(() => {});
     }
 
-    // Then pull the full server list (now includes the merged items)
+    // Then pull the server list. These are analysis-only stubs (scores + identity);
+    // the source's content (title/images/price) is never stored server-side.
     const res = await fetch(`${API_BASE}/api/saved`, { credentials: "include" });
     if (!res.ok) return;
     const data = await res.json();
-    const listings: Listing[] = data.listings ?? [];
-    localStorage.setItem(LOCAL_KEY, JSON.stringify(listings));
+    const stubs: Listing[] = data.listings ?? [];
+
+    // Merge any content we already have cached locally on top of the stub identity,
+    // keeping the server's freshly-synced analysis fields.
+    const localByKey = new Map(local.map((l) => [listingKey(l), l]));
+    const merged: Listing[] = stubs.map((stub) => {
+      const cached = localByKey.get(listingKey(stub));
+      return cached ? { ...cached, ...stub } : stub;
+    });
+
+    // Stubs with no locally-cached content (e.g. fresh device) need live content
+    // re-fetched from the source so the card can render.
+    const needHydration = merged.filter((l) => !l.title || !Array.isArray(l.images) || l.images.length === 0);
+    const hydrated = await hydrateListings(needHydration);
+    if (hydrated.size > 0) {
+      for (let i = 0; i < merged.length; i++) {
+        const content = hydrated.get(listingKey(merged[i]));
+        // Live content first, then re-apply the analysis stub so scores always win.
+        if (content) merged[i] = { ...content, ...merged[i] };
+      }
+    }
+
+    localStorage.setItem(LOCAL_KEY, JSON.stringify(merged));
     notify();
   } catch { /* silent */ }
 }

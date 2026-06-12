@@ -33,4 +33,49 @@ db.exec(`
   );
 `);
 
+// ── One-time scrub: strip copyrighted source content from existing saved rows ──
+// Earlier code persisted whole listing blobs (title/images/description/price/etc.)
+// to disk. This rewrites every saved_listings.data down to the analysis-only
+// allowlist so no scraped content remains. Idempotent + guarded by a flag row so
+// it runs at most once.
+const ALLOWED_SAVED_FIELDS = new Set([
+  "id", "source", "crossListedEbayId",
+  "score", "aiScore", "aiScores", "overview", "highlights",
+  "priceLow", "priceHigh", "priceSource", "priceChartingUrl", "tcgPlayerUrl",
+  "availabilityStatus", "availabilityCheckedAt", "availabilityReason",
+  "lastSeenActiveAt", "endedAt", "analysisSkipped", "analyzedAt",
+]);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS migrations (
+    name      TEXT    PRIMARY KEY,
+    ran_at    INTEGER NOT NULL DEFAULT (unixepoch())
+  );
+`);
+
+const SCRUB_MIGRATION = "scrub_saved_listings_content_v1";
+const alreadyRun = db.prepare("SELECT 1 FROM migrations WHERE name = ?").get(SCRUB_MIGRATION);
+
+if (!alreadyRun) {
+  const rows = db.prepare("SELECT id, data FROM saved_listings").all() as { id: number; data: string }[];
+  const update = db.prepare("UPDATE saved_listings SET data = ? WHERE id = ?");
+
+  const scrub = db.transaction(() => {
+    for (const row of rows) {
+      let parsed: Record<string, unknown>;
+      try { parsed = JSON.parse(row.data); } catch { parsed = {}; }
+
+      const out: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(parsed)) {
+        if (ALLOWED_SAVED_FIELDS.has(k)) out[k] = v;
+      }
+      update.run(JSON.stringify(out), row.id);
+    }
+    db.prepare("INSERT INTO migrations (name) VALUES (?)").run(SCRUB_MIGRATION);
+  });
+
+  scrub();
+  console.warn(`[db] scrubbed ${rows.length} saved_listings rows down to analysis-only fields`);
+}
+
 export default db;

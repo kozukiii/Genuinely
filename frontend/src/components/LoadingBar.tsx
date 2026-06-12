@@ -9,6 +9,30 @@ export interface PipelineStatus {
   groupsTotal?: number;
   listingsScored?: number;
   elapsedSeconds?: number;
+  // True for combined single-batch mode, where scores land all at once with no
+  // per-group progress. The bar fakes forward motion (capped) + rotating labels.
+  combined?: boolean;
+}
+
+// Implied work shown during the combined-batch wait. We can't report real
+// sub-steps (it's one opaque batch job), so we narrate plausible stages.
+const SCORING_STEPS = [
+  "Comparing market data...",
+  "Checking recent sold prices...",
+  "Evaluating seller signals...",
+  "Assessing condition & description...",
+  "Weighing shipping & fees...",
+  "Finalizing scores...",
+];
+const SCORING_STEP_MS = 4000;   // ~6 steps over ~24s, pacing the ~27s batch wait
+const SCORING_BASE = 58;        // where the scoring phase starts
+const SCORING_CRAWL_CAP = 85;   // bar never fakes past this while awaiting the batch
+
+// Map the current implied-step index to a bar target, so the bar advances one
+// notch each time the label changes (steps span SCORING_BASE → SCORING_CRAWL_CAP).
+function scoringStepTarget(step: number): number {
+  const frac = (step + 1) / SCORING_STEPS.length;
+  return SCORING_BASE + frac * (SCORING_CRAWL_CAP - SCORING_BASE);
 }
 
 function phaseTarget(phase: PipelinePhase, groupsDone: number, groupsTotal: number): number {
@@ -31,6 +55,7 @@ export default function LoadingBar({ status }: { status: PipelineStatus }) {
   const [visible, setVisible]   = useState(false);
   const [barWidth, setBarWidth] = useState(0);
   const [summary, setSummary]   = useState<{ elapsed: string; count: number } | null>(null);
+  const [scoringStep, setScoringStep] = useState(0);
 
   const widthRef     = useRef(0);
   const targetRef    = useRef(0);
@@ -81,7 +106,11 @@ export default function LoadingBar({ status }: { status: PipelineStatus }) {
       return;
     }
 
-    targetRef.current = phaseTarget(phase, groupsDone, groupsTotal);
+    // In combined mode the scoring phase has no real sub-progress, so drive the
+    // target off the implied step index — the bar steps forward with each label.
+    targetRef.current = phase === "scoring" && status.combined
+      ? Math.max(scoringStepTarget(scoringStep), phaseTarget(phase, groupsDone, groupsTotal))
+      : phaseTarget(phase, groupsDone, groupsTotal);
 
     function tick() {
       const currentPhase = phaseRef.current;
@@ -109,11 +138,27 @@ export default function LoadingBar({ status }: { status: PipelineStatus }) {
 
     rafRef.current = requestAnimationFrame(tick);
     return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
-  }, [phase, groupsDone, groupsTotal]);
+  }, [phase, groupsDone, groupsTotal, scoringStep, status.combined]);
+
+  // Rotate the implied-step label while waiting on the combined batch. Advance and
+  // hold on the last step rather than looping, so it never feels like it regresses.
+  useEffect(() => {
+    if (phase !== "scoring" || !status.combined) {
+      setScoringStep(0);
+      return;
+    }
+    const id = setInterval(
+      () => setScoringStep((s) => Math.min(s + 1, SCORING_STEPS.length - 1)),
+      SCORING_STEP_MS,
+    );
+    return () => clearInterval(id);
+  }, [phase, status.combined]);
 
   let displayLabel: string;
   if (phase === "done" && summary) {
     displayLabel = `Analyzed ${summary.count} listing${summary.count !== 1 ? "s" : ""} in ${summary.elapsed}s`;
+  } else if (phase === "scoring" && status.combined) {
+    displayLabel = SCORING_STEPS[scoringStep];
   } else if (phase === "scoring" && groupsTotal > 1) {
     displayLabel = `Scoring listings — ${groupsDone} of ${groupsTotal} done`;
   } else {

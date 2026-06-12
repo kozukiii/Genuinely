@@ -142,6 +142,7 @@ async function runAnalysisPipeline(
   setListings: React.Dispatch<React.SetStateAction<Listing[]>>,
   signal: AbortSignal,
   onStatus?: (s: import("../components/LoadingBar").PipelineStatus) => void,
+  combinedBatch = false,
 ) {
   let itemsToAnalyze = items;
 
@@ -248,6 +249,9 @@ async function runAnalysisPipeline(
   let groupsTotal = 0;
   const coveredIndices = new Set<number>();
   const scoringPromises: Promise<void>[] = [];
+  // In combined-batch mode we don't score groups as they stream in — we collect
+  // them all and fire a single /batch-analyze-all so every card populates at once.
+  const collectedGroups: Group[] = [];
 
   // Apply freshly-scored listings: persist to sessionStorage (survives unmount),
   // notify any open ListingPage, and update React state. Price range/source are
@@ -346,6 +350,44 @@ async function runAnalysisPipeline(
     }
   }
 
+  // Combined mode: submit every collected group as ONE Groq batch job, then apply
+  // all scores together. One batch lifecycle instead of N — cheaper and scales far
+  // better with concurrency, at the cost of no group-by-group progressive fill.
+  async function runCombinedBatch(): Promise<void> {
+    const payloadGroups = collectedGroups
+      .map((group) => ({
+        listings: group.indices.map((i) => itemsToAnalyze[i]).filter(Boolean),
+        contextToken: group.contextToken,
+      }))
+      .filter((g) => g.listings.length > 0);
+
+    const allListings = payloadGroups.flatMap((g) => g.listings);
+    if (allListings.length === 0) return;
+
+    try {
+      const res = await fetch(`${API_BASE}/api/search/batch-analyze-all`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ groups: payloadGroups }),
+        signal,
+      });
+      if (!res.ok) throw new Error(`batch-analyze-all HTTP ${res.status}`);
+
+      const data = await res.json();
+      const scored: Listing[] = Array.isArray(data.listings) ? data.listings : [];
+      const stabilized = await retryUnscoredListings(scored);
+
+      if (signal.aborted) return;
+      applyScoredListings(stabilized);
+      groupsDone = groupsTotal;
+      onStatus?.({ phase: "scoring", groupsDone, groupsTotal });
+    } catch (err: unknown) {
+      if ((err as { name?: string })?.name === "AbortError") return;
+      console.error("[analysis] batch-analyze-all failed:", err);
+      applyScoringFailure(allListings as Listing[]);
+    }
+  }
+
   // Stream context and score each group as soon as it is ready. The backend
   // /batch-analyze route still uses Groq Batch API for each submitted group.
   try {
@@ -377,7 +419,8 @@ async function runAnalysisPipeline(
             onStatus?.({ phase: "scoring", groupsDone, groupsTotal });
           } else if (event.kind === "group") {
             (event.group.indices as number[]).forEach((i) => coveredIndices.add(i));
-            scoringPromises.push(scoreGroup(event.group));
+            if (combinedBatch) collectedGroups.push(event.group);
+            else scoringPromises.push(scoreGroup(event.group));
           }
         } catch { /* skip malformed SSE line */ }
       }
@@ -389,7 +432,9 @@ async function runAnalysisPipeline(
     coveredIndices.clear();
     groupsTotal = 1;
     onStatus?.({ phase: "scoring", groupsDone: 0, groupsTotal });
-    scoringPromises.push(scoreGroup({ canonicalName: query, specificity: "broad", indices: itemsToAnalyze.map((_, i) => i), context: null }));
+    const fallbackGroup: Group = { canonicalName: query, specificity: "broad", indices: itemsToAnalyze.map((_, i) => i), context: null };
+    if (combinedBatch) collectedGroups.push(fallbackGroup);
+    else scoringPromises.push(scoreGroup(fallbackGroup));
   }
 
   if (signal.aborted) return;
@@ -399,10 +444,13 @@ async function runAnalysisPipeline(
   if (orphanIndices.length > 0) {
     groupsTotal++;
     onStatus?.({ phase: "scoring", groupsDone, groupsTotal });
-    scoringPromises.push(scoreGroup({ canonicalName: "", specificity: "broad", indices: orphanIndices, context: null }));
+    const orphanGroup: Group = { canonicalName: "", specificity: "broad", indices: orphanIndices, context: null };
+    if (combinedBatch) collectedGroups.push(orphanGroup);
+    else scoringPromises.push(scoreGroup(orphanGroup));
   }
 
-  await Promise.all(scoringPromises);
+  if (combinedBatch) await runCombinedBatch();
+  else await Promise.all(scoringPromises);
 
   onStatus?.({ phase: "done", listingsScored: items.length });
 }
@@ -569,12 +617,12 @@ export default function SearchPage() {
         const elapsedSeconds = pipelineStartRef.current != null
           ? parseFloat(((Date.now() - pipelineStartRef.current) / 1000).toFixed(1))
           : undefined;
-        publishPipelineStatus({ ...s, elapsedSeconds });
+        publishPipelineStatus({ ...s, elapsedSeconds, combined: true });
       } else {
-        publishPipelineStatus(s);
+        publishPipelineStatus({ ...s, combined: true });
       }
     };
-    runAnalysisPipeline(query, toAnalyze, setListings, ctrl.signal, onStatus).finally(() => {
+    runAnalysisPipeline(query, toAnalyze, setListings, ctrl.signal, onStatus, true).finally(() => {
       analysisControllersRef.current = analysisControllersRef.current.filter((c) => c !== ctrl);
     });
   }

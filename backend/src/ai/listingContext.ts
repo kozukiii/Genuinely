@@ -298,39 +298,104 @@ async function isCardQuery(query: string): Promise<boolean> {
   }
 }
 
+// Primary grouping model. A capable model groups far more reliably than the 8b
+// (fewer spurious overlaps/merges), and getting grouping right the first time
+// avoids duplicate batch items downstream — which nets out latency-neutral or
+// better despite the slightly slower call.
+const GROUPING_MODEL = "llama-3.3-70b-versatile";
+const GROUPING_RETRY_MODEL = "llama-3.3-70b-versatile";
+
+// A listing must belong to exactly one product group. Return the indices that
+// the model placed in 2+ groups (empty array = clean).
+function overlappingIndices(groups: RawGroup[]): number[] {
+  const seen = new Set<number>();
+  const dupes = new Set<number>();
+  for (const g of groups) {
+    for (const i of g.indices) {
+      if (seen.has(i)) dupes.add(i);
+      else seen.add(i);
+    }
+  }
+  return [...dupes];
+}
+
+// Deterministic safety net: keep each index only in the FIRST group that claims
+// it, drop it from later groups, and drop any group left empty. Guarantees the
+// returned grouping never overlaps, regardless of what the model did.
+function dedupeGroups(groups: RawGroup[]): RawGroup[] {
+  const claimed = new Set<number>();
+  const out: RawGroup[] = [];
+  for (const g of groups) {
+    const indices = g.indices.filter((i) => !claimed.has(i));
+    if (indices.length === 0) continue;
+    indices.forEach((i) => claimed.add(i));
+    out.push({ ...g, indices });
+  }
+  return out;
+}
+
+async function callGroupingModel(
+  titles: string[],
+  query: string,
+  model: string,
+  correction?: string,
+): Promise<RawGroup[]> {
+  const titlesBlock = titles.map((t, i) => `${i}. ${t}`).join("\n");
+  const userContent = correction
+    ? `Search query: "${query}"\n\nListing titles:\n${titlesBlock}\n\n${correction}`
+    : `Search query: "${query}"\n\nListing titles:\n${titlesBlock}`;
+
+  const response = await groq.chat.completions.create({
+    model,
+    messages: [
+      { role: "system", content: GROUPING_SYSTEM },
+      { role: "user", content: userContent },
+    ],
+    max_tokens: 1200,
+    temperature: 0.1,
+  });
+  logUsage("groq", model, response.usage);
+
+  const raw = (response.choices[0].message.content ?? "").trim();
+  const start = raw.indexOf("[");
+  const end = raw.lastIndexOf("]");
+  if (start === -1 || end === -1) throw new Error("No JSON array in grouping response");
+
+  const parsed = JSON.parse(raw.slice(start, end + 1));
+  if (!Array.isArray(parsed) || parsed.length === 0) throw new Error("Empty groups array");
+
+  return parsed
+    .filter((g: any) => typeof g.canonicalName === "string" && Array.isArray(g.indices) && typeof g.serperQuery === "string")
+    .map((g: any): RawGroup => ({
+      canonicalName: g.canonicalName,
+      indices: (g.indices as any[]).filter((i) => typeof i === "number"),
+      serperQuery: g.serperQuery,
+      hasReliableMarketData: g.hasReliableMarketData !== false,
+      source: g.source === "pricecharting" ? "pricecharting" : "serper",
+    }));
+}
+
 async function groupListings(titles: string[], query: string): Promise<RawGroup[]> {
   if (titles.length === 0) return [];
 
   try {
-    const titlesBlock = titles.map((t, i) => `${i}. ${t}`).join("\n");
-    const response = await groq.chat.completions.create({
-      model: "llama-3.1-8b-instant",
-      messages: [
-        { role: "system", content: GROUPING_SYSTEM },
-        { role: "user", content: `Search query: "${query}"\n\nListing titles:\n${titlesBlock}` },
-      ],
-      max_tokens: 1200,
-      temperature: 0.1,
-    });
-    logUsage("groq", "llama-3.1-8b-instant", response.usage);
+    let groups = await callGroupingModel(titles, query, GROUPING_MODEL);
 
-    const raw = (response.choices[0].message.content ?? "").trim();
-    const start = raw.indexOf("[");
-    const end = raw.lastIndexOf("]");
-    if (start === -1 || end === -1) throw new Error("No JSON array in grouping response");
-
-    const parsed = JSON.parse(raw.slice(start, end + 1));
-    if (!Array.isArray(parsed) || parsed.length === 0) throw new Error("Empty groups array");
-
-    const groups = parsed
-      .filter((g: any) => typeof g.canonicalName === "string" && Array.isArray(g.indices) && typeof g.serperQuery === "string")
-      .map((g: any): RawGroup => ({
-        canonicalName: g.canonicalName,
-        indices: (g.indices as any[]).filter((i) => typeof i === "number"),
-        serperQuery: g.serperQuery,
-        hasReliableMarketData: g.hasReliableMarketData !== false,
-        source: g.source === "pricecharting" ? "pricecharting" : "serper",
-      }));
+    // If the model assigned any listing to multiple groups, give it one chance to
+    // regroup with the specific indices it duplicated called out, then fall back
+    // to a deterministic dedupe so the output is guaranteed clean either way.
+    const dupes = overlappingIndices(groups);
+    if (dupes.length > 0) {
+      console.warn(`[groupListings] overlapping indices ${JSON.stringify(dupes)} — regrouping`);
+      try {
+        const correction = `IMPORTANT: Each listing index must appear in EXACTLY ONE group. Your previous attempt placed these indices in multiple groups: ${dupes.join(", ")}. Re-group so every index appears exactly once.`;
+        const retried = await callGroupingModel(titles, query, GROUPING_RETRY_MODEL, correction);
+        if (overlappingIndices(retried).length < dupes.length) groups = retried;
+      } catch (err) {
+        console.warn("[groupListings] regroup attempt failed, using dedupe:", err);
+      }
+      groups = dedupeGroups(groups);
+    }
 
     console.log("[groupListings] groups:", groups.map(g => ({
       canonicalName: g.canonicalName,

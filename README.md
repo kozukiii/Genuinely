@@ -40,7 +40,7 @@ The app searches supported marketplaces, organizes listing data, analyzes price 
 - 🏷️ **Category-aware price sources** for more accurate pricing in supported categories
 - 🔥 **Trending search shortcuts** for popular products
 - 🎚️ **Filters** for price, condition, shipping, and location
-- 💾 **Saved listings** synced to user accounts with guest fallback support
+- 💾 **Saved listings** synced to user accounts with guest fallback support — analysis-only persistence, with listing content re-fetched live on view
 - 📊 **Listing detail pages** with a visual score breakdown and plain-English analysis
 - 🖼️ **Image proxying** for cleaner and more reliable listing images
 - 🎨 **eBay variation selector** for item-group listings — pick a specific color, size, or model before analyzing
@@ -220,6 +220,27 @@ Listing analysis is treated as a server-controlled operation, so the client can 
 When a client requests analysis, the server **re-verifies that signature** before doing any work — any tampering with prices, condition, seller signals, or other listing fields invalidates the proof and the request is rejected. Trusted scoring inputs that must not be client-supplied (system prompt, price range, price source, shipping estimate) are kept server-side behind a **single-use, TTL-bound context token** that is bound to the exact set of listing keys it was issued for.
 
 This keeps price fairness, trust scoring, and the AI prompt anchored to server-issued data rather than anything the browser sends, while signing keys are sourced from `ANALYSIS_SIGNING_SECRET` (falling back to `JWT_SECRET`).
+
+### Saved-listings storage (analysis-only persistence)
+
+Saved listings are persisted with a deliberate boundary: **the database stores only Genuinely's own analysis output plus the listing's identity — never the source platform's content.** When a user saves a listing, the server runs it through a strict field **allowlist** before writing to disk:
+
+| Persisted | Never persisted |
+| --- | --- |
+| `id`, `source` (identity) | `title`, `description`, `fullDescription` |
+| `score`, `aiScore`, `aiScores` | `images`, `seller`, `price`, `condition`, `url` |
+| `overview`, `highlights` | any other source-supplied field |
+| `priceLow`/`priceHigh`/`priceSource` (derived) | |
+| availability metadata | |
+
+The allowlist lives in `savedRoutes.ts` (`ALLOWED_FIELDS`); a guarded one-time migration in `db.ts` scrubbed any pre-existing rows down to the same shape.
+
+Because the persisted record is just scores + an identity, the saved view is hydrated in two layers:
+
+1. **localStorage** keeps the full listing as a per-browser convenience cache, so everyday rendering is instant and offline-friendly.
+2. On a device with no local cache (e.g. fresh login), the client calls `POST /api/saved/hydrate`, which **re-fetches live listing content by `source` + `id`** from the source platform at view time. The fetched content is held only in the client; the stored analysis is then re-applied on top so scores always win.
+
+The net effect: listing content is always read live and never retained server-side, while the user's saved scores and analysis persist across devices.
 
 ---
 

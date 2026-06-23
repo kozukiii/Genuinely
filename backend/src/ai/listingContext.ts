@@ -1,5 +1,4 @@
 import OpenAI from "openai";
-import fetch from "node-fetch";
 import dotenv from "dotenv";
 import { logUsage } from "../services/usageLogger";
 import { scrapePriceChartingUrl } from "../priceSources/priceCharting";
@@ -59,11 +58,13 @@ async function serperSearch(apiKey: string, query: string, num: number): Promise
     const timer = setTimeout(() => controller.abort(), SERPER_TIMEOUT_MS);
 
     try {
-      const res = await fetch(SERPER_URL, {
-        method: "POST",
-        headers: { "X-API-KEY": apiKey, "Content-Type": "application/json" },
-        body: JSON.stringify({ q: query, num }),
-        signal: controller.signal as any,
+      // GET (no JSON body) via native fetch — lighter than the POST form and a
+      // touch faster. Serper accepts q/num as query params with the key in header.
+      const url = `${SERPER_URL}?q=${encodeURIComponent(query)}&num=${num}`;
+      const res = await fetch(url, {
+        method: "GET",
+        headers: { "X-API-KEY": apiKey },
+        signal: controller.signal,
       });
 
       if (res.status === 429) {
@@ -218,7 +219,7 @@ export async function fetchMarketContext(query: string): Promise<string | null> 
     if (ab?.answer) parts.push(`Price summary: ${ab.answer}`);
     else if (ab?.snippet) parts.push(`Price summary: ${ab.snippet}`);
     if (priceJson?.knowledgeGraph?.description) parts.push(`Product overview: ${priceJson.knowledgeGraph.description}`);
-    const rows = extractOrganic(priceJson, 8);
+    const rows = extractOrganic(priceJson, 4);
     if (rows.length) parts.push(`Pricing data:\n${rows.map((s, i) => `${i + 1}. ${s}`).join("\n")}`);
   }
 
@@ -662,7 +663,7 @@ async function processOneGroup(
       if (!marketData && serperApiKey) {
         console.log(`[group] "${group.canonicalName}" — PC miss, falling back to Serper (price only)`);
         const priceJson = !skipPriceSearch
-          ? await serperSearch(serperApiKey, `${group.serperQuery} used resale price sold 2025 2026`, 8).catch(() => null)
+          ? await serperSearch(serperApiKey, `${group.serperQuery} used resale price sold 2025 2026`, 4).catch(() => null)
           : null;
 
         const serperPrices = priceJson ? extractPricesFromSerper(priceJson) : { priceLow: null, priceHigh: null };
@@ -676,7 +677,7 @@ async function processOneGroup(
           if (ab?.answer) parts.push(`Price summary: ${ab.answer}`);
           else if (ab?.snippet) parts.push(`Price summary: ${ab.snippet}`);
           if (priceJson?.knowledgeGraph?.description) parts.push(`Product overview: ${priceJson.knowledgeGraph.description}`);
-          const rows = extractOrganic(priceJson, 8);
+          const rows = extractOrganic(priceJson, 4);
           if (rows.length) parts.push(`Pricing data:\n${rows.map((s: string, i: number) => `${i + 1}. ${s}`).join("\n")}`);
         }
         marketData = parts.length > 0 ? parts.join("\n\n") : null;
@@ -688,7 +689,7 @@ async function processOneGroup(
       // its own product knowledge — how you assess a product's damage doesn't
       // change with fresh search data, so we don't waste a Serper query on it.
       const priceJson = serperApiKey && !skipPriceSearch
-        ? await serperSearch(serperApiKey, `${group.serperQuery} used resale price sold 2025 2026`, 8).catch(() => null)
+        ? await serperSearch(serperApiKey, `${group.serperQuery} used resale price sold 2025 2026`, 4).catch(() => null)
         : null;
 
       const serperPrices = priceJson ? extractPricesFromSerper(priceJson) : { priceLow: null, priceHigh: null };
@@ -702,7 +703,7 @@ async function processOneGroup(
         if (ab?.answer) parts.push(`Price summary: ${ab.answer}`);
         else if (ab?.snippet) parts.push(`Price summary: ${ab.snippet}`);
         if (priceJson?.knowledgeGraph?.description) parts.push(`Product overview: ${priceJson.knowledgeGraph.description}`);
-        const rows = extractOrganic(priceJson, 8);
+        const rows = extractOrganic(priceJson, 4);
         if (rows.length) parts.push(`Pricing data:\n${rows.map((s: string, i: number) => `${i + 1}. ${s}`).join("\n")}`);
       }
       marketData = parts.length > 0 ? parts.join("\n\n") : null;

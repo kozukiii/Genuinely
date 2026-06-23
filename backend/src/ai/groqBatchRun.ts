@@ -27,6 +27,7 @@ export interface RawChatBatchOpts {
   maxTokens?: number; // per-request completion cap. Default 1000.
 }
 
+
 /**
  * Run a batch of independent chat requests. `messagesList[i]` is the full
  * messages array for item i. Returns raw assistant content per item, in order;
@@ -40,7 +41,7 @@ export async function runRawChatBatch(
 ): Promise<string[]> {
   if (messagesList.length === 0) return [];
   const timeoutMs = opts?.timeoutMs ?? 90_000;
-  const pollMs = opts?.pollMs ?? 1500;
+  const pollMs = opts?.pollMs ?? 1; // poll as fast as network RTT allows — kills end-of-batch detection lag
   const maxTokens = opts?.maxTokens ?? 1500;
 
   const jsonl = messagesList

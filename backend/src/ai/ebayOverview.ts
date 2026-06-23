@@ -306,6 +306,7 @@ HIGHLIGHTS RULES:
 - Do NOT surface the condition label (e.g. "Used condition", "Like New") as a highlight. Only flag condition if the images visibly contradict the stated condition (e.g. visible damage on a "Like New" claim).
 - For shipping: mark positive if free ("Free shipping"). Mark negative ONLY if the cost is unreasonably high relative to the item price (e.g. $25 shipping on a $30 item). Do NOT flag shipping negatively just because it has a cost — a small flat fee on a high-value item is normal and should not appear as a highlight at all.
 - Output 3–6 highlights total. Each label must be ≤10 words and state a specific fact.
+- NEVER reference price, value, cost, deal, or affordability in a highlight (no "great price", "below market", "overpriced", "good value", "low price", etc.). Price is shown separately with its own indicator and a price highlight here often contradicts it — leave pricing OUT of highlights entirely.
 - Order by importance — most buyer-relevant facts first. The first two will be featured on search cards.
 - Good label examples: "Original box included", "Charger included", "Free shipping", "Top-rated seller", "Missing accessories", "Visible wear in images"
 - Only include highlights with clear evidence. Do NOT pad or invent.
@@ -407,6 +408,7 @@ HIGHLIGHTS RULES (apply to every listing):
 - Do NOT surface the condition label as a highlight. Only flag condition if images visibly contradict the stated condition (e.g. visible damage on a "Like New" claim).
 - For shipping: positive if free ("Free shipping"). Negative ONLY if the cost is unreasonably high relative to item price (e.g. $25 shipping on a $30 item). Do NOT generate a shipping highlight at all if the cost is reasonable — having a small flat fee is normal, not a flaw.
 - Output 3–6 highlights per listing. Labels ≤10 words, factual.
+- NEVER reference price, value, cost, deal, or affordability in a highlight (no "great price", "below market", "overpriced", "good value", "low price", etc.). Price is shown separately with its own indicator and a price highlight here often contradicts it — leave pricing OUT of highlights entirely.
 - Order by importance — most buyer-relevant facts first. The first two will be featured on search cards.
 - Examples: "Original box included", "Charger included", "Free shipping", "Top-rated seller", "Missing accessories", "Visible wear in images"
 - Only include highlights with clear evidence. Do NOT pad.
@@ -460,6 +462,7 @@ HIGHLIGHTS RULES:
 - Do NOT surface the condition label as a highlight. Only flag condition if images visibly contradict the stated condition (e.g. visible damage on a "Like New" claim).
 - For shipping: positive if free ("Free shipping"). Negative ONLY if the cost is unreasonably high relative to item price (e.g. $25 shipping on a $30 item). Do NOT generate a shipping highlight at all if the cost is reasonable — having a small flat fee is normal, not a flaw.
 - Output 3–6 highlights per listing. Labels ≤10 words, factual.
+- NEVER reference price, value, cost, deal, or affordability in a highlight (no "great price", "below market", "overpriced", "good value", "low price", etc.). Price is shown separately with its own indicator and a price highlight here often contradicts it — leave pricing OUT of highlights entirely.
 - Order by importance — most buyer-relevant facts first. The first two will be featured on search cards.
 - Examples: "Original box included", "Charger included", "Free shipping", "Top-rated seller", "Missing accessories", "Visible wear in images"
 - Only include highlights with clear evidence. Do NOT pad.

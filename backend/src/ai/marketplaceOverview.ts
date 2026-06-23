@@ -492,6 +492,7 @@ HIGHLIGHTS RULES:
 - Then add clearly observable positive or negative details from the title, description, or images — such as pickup/delivery options, notable item specifics, or seller signals.
 - Do NOT surface the condition label (e.g. "Used condition") as a highlight. Only flag condition if the images visibly contradict the stated condition (e.g. visible damage on a "Like New" claim).
 - Output 3–6 highlights total. Each label must be ≤10 words and state a specific fact.
+- NEVER reference price, value, cost, deal, or affordability in a highlight (no "great price", "below market", "overpriced", "good value", "low price", etc.). Price is shown separately with its own indicator and a price highlight here often contradicts it — leave pricing OUT of highlights entirely.
 - Order by importance — most buyer-relevant facts first. The first two will be featured on search cards.
 - Good label examples: "Original box included", "Charger included", "Local pickup only", "Active listing", "Missing accessories", "Visible wear in images"
 - Only include highlights with clear evidence. Do NOT pad or invent.
@@ -586,6 +587,7 @@ HIGHLIGHTS RULES (apply to every listing):
 - Then add clearly observable positive or negative details from title, description, or images — such as pickup/delivery options, notable item specifics, or seller signals.
 - Do NOT surface the condition label as a highlight. Only flag condition if images visibly contradict the stated condition (e.g. visible damage on a "Like New" claim).
 - Output 3–6 highlights per listing. Labels ≤10 words, factual.
+- NEVER reference price, value, cost, deal, or affordability in a highlight (no "great price", "below market", "overpriced", "good value", "low price", etc.). Price is shown separately with its own indicator and a price highlight here often contradicts it — leave pricing OUT of highlights entirely.
 - Order by importance — most buyer-relevant facts first. The first two will be featured on search cards.
 - Examples: "Original box included", "Charger included", "Local pickup only", "Active listing", "Missing accessories", "Visible wear in images"
 - Only include highlights with clear evidence. Do NOT pad.
@@ -652,6 +654,7 @@ HIGHLIGHTS RULES:
 - Then add clearly observable positive or negative details from title, description, or images — such as pickup/delivery options, notable item specifics, or seller signals.
 - Do NOT surface the condition label as a highlight. Only flag condition if images visibly contradict the stated condition (e.g. visible damage on a "Like New" claim).
 - Output 3–6 highlights per listing. Labels ≤10 words, factual.
+- NEVER reference price, value, cost, deal, or affordability in a highlight (no "great price", "below market", "overpriced", "good value", "low price", etc.). Price is shown separately with its own indicator and a price highlight here often contradicts it — leave pricing OUT of highlights entirely.
 - Order by importance — most buyer-relevant facts first. The first two will be featured on search cards.
 - Examples: "Original box included", "Charger included", "Local pickup only", "Active listing", "Missing accessories", "Visible wear in images"
 - Only include highlights with clear evidence. Do NOT pad.

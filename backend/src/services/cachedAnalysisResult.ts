@@ -42,5 +42,11 @@ function applyPatch<T extends Record<string, any>>(
     highlights: cached.highlights,
     rawAnalysis: cached.rawAnalysis,
     analysisPending: false,
+    // Restore price range/source so the graph + badges render on cache hits.
+    ...(cached.priceLow != null ? { priceLow: cached.priceLow } : {}),
+    ...(cached.priceHigh != null ? { priceHigh: cached.priceHigh } : {}),
+    ...(cached.priceSource ? { priceSource: cached.priceSource } : {}),
+    ...(cached.priceChartingUrl ? { priceChartingUrl: cached.priceChartingUrl } : {}),
+    ...(cached.tcgPlayerUrl ? { tcgPlayerUrl: cached.tcgPlayerUrl } : {}),
   };
 }

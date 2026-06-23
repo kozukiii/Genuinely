@@ -2,7 +2,7 @@ import { analyzeMarketplaceListingWithImages, batchAnalyzeMarketplaceListingsWit
 import { batchAnalyzeMarketplaceListingsViaBatchApi } from "../../ai/marketplaceBatchApi";
 import { extractStructuredAnalysis, validateAnalysis, EMPTY_ANALYSIS } from "../../utils/extractStructuredAnalysis";
 import { calculatePriceFairness, isAcceptsOffersPrice } from "./priceFairnessScore";
-import { setCachedAnalysis, setCachedAnalysisBatch } from "../analysisCache";
+import { setCachedAnalysis, setCachedAnalysisBatch, type PriceMeta } from "../analysisCache";
 
 const MARKETPLACE_SCORE_KEYS = new Set([
   "priceFairness",
@@ -159,6 +159,7 @@ export function scoreMarketplaceListingFromRaw(
   systemPrompt?: string | null,
   priceLow?: number | null,
   priceHigh?: number | null,
+  priceMeta?: PriceMeta,
 ): any {
   const parsed = parseMarketplaceAnalysis(listing, raw ?? "{}", context, priceLow, priceHigh);
   const result = { ...parsed, systemPrompt: systemPrompt ?? MARKETPLACE_BATCH_SYSTEM_PROMPT };
@@ -166,12 +167,13 @@ export function scoreMarketplaceListingFromRaw(
   if (listing.id && listing.source) {
     setCachedAnalysis(listing.source, listing.id, {
       aiScore: result.aiScore, aiScores: result.aiScores, overview: result.overview, highlights: result.highlights,
+      priceLow, priceHigh, ...priceMeta,
     });
   }
   return result;
 }
 
-export async function scoreMarketplaceListings(listings: any[], context?: string | null, systemPrompt?: string | null, priceLow?: number | null, priceHigh?: number | null) {
+export async function scoreMarketplaceListings(listings: any[], context?: string | null, systemPrompt?: string | null, priceLow?: number | null, priceHigh?: number | null, priceMeta?: PriceMeta) {
   if (listings.length === 0) return [];
 
   const resultMap = new Map<number, any>();
@@ -205,6 +207,7 @@ export async function scoreMarketplaceListings(listings: any[], context?: string
           aiScores: result.aiScores,
           overview: result.overview,
           highlights: result.highlights,
+          priceLow, priceHigh, ...priceMeta,
         },
       });
     }

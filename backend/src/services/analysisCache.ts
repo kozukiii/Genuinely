@@ -11,9 +11,24 @@ export interface AnalysisCacheEntry {
   aiScores: Record<string, number | null | undefined>;
   overview: string;
   highlights?: { label: string; positive: boolean }[];
+  // Price range/source — needed so cache hits still render the price graph and
+  // badges (the saved-listings path stores these too; the cache must match).
+  priceLow?: number | null;
+  priceHigh?: number | null;
+  priceSource?: string | null;
+  priceChartingUrl?: string | null;
+  tcgPlayerUrl?: string | null;
 }
 
 export type AnalysisCacheStore = Record<string, AnalysisCacheEntry>;
+
+// Per-group price metadata (source + external links) threaded into cache writes
+// alongside the priceLow/priceHigh that scoring functions already receive.
+export interface PriceMeta {
+  priceSource?: string | null;
+  priceChartingUrl?: string | null;
+  tcgPlayerUrl?: string | null;
+}
 
 function readStore(): AnalysisCacheStore {
   try {

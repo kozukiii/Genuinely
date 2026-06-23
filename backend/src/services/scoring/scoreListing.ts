@@ -1,6 +1,7 @@
 import { scoreEbayListing } from "./scoreEbayListing";
 import { scoreMarketplaceListing, scoreMarketplaceListings } from "./scoreMarketplaceListing";
 import { analyzeItemsWithAI } from "../aiService";
+import type { PriceMeta } from "../analysisCache";
 
 export async function scoreListing(listing: any, context?: string | null, systemPrompt?: string | null) {
   switch (listing.source) {
@@ -13,14 +14,14 @@ export async function scoreListing(listing: any, context?: string | null, system
   }
 }
 
-export async function scoreListings(listings: any[], context?: string | null, systemPrompt?: string | null, priceLow?: number | null, priceHigh?: number | null) {
+export async function scoreListings(listings: any[], context?: string | null, systemPrompt?: string | null, priceLow?: number | null, priceHigh?: number | null, priceMeta?: PriceMeta) {
   const ebay = listings.filter((l) => l.source === "ebay");
   const marketplace = listings.filter((l) => l.source === "marketplace");
   const other = listings.filter((l) => l.source !== "ebay" && l.source !== "marketplace");
 
   const [scoredEbay, scoredMarketplace] = await Promise.all([
-    analyzeItemsWithAI(ebay, context, systemPrompt, priceLow, priceHigh),
-    scoreMarketplaceListings(marketplace, context, systemPrompt, priceLow, priceHigh),
+    analyzeItemsWithAI(ebay, context, systemPrompt, priceLow, priceHigh, priceMeta),
+    scoreMarketplaceListings(marketplace, context, systemPrompt, priceLow, priceHigh, priceMeta),
   ]);
 
   // Restore original order

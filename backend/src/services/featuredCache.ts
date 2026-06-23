@@ -91,6 +91,11 @@ async function buildFeatured(): Promise<FeaturedCache> {
         group.systemPrompt ?? null,
         group.priceLow ?? null,
         group.priceHigh ?? null,
+        {
+          priceSource: group.priceSource ?? null,
+          priceChartingUrl: group.priceChartingUrl ?? null,
+          tcgPlayerUrl: group.tcgPlayerUrl ?? null,
+        },
       );
 
       // Attach the group's price range / source so the frontend can render the chart,

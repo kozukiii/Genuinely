@@ -21,6 +21,9 @@ export interface ScoringGroup {
   systemPrompt?: string | null;
   priceLow?: number | null;
   priceHigh?: number | null;
+  priceSource?: string | null;
+  priceChartingUrl?: string | null;
+  tcgPlayerUrl?: string | null;
 }
 
 interface Unit {
@@ -59,8 +62,13 @@ export async function scoreGroupsInOneBatch(groups: ScoringGroup[]): Promise<any
 
   return units.map((u, i) => {
     const r = raw[i] ?? "{}";
+    const priceMeta = {
+      priceSource: u.group.priceSource ?? null,
+      priceChartingUrl: u.group.priceChartingUrl ?? null,
+      tcgPlayerUrl: u.group.tcgPlayerUrl ?? null,
+    };
     return u.source === "marketplace"
-      ? scoreMarketplaceListingFromRaw(u.listing, r, u.group.context, u.group.systemPrompt, u.group.priceLow, u.group.priceHigh)
-      : scoreEbayItemFromRaw(u.listing, r, u.group.context, u.group.systemPrompt, u.group.priceLow, u.group.priceHigh);
+      ? scoreMarketplaceListingFromRaw(u.listing, r, u.group.context, u.group.systemPrompt, u.group.priceLow, u.group.priceHigh, priceMeta)
+      : scoreEbayItemFromRaw(u.listing, r, u.group.context, u.group.systemPrompt, u.group.priceLow, u.group.priceHigh, priceMeta);
   });
 }

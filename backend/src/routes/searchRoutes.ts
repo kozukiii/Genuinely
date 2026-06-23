@@ -99,7 +99,11 @@ async function scoreSingleListingWithContext(listing: any) {
   const group = groups[0] ?? null;
   const toScore = enriched;
 
-  const [result] = await scoreListings([toScore], null, group?.systemPrompt ?? null, group?.priceLow ?? null, group?.priceHigh ?? null);
+  const [result] = await scoreListings([toScore], null, group?.systemPrompt ?? null, group?.priceLow ?? null, group?.priceHigh ?? null, {
+    priceSource: group?.priceSource ?? null,
+    priceChartingUrl: group?.priceChartingUrl ?? null,
+    tcgPlayerUrl: group?.tcgPlayerUrl ?? null,
+  });
 
   return {
     ...result,
@@ -261,6 +265,9 @@ router.post("/batch-analyze-all", async (req, res) => {
         systemPrompt: trusted?.systemPrompt ?? null,
         priceLow: trusted?.priceLow ?? null,
         priceHigh: trusted?.priceHigh ?? null,
+        priceSource: trusted?.priceSource ?? null,
+        priceChartingUrl: trusted?.priceChartingUrl ?? null,
+        tcgPlayerUrl: trusted?.tcgPlayerUrl ?? null,
       });
       groupMeta.push({
         count: enriched.length,
@@ -461,7 +468,7 @@ router.post("/batch-analyze", async (req, res) => {
     const priceSource = trustedContext.priceSource;
     const priceChartingUrl = trustedContext.priceChartingUrl;
     const tcgPlayerUrl = trustedContext.tcgPlayerUrl;
-    const scored = await scoreListings(enriched, null, systemPrompt, priceLow, priceHigh);
+    const scored = await scoreListings(enriched, null, systemPrompt, priceLow, priceHigh, { priceSource, priceChartingUrl, tcgPlayerUrl });
 
     // Attach price range to every item so the frontend doesn't have to patch it client-side.
     // Without this, priceLow/priceHigh only exist in the request and never reach the listing cards.

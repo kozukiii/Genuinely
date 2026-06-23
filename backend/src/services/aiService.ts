@@ -3,7 +3,7 @@ import { batchAnalyzeListingsViaBatchApi } from "../ai/ebayBatchApi";
 import { extractStructuredAnalysis, validateAnalysis, EMPTY_ANALYSIS } from "../utils/extractStructuredAnalysis";
 import { parseEbaySellerData, calculateSellerTrust } from "./scoring/sellerTrustScore";
 import { calculatePriceFairness } from "./scoring/priceFairnessScore";
-import { setCachedAnalysis, setCachedAnalysisBatch } from "./analysisCache";
+import { setCachedAnalysis, setCachedAnalysisBatch, type PriceMeta } from "./analysisCache";
 
 const EBAY_SCORE_KEYS = new Set([
   "priceFairness",
@@ -164,7 +164,7 @@ export async function analyzeItemWithAI(merged: any, context?: string | null) {
   return result;
 }
 
-export async function analyzeItemsWithAI(items: any[], context?: string | null, systemPrompt?: string | null, priceLow?: number | null, priceHigh?: number | null) {
+export async function analyzeItemsWithAI(items: any[], context?: string | null, systemPrompt?: string | null, priceLow?: number | null, priceHigh?: number | null, priceMeta?: PriceMeta) {
   if (items.length === 0) return [];
 
   const resultMap = new Map<number, any>();
@@ -189,7 +189,7 @@ export async function analyzeItemsWithAI(items: any[], context?: string | null, 
       toCache.push({
         source: item.source,
         id: item.id,
-        result: { aiScore: parsed.aiScore, aiScores: parsed.aiScores, overview: parsed.overview, highlights: parsed.highlights },
+        result: { aiScore: parsed.aiScore, aiScores: parsed.aiScores, overview: parsed.overview, highlights: parsed.highlights, priceLow, priceHigh, ...priceMeta },
       });
     }
   }
@@ -231,6 +231,7 @@ export function scoreEbayItemFromRaw(
   systemPrompt?: string | null,
   priceLow?: number | null,
   priceHigh?: number | null,
+  priceMeta?: PriceMeta,
 ): any {
   const parsed = parseAIAnalysis(item, raw ?? "{}");
   const base = { ...item, ...parsed, systemPrompt: systemPrompt ?? EBAY_BATCH_SYSTEM_PROMPT };
@@ -238,6 +239,7 @@ export function scoreEbayItemFromRaw(
   if (item.id && item.source) {
     setCachedAnalysis(item.source, item.id, {
       aiScore: parsed.aiScore, aiScores: parsed.aiScores, overview: parsed.overview, highlights: parsed.highlights,
+      priceLow, priceHigh, ...priceMeta,
     });
   }
 

@@ -766,10 +766,21 @@ async function processOneGroup(
 
   let systemPrompt = rawSystemPrompt;
 
-  // For serper groups, prefer Serper prices over Groq-extracted ones
+  // For serper groups, prefer the LLM-engineered range over the raw regex scrape.
+  // extractPricesFromSerper indiscriminately grabs every $amount in the snippets
+  // (whole-product prices, unrelated parts, etc.), so it often yields a wildly
+  // wrong range while engineerPrompt reasons out the actual resale band for THIS
+  // product. The regex value is only a fallback when the LLM produced nothing.
   if (!isPriceCharting) {
-    priceLow = priceLow ?? groqPriceLow;
-    priceHigh = priceHigh ?? groqPriceHigh;
+    if (groqPriceLow != null && groqPriceHigh != null) {
+      // Take the LLM range as a unit so the graph matches the prompt exactly.
+      priceLow = groqPriceLow;
+      priceHigh = groqPriceHigh;
+    } else {
+      // LLM gave an incomplete range — fall back to the regex scrape per-field.
+      priceLow = priceLow ?? groqPriceLow;
+      priceHigh = priceHigh ?? groqPriceHigh;
+    }
   }
 
   // Prepend authoritative PC price label to system prompt

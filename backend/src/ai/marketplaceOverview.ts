@@ -4,7 +4,7 @@ import fetch from "node-fetch";
 import sharp from "sharp";
 import { logUsage } from "../services/usageLogger";
 import { extractBatchObjects } from "../utils/extractBatchObjects";
-import { stitchDataUrls, gridLayoutNote, planImageBlocks, MAX_CELLS, type StitchResult } from "./stitchImages";
+import { stitchDataUrls, gridLayoutNote, type StitchResult } from "./stitchImages";
 
 // Longest-edge cap for inline Marketplace photos before base64 embedding. Keeps a
 // 5-block request comfortably under Groq's 4MB base64 limit while staying legible
@@ -220,33 +220,26 @@ async function fetchMarketplaceImageDataUrls(imageUrls: string[], limit: number)
   return results.filter((u): u is string => u !== null).slice(0, limit);
 }
 
-// Upper bound on photos fetched per listing. 5 blocks × MAX_CELLS is the hard
-// capacity, but each base64 fetch goes through the proxy and is slow, so we cap
-// lower to bound latency. Overflow beyond this is dropped.
-const MARKETPLACE_IMAGE_FETCH_CAP = 10;
+// Upper bound on photos fetched per listing. Every photo gets stitched into a
+// single size-bounded grid (see stitchImages), so a high cap doesn't blow up
+// token cost — it only costs proxy-fetch latency. Overflow beyond this is dropped.
+const MARKETPLACE_IMAGE_FETCH_CAP = 25;
 
-// Pack already-fetched Marketplace data URLs into ≤5 image blocks: raw single
-// blocks while they fit, stitched grids for the overflow so no photo is dropped.
+// Collapse ALL of a listing's photos into ONE size-bounded grid image (instead
+// of up to 5 separate blocks). The grid's total pixels are capped regardless of
+// photo count, so per-listing token cost stays flat whether it's 3 or 25 photos.
 async function buildMarketplaceImageBlocks(dataUrls: string[]): Promise<{ blocks: any[]; stitchedAny: boolean }> {
-  const groups = planImageBlocks(dataUrls.length, 5, MAX_CELLS);
-  const blocks: any[] = [];
-  let stitchedAny = false;
-
-  for (const g of groups) {
-    if (g.length === 1) {
-      blocks.push({ type: "image_url", image_url: { url: dataUrls[g[0]] } });
-      continue;
-    }
-    const grid = await stitchDataUrls(g.map((i) => dataUrls[i]));
-    if (grid) {
-      blocks.push({ type: "image_url", image_url: { url: grid.dataUrl } });
-      stitchedAny = true;
-    } else {
-      blocks.push({ type: "image_url", image_url: { url: dataUrls[g[0]] } });
-    }
+  if (dataUrls.length === 0) return { blocks: [], stitchedAny: false };
+  if (dataUrls.length === 1) {
+    return { blocks: [{ type: "image_url", image_url: { url: dataUrls[0] } }], stitchedAny: false };
   }
 
-  return { blocks, stitchedAny };
+  const grid = await stitchDataUrls(dataUrls);
+  if (grid) {
+    return { blocks: [{ type: "image_url", image_url: { url: grid.dataUrl } }], stitchedAny: true };
+  }
+  // Stitch failed to decode anything — fall back to the first raw photo.
+  return { blocks: [{ type: "image_url", image_url: { url: dataUrls[0] } }], stitchedAny: false };
 }
 
 /**
@@ -526,7 +519,7 @@ HIGHLIGHTS RULES:
   if (stitchedAny) {
     messages[1].content.push({
       type: "text",
-      text: "NOTE ON IMAGES: some images below are grids combining multiple separate photos of this SAME item (read left-to-right, top-to-bottom; white padding is letterboxing). Treat every photo/cell as the same listing — multiple angles are normal, not suspicious.",
+      text: "NOTE ON IMAGES: some images below are grids combining multiple separate photos of this SAME item (read left-to-right, top-to-bottom; each cell is cropped to fill its square, any trailing blank cell is just an empty slot). Treat every photo/cell as the same listing — multiple angles are normal, not suspicious.",
     });
   }
   for (const block of imageBlocks) messages[1].content.push(block);

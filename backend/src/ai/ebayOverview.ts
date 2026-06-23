@@ -3,7 +3,7 @@ import dotenv from "dotenv";
 import { calculatePriceFairness } from "../services/scoring/priceFairnessScore";
 import { extractBatchObjects } from "../utils/extractBatchObjects";
 import { validateAnalysis, EMPTY_ANALYSIS } from "../utils/extractStructuredAnalysis";
-import { stitchBuffers, gridLayoutNote, planImageBlocks, MAX_CELLS, type StitchResult } from "./stitchImages";
+import { stitchBuffers, gridLayoutNote, type StitchResult } from "./stitchImages";
 
 export interface VisionBatchOpts {
   /** When true, each listing's photos are stitched into a single grid image (1 image/listing). */
@@ -174,32 +174,29 @@ function isVariationListing(listing: any): boolean {
  * Extracted so both the synchronous path (analyzeListingWithImages) and the
  * Groq Batch API path (ebayBatchApi.ts) score listings with an identical prompt.
  */
-// Pack a listing's photos into ≤5 image blocks: raw single-photo blocks while
-// they fit, stitched grids for the overflow so no photo is dropped. eBay images
-// are public URLs, so single blocks stay as URLs (no fetch); only grouped photos
-// are fetched + stitched.
-async function buildEbayImageBlocks(urls: string[]): Promise<{ blocks: any[]; stitchedAny: boolean }> {
-  const groups = planImageBlocks(urls.length, 5, MAX_CELLS);
-  const blocks: any[] = [];
-  let stitchedAny = false;
+// Upper bound on photos pulled per eBay listing. All photos collapse into ONE
+// size-bounded grid (see stitchImages), so a high cap costs fetch latency, not tokens.
+const EBAY_IMAGE_CAP = 25;
 
-  for (const g of groups) {
-    if (g.length === 1) {
-      blocks.push({ type: "image_url", image_url: { url: urls[g[0]] } });
-      continue;
-    }
-    const buffers = (await Promise.all(g.map((i) => fetchImageBuffer(urls[i])))).filter((b): b is Buffer => b !== null);
-    const stitched = buffers.length ? await stitchBuffers(buffers) : null;
-    if (stitched) {
-      blocks.push({ type: "image_url", image_url: { url: stitched.dataUrl } });
-      stitchedAny = true;
-    } else {
-      // Fetch/stitch failed — fall back to one representative raw URL for the group.
-      blocks.push({ type: "image_url", image_url: { url: urls[g[0]] } });
-    }
+// Collapse ALL of a listing's photos into ONE size-bounded grid image. eBay
+// photos are public URLs but full-resolution, so sending them raw is token-heavy;
+// we fetch + downscale + stitch into a single capped grid instead. Only if every
+// fetch fails do we fall back to raw URLs so the model still sees something.
+async function buildEbayImageBlocks(urls: string[]): Promise<{ blocks: any[]; stitchedAny: boolean }> {
+  const capped = urls.slice(0, EBAY_IMAGE_CAP);
+  if (capped.length === 0) return { blocks: [], stitchedAny: false };
+
+  const buffers = (await Promise.all(capped.map((u) => fetchImageBuffer(u)))).filter((b): b is Buffer => b !== null);
+  if (buffers.length === 0) {
+    // Fetch failed entirely — fall back to raw URLs (legacy behavior).
+    return { blocks: capped.map((u) => ({ type: "image_url", image_url: { url: u } })), stitchedAny: false };
   }
 
-  return { blocks, stitchedAny };
+  const grid = await stitchBuffers(buffers);
+  if (grid) {
+    return { blocks: [{ type: "image_url", image_url: { url: grid.dataUrl } }], stitchedAny: grid.cellCount > 1 };
+  }
+  return { blocks: capped.map((u) => ({ type: "image_url", image_url: { url: u } })), stitchedAny: false };
 }
 
 /**
@@ -352,7 +349,7 @@ HIGHLIGHTS RULES:
   if (stitchedAny) {
     messages[1].content.push({
       type: "text",
-      text: "NOTE ON IMAGES: some images below are grids combining multiple separate photos of this SAME item (read left-to-right, top-to-bottom; white padding is letterboxing). Treat every photo/cell as the same listing — multiple angles are normal, not suspicious.",
+      text: "NOTE ON IMAGES: some images below are grids combining multiple separate photos of this SAME item (read left-to-right, top-to-bottom; each cell is cropped to fill its square, any trailing blank cell is just an empty slot). Treat every photo/cell as the same listing — multiple angles are normal, not suspicious.",
     });
   }
   for (const block of blocks) messages[1].content.push(block);

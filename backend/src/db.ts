@@ -53,6 +53,15 @@ db.exec(`
   );
 `);
 
+// last_seen: most-recent authenticated activity per user (bumped, throttled, by
+// requireAuth). Added via ALTER since the users table predates it. Nullable —
+// older accounts read NULL until their next request.
+const hasLastSeen = (db.prepare("PRAGMA table_info(users)").all() as { name: string }[])
+  .some((c) => c.name === "last_seen");
+if (!hasLastSeen) {
+  db.exec("ALTER TABLE users ADD COLUMN last_seen INTEGER");
+}
+
 const SCRUB_MIGRATION = "scrub_saved_listings_content_v1";
 const alreadyRun = db.prepare("SELECT 1 FROM migrations WHERE name = ?").get(SCRUB_MIGRATION);
 

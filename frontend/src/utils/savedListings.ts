@@ -35,6 +35,24 @@ function listingKey(listing: Pick<Listing, "source" | "id">): string {
   return `${listing.source}:${listing.id}`;
 }
 
+// ── Unsave tombstones ────────────────────────────────────────────────────────
+// When a listing is unsaved, an in-flight async re-save (health-check re-POST,
+// syncFromServer pull, updateSavedListing) can re-create it server-side after the
+// DELETE — and it reappears on the next sync. We mark just-unsaved keys here so
+// every re-save path skips them. Entries auto-expire so a later genuine re-save
+// (or re-save of the same item) still works; an explicit save clears it outright.
+const TOMBSTONE_TTL_MS = 15_000;
+const tombstones = new Map<string, number>(); // key -> expiry timestamp
+
+function tombstone(key: string) { tombstones.set(key, Date.now() + TOMBSTONE_TTL_MS); }
+function clearTombstone(key: string) { tombstones.delete(key); }
+function isTombstoned(key: string): boolean {
+  const expiry = tombstones.get(key);
+  if (expiry == null) return false;
+  if (Date.now() > expiry) { tombstones.delete(key); return false; }
+  return true;
+}
+
 function isInactiveStatus(status: Listing["availabilityStatus"]): boolean {
   return status === "sold" || status === "ended" || status === "removed";
 }
@@ -128,6 +146,9 @@ export async function refreshSavedListingsHealthCheck(
 
     if (isLoggedIn()) {
       changed.forEach((listing) => {
+        // Skip anything the user just unsaved — re-POSTing it here is exactly how
+        // a resurrected row would race the DELETE and reappear on next sync.
+        if (isTombstoned(listingKey(listing))) return;
         fetch(`${API_BASE}/api/saved`, {
           method: "POST",
           credentials: "include",
@@ -164,6 +185,7 @@ export function isSaved(id: string): boolean {
 export function updateSavedListing(listing: Listing) {
   const saved = getSavedListings();
   if (!saved.some((x) => x.id === listing.id)) return;
+  if (isTombstoned(listingKey(listing))) return; // just unsaved — don't resurrect
   setSavedListings(saved.map((x) => (x.id === listing.id ? listing : x)));
 
   if (isLoggedIn()) {
@@ -184,9 +206,14 @@ export function toggleSaved(listing: Listing): boolean {
     : [listing, ...saved];
   setSavedListings(next);
 
+  const key = listingKey(listing);
+
   if (isLoggedIn()) {
     if (exists) {
+      // Block any in-flight/async re-save from resurrecting this listing.
+      tombstone(key);
       const rollback = () => {
+        clearTombstone(key);
         const current = getSavedListings();
         if (!current.some((x) => x.id === listing.id)) {
           setSavedListings([...current, listing]);
@@ -196,6 +223,8 @@ export function toggleSaved(listing: Listing): boolean {
         method: "DELETE", credentials: "include",
       }).then((res) => { if (!res.ok) rollback(); }).catch(rollback);
     } else {
+      // Explicit save overrides any pending tombstone for this key.
+      clearTombstone(key);
       const rollback = () => {
         setSavedListings(getSavedListings().filter((x) => x.id !== listing.id));
       };
@@ -206,6 +235,11 @@ export function toggleSaved(listing: Listing): boolean {
         body: JSON.stringify({ listing }),
       }).then((res) => { if (!res.ok) rollback(); }).catch(rollback);
     }
+  } else if (exists) {
+    // Guest unsave still tombstones so a later login sync doesn't re-push it.
+    tombstone(key);
+  } else {
+    clearTombstone(key);
   }
 
   return !exists;
@@ -255,7 +289,9 @@ export async function syncFromServer(): Promise<void> {
     const res = await fetch(`${API_BASE}/api/saved`, { credentials: "include" });
     if (!res.ok) return;
     const data = await res.json();
-    const stubs: Listing[] = data.listings ?? [];
+    // Drop anything just unsaved locally — the server row may not be deleted yet,
+    // and pulling it back here is how an unsaved listing reappears.
+    const stubs: Listing[] = (data.listings ?? []).filter((s: Listing) => !isTombstoned(listingKey(s)));
 
     // Merge any content we already have cached locally on top of the stub identity,
     // keeping the server's freshly-synced analysis fields.

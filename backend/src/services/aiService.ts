@@ -164,10 +164,40 @@ export async function analyzeItemWithAI(merged: any, context?: string | null) {
   return result;
 }
 
+// Apply the deterministic priceFairness override to a parsed eBay analysis,
+// returning the final {aiScore, aiScores}. Variation listings (no single
+// representative price) keep the raw LLM scores. Used by both the live batch
+// path and the combined-batch FromRaw path so the cached scores ALWAYS reflect
+// the post-override values (otherwise a cache hit shows a different score than
+// a fresh analysis).
+function applyEbayPriceFairness(
+  item: any,
+  parsed: any,
+  context: string | null | undefined,
+  priceLow: number | null | undefined,
+  priceHigh: number | null | undefined,
+): { aiScore: number | null; aiScores: any } {
+  const itemIdStr = String(item.id ?? item.itemId ?? "");
+  const itemIsVariation = !!item.itemGroupId || /^v1\|\d+\|[1-9]\d*$/.test(itemIdStr);
+  if (itemIsVariation) return { aiScore: parsed.aiScore, aiScores: parsed.aiScores };
+
+  const fairness = calculatePriceFairness(item.price, context, priceLow, priceHigh);
+  if (fairness === null || !parsed.aiScores) return { aiScore: parsed.aiScore, aiScores: parsed.aiScores };
+
+  const aiScores = { ...parsed.aiScores, priceFairness: fairness };
+  const aiScore = average([
+    aiScores.priceFairness,
+    aiScores.sellerTrust,
+    aiScores.conditionHonesty,
+    aiScores.shippingFairness,
+    aiScores.locationRisk,
+    aiScores.descriptionQuality,
+  ]);
+  return { aiScore, aiScores };
+}
+
 export async function analyzeItemsWithAI(items: any[], context?: string | null, systemPrompt?: string | null, priceLow?: number | null, priceHigh?: number | null, priceMeta?: PriceMeta) {
   if (items.length === 0) return [];
-
-  const resultMap = new Map<number, any>();
 
   // Score EVERY listing in a single Batch API job (no per-call image cap, so no
   // need to chunk). On timeout/error, fall back to the synchronous packed call,
@@ -175,47 +205,29 @@ export async function analyzeItemsWithAI(items: any[], context?: string | null, 
   const rawStrings = await scoreAllRaw(items, context, systemPrompt);
 
   const toCache: Parameters<typeof setCachedAnalysisBatch>[0] = [];
-  for (let i = 0; i < items.length; i++) {
-    const item = items[i];
+  const results = items.map((item, i) => {
     const parsed = parseAIAnalysis(item, rawStrings[i] ?? "{}");
-
-    resultMap.set(i, {
+    const final = applyEbayPriceFairness(item, parsed, context, priceLow, priceHigh);
+    const result = {
       ...item,
       ...parsed,
+      aiScore: final.aiScore,
+      aiScores: final.aiScores,
       systemPrompt: systemPrompt ?? EBAY_BATCH_SYSTEM_PROMPT,
-    });
+    };
 
     if (item.id && item.source) {
       toCache.push({
         source: item.source,
         id: item.id,
-        result: { aiScore: parsed.aiScore, aiScores: parsed.aiScores, overview: parsed.overview, highlights: parsed.highlights, priceLow, priceHigh, ...priceMeta },
+        result: { aiScore: final.aiScore, aiScores: final.aiScores, overview: parsed.overview, highlights: parsed.highlights, priceLow, priceHigh, ...priceMeta },
       });
     }
-  }
-  setCachedAnalysisBatch(toCache);
-
-  return items.map((item, i) => {
-    const result = resultMap.get(i)!;
-
-    // Variation listings have no single representative price — skip the fairness override.
-    const itemIdStr = String(item.id ?? item.itemId ?? "");
-    const itemIsVariation = !!item.itemGroupId || /^v1\|\d+\|[1-9]\d*$/.test(itemIdStr);
-    if (itemIsVariation) return result;
-
-    const fairness = calculatePriceFairness(item.price, context, priceLow, priceHigh);
-    if (fairness === null || !result.aiScores) return result;
-    const updatedScores = { ...result.aiScores, priceFairness: fairness };
-    const updatedAiScore = average([
-      updatedScores.priceFairness,
-      updatedScores.sellerTrust,
-      updatedScores.conditionHonesty,
-      updatedScores.shippingFairness,
-      updatedScores.locationRisk,
-      updatedScores.descriptionQuality,
-    ]);
-    return { ...result, aiScores: updatedScores, aiScore: updatedAiScore };
+    return result;
   });
+
+  setCachedAnalysisBatch(toCache);
+  return results;
 }
 
 /**
@@ -234,29 +246,21 @@ export function scoreEbayItemFromRaw(
   priceMeta?: PriceMeta,
 ): any {
   const parsed = parseAIAnalysis(item, raw ?? "{}");
-  const base = { ...item, ...parsed, systemPrompt: systemPrompt ?? EBAY_BATCH_SYSTEM_PROMPT };
+  const final = applyEbayPriceFairness(item, parsed, context, priceLow, priceHigh);
+  const result = {
+    ...item,
+    ...parsed,
+    aiScore: final.aiScore,
+    aiScores: final.aiScores,
+    systemPrompt: systemPrompt ?? EBAY_BATCH_SYSTEM_PROMPT,
+  };
 
   if (item.id && item.source) {
     setCachedAnalysis(item.source, item.id, {
-      aiScore: parsed.aiScore, aiScores: parsed.aiScores, overview: parsed.overview, highlights: parsed.highlights,
+      aiScore: final.aiScore, aiScores: final.aiScores, overview: parsed.overview, highlights: parsed.highlights,
       priceLow, priceHigh, ...priceMeta,
     });
   }
 
-  const itemIdStr = String(item.id ?? item.itemId ?? "");
-  const itemIsVariation = !!item.itemGroupId || /^v1\|\d+\|[1-9]\d*$/.test(itemIdStr);
-  if (itemIsVariation) return base;
-
-  const fairness = calculatePriceFairness(item.price, context, priceLow, priceHigh);
-  if (fairness === null || !base.aiScores) return base;
-  const updatedScores = { ...base.aiScores, priceFairness: fairness };
-  const updatedAiScore = average([
-    updatedScores.priceFairness,
-    updatedScores.sellerTrust,
-    updatedScores.conditionHonesty,
-    updatedScores.shippingFairness,
-    updatedScores.locationRisk,
-    updatedScores.descriptionQuality,
-  ]);
-  return { ...base, aiScores: updatedScores, aiScore: updatedAiScore };
+  return result;
 }

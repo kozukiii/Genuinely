@@ -532,7 +532,7 @@ export async function analyzeMarketplaceListingWithImages(listing: any, context?
   const messages = await buildMarketplaceAnalysisMessages(listing, context);
 
   const response = await groq.chat.completions.create({
-    model: "meta-llama/llama-4-scout-17b-16e-instruct",
+    model: "qwen/qwen3.6-27b",
     messages,
     max_tokens: 1000,
     temperature: 0.2,

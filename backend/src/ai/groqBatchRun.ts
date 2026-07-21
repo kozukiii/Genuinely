@@ -16,7 +16,7 @@ const groq = new OpenAI({
   baseURL: "https://api.groq.com/openai/v1",
 });
 
-const MODEL = "meta-llama/llama-4-scout-17b-16e-instruct";
+const MODEL = "qwen/qwen3.6-27b";
 const TERMINAL = ["completed", "failed", "expired", "cancelled"];
 
 function sleep(ms: number) { return new Promise<void>((r) => setTimeout(r, ms)); }

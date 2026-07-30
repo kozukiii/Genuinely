@@ -166,6 +166,9 @@ The actual `.env` files are not committed.
 
 ```env
 GROQ_API_KEY=
+# Optional: defaults to meta-llama/llama-4-maverick-17b-128e-instruct.
+# Set this to another Groq vision model if your account/model availability changes.
+GROQ_VISION_MODEL=
 EBAY_APP_ID=
 EBAY_CERT_ID=
 EBAY_DEV_ID=

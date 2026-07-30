@@ -8,6 +8,7 @@
 
 import OpenAI, { toFile } from "openai";
 import dotenv from "dotenv";
+import { GROQ_VISION_MODEL } from "./groqModels";
 
 dotenv.config({ quiet: true });
 
@@ -16,7 +17,6 @@ const groq = new OpenAI({
   baseURL: "https://api.groq.com/openai/v1",
 });
 
-const MODEL = "meta-llama/llama-4-scout-17b-16e-instruct";
 const TERMINAL = ["completed", "failed", "expired", "cancelled"];
 
 function sleep(ms: number) { return new Promise<void>((r) => setTimeout(r, ms)); }
@@ -49,7 +49,7 @@ export async function runRawChatBatch(
       custom_id: `item-${i}`,
       method: "POST",
       url: "/v1/chat/completions",
-      body: { model: MODEL, messages, max_tokens: maxTokens, temperature: 0.2, response_format: { type: "json_object" } },
+      body: { model: GROQ_VISION_MODEL, messages, max_tokens: maxTokens, temperature: 0.2, response_format: { type: "json_object" } },
     }))
     .join("\n");
 
@@ -75,7 +75,11 @@ export async function runRawChatBatch(
     current = await groq.batches.retrieve(batch.id);
   }
   if (current.status !== "completed" || !current.output_file_id) {
-    throw new Error(`batch ${batch.id} ended non-complete (status=${current.status})`);
+    const counts = current.request_counts
+      ? ` requests=${current.request_counts.completed ?? 0}/${current.request_counts.total ?? 0} completed, ${current.request_counts.failed ?? 0} failed`
+      : "";
+    const errorFile = current.error_file_id ? ` error_file=${current.error_file_id}` : "";
+    throw new Error(`batch ${batch.id} produced no usable output (status=${current.status}${counts}${errorFile})`);
   }
 
   const content = await groq.files.content(current.output_file_id);

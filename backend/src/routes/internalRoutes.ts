@@ -123,7 +123,7 @@ async function fetchSerperUsage(): Promise<ProviderUsage> {
 // Groq pricing: USD per 1M tokens (input / output)
 const GROQ_PRICING: Record<string, { input: number; output: number }> = {
   "llama-3.1-8b-instant":  { input: 0.05,  output: 0.08  },
-  "llama-4-scout-17b":     { input: 0.11,  output: 0.34  },
+  "llama-4-maverick-17b":  { input: 0.20,  output: 0.60  },
 };
 const GROQ_DEFAULT_PRICE = { input: 0.10, output: 0.10 };
 

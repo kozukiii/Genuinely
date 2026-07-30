@@ -5,6 +5,7 @@ import sharp from "sharp";
 import { logUsage } from "../services/usageLogger";
 import { extractBatchObjects } from "../utils/extractBatchObjects";
 import { stitchDataUrls, gridLayoutNote, type StitchResult } from "./stitchImages";
+import { GROQ_VISION_MODEL, GROQ_VISION_USAGE_MODEL } from "./groqModels";
 
 // Longest-edge cap for inline Marketplace photos before base64 embedding. Keeps a
 // 5-block request comfortably under Groq's 4MB base64 limit while staying legible
@@ -532,13 +533,13 @@ export async function analyzeMarketplaceListingWithImages(listing: any, context?
   const messages = await buildMarketplaceAnalysisMessages(listing, context);
 
   const response = await groq.chat.completions.create({
-    model: "meta-llama/llama-4-scout-17b-16e-instruct",
+    model: GROQ_VISION_MODEL,
     messages,
     max_tokens: 1000,
     temperature: 0.2,
     response_format: { type: "json_object" },
   });
-  logUsage("groq", "llama-4-scout-17b", response.usage);
+  logUsage("groq", GROQ_VISION_USAGE_MODEL, response.usage);
   console.log("[marketplace:single] response_format=json_object used");
 
   return response.choices[0].message.content?.trim() || "{}";
@@ -726,7 +727,7 @@ async function _runMarketplaceBatch(listings: any[], allDataUrls: string[][], co
   let rawResponse: string;
   try {
     const response = await groqWithRetry(() => groq.chat.completions.create({
-      model: "meta-llama/llama-4-scout-17b-16e-instruct",
+      model: GROQ_VISION_MODEL,
       messages: [
         { role: "system", content: systemContent },
         { role: "user", content: contentParts },
@@ -735,7 +736,7 @@ async function _runMarketplaceBatch(listings: any[], allDataUrls: string[][], co
       temperature: 0.2,
       response_format: { type: "json_object" },
     }));
-    logUsage("groq", "llama-4-scout-17b", response.usage);
+    logUsage("groq", GROQ_VISION_USAGE_MODEL, response.usage);
     rawResponse = response.choices[0].message.content?.trim() ?? "{}";
     console.log(`[marketplace:batch] response_format=json_object received ${rawResponse.length} chars`);
   } catch (err) {

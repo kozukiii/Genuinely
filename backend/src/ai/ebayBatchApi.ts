@@ -13,6 +13,7 @@ import OpenAI, { toFile } from "openai";
 import dotenv from "dotenv";
 import { buildEbayAnalysisMessages } from "./ebayOverview";
 import { runRawChatBatch, type RawChatBatchOpts } from "./groqBatchRun";
+import { GROQ_VISION_MODEL } from "./groqModels";
 import { extractStructuredAnalysis, validateAnalysis } from "../utils/extractStructuredAnalysis";
 
 dotenv.config({ quiet: true });
@@ -22,7 +23,6 @@ const groq = new OpenAI({
   baseURL: "https://api.groq.com/openai/v1",
 });
 
-const MODEL = "meta-llama/llama-4-scout-17b-16e-instruct";
 const EBAY_KEYS = new Set(["priceFairness", "conditionHonesty", "shippingFairness", "descriptionQuality"]);
 
 /** custom_id we attach to each line so results map back to the listing index. */
@@ -53,7 +53,7 @@ export async function submitEbayBatch(listings: any[], context?: string | null, 
     method: "POST",
     url: "/v1/chat/completions",
     body: {
-      model: MODEL,
+      model: GROQ_VISION_MODEL,
       messages,
       max_tokens: 1000,
       temperature: 0.2,

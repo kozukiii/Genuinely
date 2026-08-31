@@ -16,6 +16,12 @@ export interface RawChatRequestOpts {
   concurrency?: number;
 }
 
+const RETRYABLE_STATUSES = new Set([408, 409, 429, 500, 502, 503, 504]);
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
 function schemasForRequests(
   messagesList: any[][],
   label: string,
@@ -48,12 +54,21 @@ export async function runRawChatRequests(
     while (true) {
       const index = nextIndex++;
       if (index >= messagesList.length) return;
-      const response = await groq.chat.completions.create(
-        buildGroqVisionRequest(messagesList[index], maxTokens, schemas[index]),
-      );
-      const content = response.choices[0]?.message?.content?.trim();
-      if (!content) throw new Error(`Groq ${label} request ${index} returned empty content`);
-      results[index] = content;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const response = await groq.chat.completions.create(
+            buildGroqVisionRequest(messagesList[index], maxTokens, schemas[index]),
+          );
+          const content = response.choices[0]?.message?.content?.trim();
+          if (!content) throw new Error(`Groq ${label} request ${index} returned empty content`);
+          results[index] = content;
+          break;
+        } catch (error: any) {
+          const retryable = error?.status == null || RETRYABLE_STATUSES.has(error.status);
+          if (!retryable || attempt === 3) throw error;
+          await sleep(400 * attempt);
+        }
+      }
     }
   }
 

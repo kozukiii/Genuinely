@@ -1,4 +1,4 @@
-import { analyzeListingWithImages, batchAnalyzeListingsWithImages, EBAY_BATCH_SYSTEM_PROMPT } from "../ai/ebayOverview";
+import { analyzeListingWithImages, EBAY_BATCH_SYSTEM_PROMPT } from "../ai/ebayOverview";
 import { analyzeEbayListingsViaChat } from "../ai/ebayBatchApi";
 import { extractStructuredAnalysis, validateAnalysis, EMPTY_ANALYSIS } from "../utils/extractStructuredAnalysis";
 import { parseEbaySellerData, calculateSellerTrust } from "./scoring/sellerTrustScore";
@@ -12,22 +12,8 @@ const EBAY_SCORE_KEYS = new Set([
   "descriptionQuality",
 ]);
 
-// Live eBay scoring uses bounded concurrent Groq chat completions. The packed
-// path remains a safety net and stays chunked for the three-image-block cap.
-const SYNC_FALLBACK_CHUNK = 8;
-
 async function scoreAllRaw(items: any[], context?: string | null, systemPrompt?: string | null): Promise<string[]> {
-  try {
-    return await analyzeEbayListingsViaChat(items, context, systemPrompt);
-  } catch (err) {
-    console.error("[aiService] Groq chat scoring failed — falling back to packed chunks:", err);
-    const raw: string[] = [];
-    for (let start = 0; start < items.length; start += SYNC_FALLBACK_CHUNK) {
-      const chunk = items.slice(start, start + SYNC_FALLBACK_CHUNK);
-      raw.push(...await batchAnalyzeListingsWithImages(chunk, context, systemPrompt, { stitch: true }));
-    }
-    return raw;
-  }
+  return analyzeEbayListingsViaChat(items, context, systemPrompt);
 }
 
 // Helper for safe average
@@ -196,8 +182,7 @@ function applyEbayPriceFairness(
 export async function analyzeItemsWithAI(items: any[], context?: string | null, systemPrompt?: string | null, priceLow?: number | null, priceHigh?: number | null, priceMeta?: PriceMeta) {
   if (items.length === 0) return [];
 
-  // Score every listing through bounded concurrent chat completions. On error,
-  // fall back to packed calls chunked for the image-block cap.
+  // Score every listing through bounded concurrent synchronous chat completions.
   const rawStrings = await scoreAllRaw(items, context, systemPrompt);
 
   const toCache: Parameters<typeof setCachedAnalysisBatch>[0] = [];

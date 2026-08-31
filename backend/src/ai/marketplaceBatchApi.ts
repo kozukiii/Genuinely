@@ -33,5 +33,9 @@ export async function batchAnalyzeMarketplaceListingsViaBatchApi(
   );
 
   // Base64 images make these requests large; give the queue a little more headroom.
-  return runRawChatBatch(messagesList, "marketplace-live", { timeoutMs: 120_000, ...opts });
+  return runRawChatBatch(messagesList, "marketplace-live", {
+    timeoutMs: 120_000,
+    ...opts,
+    schema: "marketplace-single",
+  });
 }

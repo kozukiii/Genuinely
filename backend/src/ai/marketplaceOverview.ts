@@ -4,8 +4,14 @@ import fetch from "node-fetch";
 import sharp from "sharp";
 import { logUsage } from "../services/usageLogger";
 import { extractBatchObjects } from "../utils/extractBatchObjects";
-import { stitchDataUrls, gridLayoutNote, type StitchResult } from "./stitchImages";
-import { GROQ_VISION_MODEL } from "./groqModels";
+import {
+  MAX_IMAGE_BLOCKS,
+  gridLayoutNote,
+  planImageBlocks,
+  stitchDataUrlBlocks,
+  type StitchResult,
+} from "./stitchImages";
+import { buildGroqVisionRequest, GROQ_VISION_MODEL } from "./groqModels";
 
 // Longest-edge cap for inline Marketplace photos before base64 embedding. Keeps a
 // 3-block request comfortably under Groq's 4MB base64 limit while staying legible
@@ -13,7 +19,7 @@ import { GROQ_VISION_MODEL } from "./groqModels";
 const MAX_IMAGE_PX = 1024;
 
 export interface VisionBatchOpts {
-  /** When true, each listing's photos are stitched into a single grid image (1 image/listing). */
+  /** When true, each listing's photos are stitched into up to three 3x3 grids. */
   stitch?: boolean;
 }
 
@@ -216,31 +222,29 @@ async function fetchImageAsDataUrl(url: string): Promise<string | null> {
   return null;
 }
 
-async function fetchMarketplaceImageDataUrls(imageUrls: string[], limit: number): Promise<string[]> {
-  const results = await Promise.all(imageUrls.slice(0, limit * 2).map(fetchImageAsDataUrl));
-  return results.filter((u): u is string => u !== null).slice(0, limit);
+async function fetchMarketplaceImageDataUrls(imageUrls: string[]): Promise<string[]> {
+  planImageBlocks(imageUrls.length);
+  const results = await Promise.all(imageUrls.map(fetchImageAsDataUrl));
+  const dataUrls = results.filter((u): u is string => u !== null);
+  if (dataUrls.length !== imageUrls.length) {
+    throw new Error(`Failed to fetch ${imageUrls.length - dataUrls.length} of ${imageUrls.length} Marketplace images; refusing partial analysis`);
+  }
+  return dataUrls;
 }
 
-// Upper bound on photos fetched per listing. Every photo gets stitched into a
-// single size-bounded grid (see stitchImages), so a high cap doesn't blow up
-// token cost — it only costs proxy-fetch latency. Overflow beyond this is dropped.
-const MARKETPLACE_IMAGE_FETCH_CAP = 25;
-
-// Collapse ALL of a listing's photos into ONE size-bounded grid image (instead
-// of up to 5 separate blocks). The grid's total pixels are capped regardless of
-// photo count, so per-listing token cost stays flat whether it's 3 or 25 photos.
+// Collapse every listing photo into one to three size-bounded grids. No source
+// photo is truncated: nine photos fit per grid and Groq accepts three grids.
 async function buildMarketplaceImageBlocks(dataUrls: string[]): Promise<{ blocks: any[]; stitchedAny: boolean }> {
   if (dataUrls.length === 0) return { blocks: [], stitchedAny: false };
   if (dataUrls.length === 1) {
     return { blocks: [{ type: "image_url", image_url: { url: dataUrls[0] } }], stitchedAny: false };
   }
 
-  const grid = await stitchDataUrls(dataUrls);
-  if (grid) {
-    return { blocks: [{ type: "image_url", image_url: { url: grid.dataUrl } }], stitchedAny: true };
-  }
-  // Stitch failed to decode anything — fall back to the first raw photo.
-  return { blocks: [{ type: "image_url", image_url: { url: dataUrls[0] } }], stitchedAny: false };
+  const grids = await stitchDataUrlBlocks(dataUrls);
+  return {
+    blocks: grids.map((grid) => ({ type: "image_url", image_url: { url: grid.dataUrl } })),
+    stitchedAny: true,
+  };
 }
 
 /**
@@ -250,7 +254,7 @@ async function buildMarketplaceImageBlocks(dataUrls: string[]): Promise<{ blocks
  */
 export async function getMarketplaceVisionImages(listing: any): Promise<string[]> {
   const imageUrls = getMarketplaceImageUrls(listing);
-  const dataUrls = await fetchMarketplaceImageDataUrls(imageUrls, MARKETPLACE_IMAGE_FETCH_CAP);
+  const dataUrls = await fetchMarketplaceImageDataUrls(imageUrls);
   const { blocks } = await buildMarketplaceImageBlocks(dataUrls);
   return blocks
     .map((b: any) => b?.image_url?.url)
@@ -276,11 +280,14 @@ export async function buildMarketplaceAnalysisMessages(listing: any, context?: s
   const availability = formatAvailability(listing);
 
   const imageUrls = getMarketplaceImageUrls(listing);
-  // Fetch more than the 5-block budget so overflow photos can be stitched in
-  // rather than dropped. Capped to bound proxy-fetch cost (base64 images are slow).
-  const dataUrls = await fetchMarketplaceImageDataUrls(imageUrls, MARKETPLACE_IMAGE_FETCH_CAP);
+  const dataUrls = await fetchMarketplaceImageDataUrls(imageUrls);
   const { blocks: imageBlocks, stitchedAny } = await buildMarketplaceImageBlocks(dataUrls);
-  listing.__visionImageStats = { provided: imageUrls.length, attached: dataUrls.length, stitched: stitchedAny };
+  listing.__visionImageStats = {
+    provided: imageUrls.length,
+    attached: dataUrls.length,
+    stitched: stitchedAny,
+    grids: imageBlocks.length,
+  };
 
   const priceText = formatPriceForPrompt(listing.price, currency);
 
@@ -532,15 +539,9 @@ HIGHLIGHTS RULES:
 export async function analyzeMarketplaceListingWithImages(listing: any, context?: string | null) {
   const messages = await buildMarketplaceAnalysisMessages(listing, context);
 
-  const response = await groq.chat.completions.create({
-    model: GROQ_VISION_MODEL,
-    messages,
-    max_tokens: 1000,
-    temperature: 0.2,
-    response_format: { type: "json_object" },
-  });
+  const response = await groq.chat.completions.create(buildGroqVisionRequest(messages, 1000, "marketplace-single"));
   logUsage("groq", GROQ_VISION_MODEL, response.usage);
-  console.log("[marketplace:single] response_format=json_object used");
+  console.log("[marketplace:single] completion received");
 
   return response.choices[0].message.content?.trim() || "{}";
 }
@@ -549,7 +550,7 @@ export async function analyzeMarketplaceListingWithImages(listing: any, context?
 // Batch analysis — analyzes multiple listings in a single API call
 // ---------------------------------------------------------------------------
 
-const MODEL_IMAGE_LIMIT = 3; // Qwen 3.6 hard cap per request
+const MODEL_IMAGE_LIMIT = MAX_IMAGE_BLOCKS; // Qwen 3.6 hard cap per request
 
 // Appended to any generated system prompt so the output shape stays consistent
 const MARKETPLACE_BATCH_OUTPUT_FORMAT = `
@@ -673,7 +674,7 @@ OUTPUT FORMAT — return ONLY this JSON object:
 }
 `.trim();
 
-async function _runMarketplaceBatch(listings: any[], allDataUrls: string[][], context?: string | null, systemPrompt?: string | null, layouts?: (StitchResult | null)[]): Promise<string[]> {
+async function _runMarketplaceBatch(listings: any[], allDataUrls: string[][], context?: string | null, systemPrompt?: string | null, layouts?: StitchResult[][]): Promise<string[]> {
   const contentParts: any[] = [];
 
   for (let i = 0; i < listings.length; i++) {
@@ -686,7 +687,7 @@ async function _runMarketplaceBatch(listings: any[], allDataUrls: string[][], co
     const availability = formatAvailability(listing);
     const batchDescription = clean(listing.fullDescription ?? listing.description);
     const dataUrls = allDataUrls[i];
-    const layout = layouts?.[i] ?? null;
+    const listingLayouts = layouts?.[i] ?? [];
     const batchPriceText = formatPriceForPrompt(listing.price, currency);
 
     contentParts.push({ type: "text", text: `=== LISTING ${i + 1} ===` });
@@ -698,11 +699,13 @@ async function _runMarketplaceBatch(listings: any[], allDataUrls: string[][], co
     contentParts.push({ type: "text", text: `Listing URL: ${link}` });
     if (batchDescription) contentParts.push({ type: "text", text: `Description: ${batchDescription}` });
 
-    if (layout) {
-      // Stitched mode: a single composite image holds all of this listing's photos
-      contentParts.push({ type: "text", text: `Photos: ${layout.cellCount} (combined into the grid image below)` });
-      contentParts.push({ type: "text", text: `[Image grid for Listing ${i + 1}] ${gridLayoutNote(layout.cols, layout.rows, layout.cellCount)}` });
-      if (dataUrls[0]) contentParts.push({ type: "image_url", image_url: { url: dataUrls[0] } });
+    if (listingLayouts.length > 0) {
+      const sourceCount = listingLayouts.reduce((sum, grid) => sum + grid.cellCount, 0);
+      contentParts.push({ type: "text", text: `Photos: ${sourceCount} (combined into ${listingLayouts.length} grid image${listingLayouts.length === 1 ? "" : "s"} below)` });
+      listingLayouts.forEach((grid, gridIndex) => {
+        contentParts.push({ type: "text", text: `[Image grid ${gridIndex + 1}/${listingLayouts.length} for Listing ${i + 1}] ${gridLayoutNote(grid.cols, grid.rows, grid.cellCount)}` });
+        if (dataUrls[gridIndex]) contentParts.push({ type: "image_url", image_url: { url: dataUrls[gridIndex] } });
+      });
     } else {
       contentParts.push({ type: "text", text: `Images Attached: ${dataUrls.length}` });
       if (dataUrls.length) {
@@ -726,19 +729,16 @@ async function _runMarketplaceBatch(listings: any[], allDataUrls: string[][], co
 
   let rawResponse: string;
   try {
-    const response = await groqWithRetry(() => groq.chat.completions.create({
-      model: GROQ_VISION_MODEL,
-      messages: [
+    const requestMessages = [
         { role: "system", content: systemContent },
         { role: "user", content: contentParts },
-      ],
-      max_tokens: Math.min(listings.length * 800, 5000),
-      temperature: 0.2,
-      response_format: { type: "json_object" },
-    }));
+      ];
+    const response = await groqWithRetry(() => groq.chat.completions.create(
+      buildGroqVisionRequest(requestMessages, Math.min(listings.length * 800, 5000), "marketplace-batch"),
+    ));
     logUsage("groq", GROQ_VISION_MODEL, response.usage);
     rawResponse = response.choices[0].message.content?.trim() ?? "{}";
-    console.log(`[marketplace:batch] response_format=json_object received ${rawResponse.length} chars`);
+    console.log(`[marketplace:batch] received ${rawResponse.length} chars`);
   } catch (err) {
     console.error("[marketplace:batch] API call failed, falling back to sequential individual calls:", err);
     const results: string[] = [];
@@ -790,25 +790,26 @@ export async function batchAnalyzeMarketplaceListingsWithImages(listings: any[],
 
   const stitch = opts?.stitch === true;
 
-  // Fetch all images for every listing in parallel, capped at the model's hard limit.
-  // In stitch mode we fetch the raw photos then collapse them into a single grid image,
-  // so each listing contributes exactly one image block to the bin-packer.
-  const layouts = new Array<StitchResult | null>(listings.length).fill(null);
+  // Fetch every source image. In stitch mode each listing contributes one to
+  // three complete grids to the bin-packer.
+  const layouts = Array.from({ length: listings.length }, (): StitchResult[] => []);
   const allDataUrls = await Promise.all(
     listings.map(async (listing, i) => {
       const imageUrls = getMarketplaceImageUrls(listing);
-      const dataUrls = await fetchMarketplaceImageDataUrls(imageUrls, MODEL_IMAGE_LIMIT);
+      const dataUrls = await fetchMarketplaceImageDataUrls(imageUrls);
 
       if (stitch && dataUrls.length > 0) {
-        const grid = await stitchDataUrls(dataUrls);
-        if (grid) {
-          layouts[i] = grid;
-          listing.__visionImageStats = { provided: imageUrls.length, attached: grid.cellCount, stitched: true };
-          console.warn(`[marketplace:visionImages] id=${listing.id ?? "unknown"} provided=${imageUrls.length} stitched=${grid.cellCount} (${grid.cols}x${grid.rows})`);
-          return [grid.dataUrl];
-        }
+        const grids = await stitchDataUrlBlocks(dataUrls);
+        layouts[i] = grids;
+        const attached = grids.reduce((sum, grid) => sum + grid.cellCount, 0);
+        listing.__visionImageStats = { provided: imageUrls.length, attached, stitched: true, grids: grids.length };
+        console.warn(`[marketplace:visionImages] id=${listing.id ?? "unknown"} provided=${imageUrls.length} attached=${attached} grids=${grids.length}`);
+        return grids.map((grid) => grid.dataUrl);
       }
 
+      if (dataUrls.length > MODEL_IMAGE_LIMIT) {
+        throw new Error(`Cannot send ${dataUrls.length} unstitched Marketplace images in ${MODEL_IMAGE_LIMIT} Groq blocks`);
+      }
       listing.__visionImageStats = { provided: imageUrls.length, attached: dataUrls.length };
       console.warn(`[marketplace:visionImages] id=${listing.id ?? "unknown"} provided=${imageUrls.length} attached=${dataUrls.length}`);
       return dataUrls;

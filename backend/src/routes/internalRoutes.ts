@@ -125,6 +125,7 @@ const GROQ_PRICING: Record<string, { input: number; output: number }> = {
   "openai/gpt-oss-20b":    { input: 0.075, output: 0.30 },
   "openai/gpt-oss-120b":   { input: 0.15,  output: 0.60 },
   "qwen/qwen3.6-27b":      { input: 0.60,  output: 3.00 },
+  "qwen/qwen3.8-27b":      { input: 0.80,  output: 4.00 },
 };
 const GROQ_DEFAULT_PRICE = { input: 0.10, output: 0.10 };
 

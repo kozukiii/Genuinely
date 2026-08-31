@@ -8,7 +8,7 @@
 
 import OpenAI, { toFile } from "openai";
 import dotenv from "dotenv";
-import { GROQ_VISION_MODEL } from "./groqModels";
+import { buildGroqVisionRequest, type GroqVisionSchema } from "./groqModels";
 
 dotenv.config({ quiet: true });
 
@@ -25,6 +25,8 @@ export interface RawChatBatchOpts {
   timeoutMs?: number; // give up (and let caller fall back) after this long. Default 90s.
   pollMs?: number;    // status poll interval. Default 1.5s.
   maxTokens?: number; // per-request completion cap. Default 1000.
+  schema?: GroqVisionSchema;
+  schemas?: GroqVisionSchema[];
 }
 
 
@@ -43,13 +45,16 @@ export async function runRawChatBatch(
   const timeoutMs = opts?.timeoutMs ?? 90_000;
   const pollMs = opts?.pollMs ?? 1; // poll as fast as network RTT allows — kills end-of-batch detection lag
   const maxTokens = opts?.maxTokens ?? 1500;
+  if (!opts?.schema && opts?.schemas?.length !== messagesList.length) {
+    throw new Error(`Groq batch ${label} requires one response schema per request`);
+  }
 
   const jsonl = messagesList
     .map((messages, i) => JSON.stringify({
       custom_id: `item-${i}`,
       method: "POST",
       url: "/v1/chat/completions",
-      body: { model: GROQ_VISION_MODEL, messages, max_tokens: maxTokens, temperature: 0.2, response_format: { type: "json_object" } },
+      body: buildGroqVisionRequest(messages, maxTokens, opts?.schemas?.[i] ?? opts!.schema!),
     }))
     .join("\n");
 

@@ -3,11 +3,17 @@ import dotenv from "dotenv";
 import { calculatePriceFairness } from "../services/scoring/priceFairnessScore";
 import { extractBatchObjects } from "../utils/extractBatchObjects";
 import { validateAnalysis, EMPTY_ANALYSIS } from "../utils/extractStructuredAnalysis";
-import { stitchBuffers, gridLayoutNote, type StitchResult } from "./stitchImages";
-import { GROQ_VISION_MODEL } from "./groqModels";
+import {
+  MAX_IMAGE_BLOCKS,
+  gridLayoutNote,
+  planImageBlocks,
+  stitchBufferBlocks,
+  type StitchResult,
+} from "./stitchImages";
+import { buildGroqVisionRequest, GROQ_VISION_MODEL } from "./groqModels";
 
 export interface VisionBatchOpts {
-  /** When true, each listing's photos are stitched into a single grid image (1 image/listing). */
+  /** When true, each listing's photos are stitched into up to three 3x3 grids. */
   stitch?: boolean;
 }
 
@@ -175,29 +181,30 @@ function isVariationListing(listing: any): boolean {
  * Extracted so both the synchronous path (analyzeListingWithImages) and the
  * Groq Batch API path (ebayBatchApi.ts) score listings with an identical prompt.
  */
-// Upper bound on photos pulled per eBay listing. All photos collapse into ONE
-// size-bounded grid (see stitchImages), so a high cap costs fetch latency, not tokens.
-const EBAY_IMAGE_CAP = 25;
-
-// Collapse ALL of a listing's photos into ONE size-bounded grid image. eBay
+// Collapse all of a listing's photos into up to three size-bounded grid images. eBay
 // photos are public URLs but full-resolution, so sending them raw is token-heavy;
-// we fetch + downscale + stitch into a single capped grid instead. Only if every
-// fetch fails do we fall back to raw URLs so the model still sees something.
+// we fetch + downscale + stitch them. A request is rejected rather than analyzed
+// with silently missing photos.
 async function buildEbayImageBlocks(urls: string[]): Promise<{ blocks: any[]; stitchedAny: boolean }> {
-  const capped = urls.slice(0, EBAY_IMAGE_CAP);
-  if (capped.length === 0) return { blocks: [], stitchedAny: false };
+  planImageBlocks(urls.length);
+  if (urls.length === 0) return { blocks: [], stitchedAny: false };
 
-  const buffers = (await Promise.all(capped.map((u) => fetchImageBuffer(u)))).filter((b): b is Buffer => b !== null);
-  if (buffers.length === 0) {
-    // Fetch failed entirely — fall back to raw URLs (legacy behavior).
-    return { blocks: capped.map((u) => ({ type: "image_url", image_url: { url: u } })), stitchedAny: false };
+  const fetched = await Promise.all(urls.map((u) => fetchImageBuffer(u)));
+  const buffers = fetched.filter((b): b is Buffer => b !== null);
+  if (buffers.length !== urls.length) {
+    // With at most three photos, Groq can fetch every public URL directly.
+    if (urls.length <= MAX_IMAGE_BLOCKS) {
+      console.warn(`[ebay:visionImages] local fetch failed; sending all ${urls.length} original URLs directly`);
+      return { blocks: urls.map((u) => ({ type: "image_url", image_url: { url: u } })), stitchedAny: false };
+    }
+    throw new Error(`Failed to fetch ${urls.length - buffers.length} of ${urls.length} eBay images; refusing partial analysis`);
   }
 
-  const grid = await stitchBuffers(buffers);
-  if (grid) {
-    return { blocks: [{ type: "image_url", image_url: { url: grid.dataUrl } }], stitchedAny: grid.cellCount > 1 };
-  }
-  return { blocks: capped.map((u) => ({ type: "image_url", image_url: { url: u } })), stitchedAny: false };
+  const grids = await stitchBufferBlocks(buffers);
+  return {
+    blocks: grids.map((grid) => ({ type: "image_url", image_url: { url: grid.dataUrl } })),
+    stitchedAny: grids.some((grid) => grid.cellCount > 1),
+  };
 }
 
 /**
@@ -341,13 +348,19 @@ HIGHLIGHTS RULES:
         { type: "text", text: `Listing URL: ${link}` },
         { type: "text", text: `Images Provided: ${imageUrls.length}` },
         { type: "text", text: `Suggested Price Fairness: ${isVariation ? "N/A — variation listing" : (calculatePriceFairness(listing.price, context, listing.priceLow, listing.priceHigh) ?? "N/A")}` },
-        ...(isVariation ? [{ type: "text", text: `IMPORTANT: This is a variation listing. Price varies across options and cannot be fairly assessed. Do NOT include priceFairness in your scores object — omit the key entirely. Score only: conditionHonesty, shippingFairness, descriptionQuality.` }] : []),
+        ...(isVariation ? [{ type: "text", text: `IMPORTANT: This is a variation listing. Price varies across options and cannot be fairly assessed. Set priceFairness to null. Score conditionHonesty, shippingFairness, and descriptionQuality normally.` }] : []),
         ...(context ? [{ type: "text", text: `\n--- PRODUCT CONTEXT ---\n${context}\n--- END PRODUCT CONTEXT ---` }] : []),
       ],
     },
   ];
 
   const { blocks, stitchedAny } = await buildEbayImageBlocks(imageUrls);
+  listing.__visionImageStats = {
+    provided: imageUrls.length,
+    attached: imageUrls.length,
+    stitched: stitchedAny,
+    grids: blocks.length,
+  };
   if (stitchedAny) {
     messages[1].content.push({
       type: "text",
@@ -362,13 +375,7 @@ HIGHLIGHTS RULES:
 export async function analyzeListingWithImages(listing: any, context?: string | null) {
   const messages = await buildEbayAnalysisMessages(listing, context);
 
-  const response = await groq.chat.completions.create({
-    model: GROQ_VISION_MODEL,
-    messages,
-    max_tokens: 1000,
-    temperature: 0.2,
-    response_format: { type: "json_object" },
-  });
+  const response = await groq.chat.completions.create(buildGroqVisionRequest(messages, 1000, "ebay-single"));
 
   return response.choices[0].message.content?.trim() || "{}";
 }
@@ -481,11 +488,11 @@ OUTPUT FORMAT — return ONLY this JSON object:
 }
 `.trim();
 
-const MAX_IMAGES_PER_BATCH = 3;
+const MAX_IMAGES_PER_BATCH = MAX_IMAGE_BLOCKS;
 
-// In stitch mode a listing's photos are collapsed into a single composite image,
-// so each listing costs exactly 1 image block regardless of how many photos it has.
-type BatchEntry = { listing: any; imageCount: number; stitched?: StitchResult | null };
+// In stitch mode a listing contributes one to three grids, each containing at
+// most nine source photos.
+type BatchEntry = { listing: any; imageCount: number; stitched?: StitchResult[] };
 
 function getListingImageUrls(listing: any): string[] {
   return (
@@ -513,13 +520,18 @@ async function fetchImageBuffer(url: string): Promise<Buffer | null> {
   }
 }
 
-/** Fetch + stitch a listing's photos into one grid image. Returns null if nothing decodes. */
-async function stitchListing(listing: any): Promise<StitchResult | null> {
-  const urls = getListingImageUrls(listing).slice(0, MAX_IMAGES_PER_BATCH);
+/** Fetch + stitch every listing photo into one to three grids. */
+async function stitchListing(listing: any): Promise<StitchResult[] | null> {
+  const urls = getListingImageUrls(listing);
+  planImageBlocks(urls.length);
   if (urls.length === 0) return null;
-  const buffers = (await Promise.all(urls.map(fetchImageBuffer))).filter((b): b is Buffer => b !== null);
-  if (buffers.length === 0) return null;
-  return stitchBuffers(buffers);
+  const fetched = await Promise.all(urls.map(fetchImageBuffer));
+  const buffers = fetched.filter((b): b is Buffer => b !== null);
+  if (buffers.length !== urls.length) {
+    if (urls.length <= MAX_IMAGES_PER_BATCH) return null;
+    throw new Error(`Failed to fetch ${urls.length - buffers.length} of ${urls.length} eBay images; refusing partial analysis`);
+  }
+  return stitchBufferBlocks(buffers);
 }
 
 function buildImageAwareBatches(entries: BatchEntry[]): BatchEntry[][] {
@@ -569,7 +581,7 @@ async function _runEbayBatch(entries: BatchEntry[], context?: string | null, sys
     const shortDesc = clean(listing.shortDescription) ?? "";
     const rawDesc = listing.description || listing.fullDescription || "";
     const description = clean(stripHtml(rawDesc)) ?? "";
-    const stitched = entries[i].stitched ?? null;
+    const stitched = entries[i].stitched ?? [];
     const imageUrls = getListingImageUrls(listing).slice(0, imageCount);
 
     const isVariation = isVariationListing(listing);
@@ -590,15 +602,17 @@ async function _runEbayBatch(entries: BatchEntry[], context?: string | null, sys
     contentParts.push({ type: "text", text: `Short Description: ${shortDesc}` });
     contentParts.push({ type: "text", text: `Description: ${description}` });
     contentParts.push({ type: "text", text: `Listing URL: ${link}` });
-    contentParts.push({ type: "text", text: `Images Provided: ${stitched ? stitched.cellCount : imageUrls.length}` });
+    contentParts.push({ type: "text", text: `Images Provided: ${stitched.length > 0 ? stitched.reduce((sum, grid) => sum + grid.cellCount, 0) : imageUrls.length}` });
     contentParts.push({ type: "text", text: `Suggested Price Fairness: ${isVariation ? "N/A — variation listing" : (suggestedPriceFairness ?? "N/A")}` });
     if (isVariation) {
-      contentParts.push({ type: "text", text: `IMPORTANT: Variation listing — do NOT include priceFairness in this listing's scores. Omit the key. Score only: conditionHonesty, shippingFairness, descriptionQuality.` });
+      contentParts.push({ type: "text", text: `IMPORTANT: Variation listing — set priceFairness to null. Score conditionHonesty, shippingFairness, and descriptionQuality normally.` });
     }
 
-    if (stitched) {
-      contentParts.push({ type: "text", text: `[Image grid for Listing ${i + 1}] ${gridLayoutNote(stitched.cols, stitched.rows, stitched.cellCount)}` });
-      contentParts.push({ type: "image_url", image_url: { url: stitched.dataUrl } });
+    if (stitched.length > 0) {
+      stitched.forEach((grid, gridIndex) => {
+        contentParts.push({ type: "text", text: `[Image grid ${gridIndex + 1}/${stitched.length} for Listing ${i + 1}] ${gridLayoutNote(grid.cols, grid.rows, grid.cellCount)}` });
+        contentParts.push({ type: "image_url", image_url: { url: grid.dataUrl } });
+      });
     } else if (imageUrls.length > 0) {
       contentParts.push({ type: "text", text: `[Images for Listing ${i + 1}]` });
       for (const url of imageUrls) {
@@ -619,18 +633,15 @@ async function _runEbayBatch(entries: BatchEntry[], context?: string | null, sys
 
   let rawResponse: string;
   try {
-    const response = await groqWithRetry(() => groq.chat.completions.create({
-      model: GROQ_VISION_MODEL,
-      messages: [
+    const requestMessages = [
         { role: "system", content: systemContent },
         { role: "user", content: contentParts },
-      ],
-      max_tokens: Math.min(listings.length * 800, 5000),
-      temperature: 0.2,
-      response_format: { type: "json_object" },
-    }));
+      ];
+    const response = await groqWithRetry(() => groq.chat.completions.create(
+      buildGroqVisionRequest(requestMessages, Math.min(listings.length * 800, 5000), "ebay-batch"),
+    ));
     rawResponse = response.choices[0].message.content?.trim() ?? "{}";
-    console.log(`[ebay:batch] response_format=json_object received ${rawResponse.length} chars`);
+    console.log(`[ebay:batch] received ${rawResponse.length} chars`);
   } catch (err) {
     console.error("[ebay:batch] API call failed, falling back to sequential individual calls:", err);
     const results: string[] = [];
@@ -682,22 +693,26 @@ export async function batchAnalyzeListingsWithImages(listings: any[], context?: 
 
   const stitch = opts?.stitch === true;
 
-  // Build a batch entry per listing. In stitch mode we fetch + collapse each
-  // listing's photos into one grid image up front, so it costs a single image block.
+  // Build a batch entry per listing. In stitch mode every source photo is
+  // represented across one to three grid blocks.
   const entries: BatchEntry[] = await Promise.all(
     listings.map(async (listing): Promise<BatchEntry> => {
       const available = getListingImageUrls(listing).length;
       if (stitch) {
-        const grid = await stitchListing(listing);
-        if (grid) {
-          listing.__visionImageStats = { provided: available, attached: grid.cellCount, stitched: true };
-          console.warn(`[ebay:visionImages] id=${listing.id ?? "unknown"} stitched=${grid.cellCount} (${grid.cols}x${grid.rows})`);
-          return { listing, imageCount: 1, stitched: grid };
+        const grids = await stitchListing(listing);
+        if (grids) {
+          const attached = grids.reduce((sum, grid) => sum + grid.cellCount, 0);
+          listing.__visionImageStats = { provided: available, attached, stitched: true, grids: grids.length };
+          console.warn(`[ebay:visionImages] id=${listing.id ?? "unknown"} provided=${available} attached=${attached} grids=${grids.length}`);
+          return { listing, imageCount: grids.length, stitched: grids };
         }
         // Stitch failed (no decodable images) — fall through to URL mode
       }
       const attached = Math.min(available, MAX_IMAGES_PER_BATCH);
       listing.__visionImageStats = { provided: available, attached, stitched: false };
+      if (attached !== available) {
+        console.warn(`[ebay:visionImages] unstitched diagnostic mode attached=${attached}/${available}`);
+      }
       return { listing, imageCount: attached };
     })
   );

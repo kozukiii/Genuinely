@@ -58,7 +58,10 @@ export async function scoreGroupsInOneBatch(groups: ScoringGroup[]): Promise<any
 
   if (units.length === 0) return [];
 
-  const raw = await runRawChatBatch(units.map((u) => u.messages), "search-combined", { timeoutMs: 120_000 });
+  const raw = await runRawChatBatch(units.map((u) => u.messages), "search-combined", {
+    timeoutMs: 120_000,
+    schemas: units.map((u) => u.source === "ebay" ? "ebay-single" : "marketplace-single"),
+  });
 
   return units.map((u, i) => {
     const r = raw[i] ?? "{}";

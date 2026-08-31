@@ -12,40 +12,41 @@ import sharp from "sharp";
 // Vision token cost on the model scales with TOTAL PIXEL AREA, not image count.
 // So instead of capping the photo count, we cap the grid's overall size
 // (GRID_MAX_PX) and let cells shrink as more photos are packed in. A 4-photo
-// grid and a 25-photo grid then cost roughly the same number of tokens — the
-// per-listing cost stays bounded no matter how many photos a listing has. The
-// only tradeoff is per-cell resolution at high photo counts.
+// grid and a 9-photo grid then cost roughly the same number of tokens. Listings
+// with more than 9 photos use another grid, up to the model's three-block cap.
 
-export const MAX_CELLS = 25;  // up to a 5×5 grid per listing — plenty for any real listing
+export const MAX_CELLS = 9;   // up to a 3×3 grid per image block
+export const MAX_IMAGE_BLOCKS = 3;
+export const MAX_SOURCE_IMAGES = MAX_CELLS * MAX_IMAGE_BLOCKS;
 const CELL_TARGET_PX = 512;   // desired per-cell resolution. Grid grows WITH photo count
-                              // (3 photos → small grid, cheap; 25 → larger) until it would
+                              // (3 photos → small grid, cheap; 9 → larger) until it would
                               // exceed GRID_MAX_PX, at which point cells shrink to stay capped.
 const CELL_MAX_PX = 1024;     // a single-photo "grid" gets at most this resolution
-const CELL_MIN_PX = 192;      // floor so cells stay legible even in a dense 5×5 grid
+const CELL_MIN_PX = 192;      // floor so cells stay legible in a dense grid
 const GRID_MAX_PX = 1280;     // hard ceiling on the composite's longest edge — bounds worst-case
                               // token cost and keeps the base64 body under Groq's 4MB cap.
 const BG = { r: 255, g: 255, b: 255, alpha: 1 };
 
-// The configured Groq vision model caps a request at 3 image blocks. Distribute
-// a listing's photos across up to `maxBlocks` blocks, preferring raw
-// single-photo blocks (best detail) and
-// only grouping into stitched grids once there are more photos than blocks — so
-// no photo is dropped. Returns index groups; a group of 1 = raw, >1 = stitched.
-// Capacity is maxBlocks × maxCells photos; anything beyond that is truncated.
-export function planImageBlocks(count: number, maxBlocks = 3, maxCells = MAX_CELLS): number[][] {
-  const n = Math.min(count, maxBlocks * maxCells);
-  if (n <= 0) return [];
-  if (n <= maxBlocks) return Array.from({ length: n }, (_, i) => [i]);
+// Partition every source photo into the fewest possible stitched image blocks.
+// The configured Groq model accepts at most three blocks, and each grid keeps at
+// most 9 cells legible. Exceeding that capacity is an explicit error: callers
+// must never receive a plausible-looking analysis made from silently truncated
+// photos.
+export function planImageBlocks(
+  count: number,
+  maxBlocks = MAX_IMAGE_BLOCKS,
+  maxCells = MAX_CELLS,
+): number[][] {
+  if (!Number.isInteger(count) || count < 0) throw new RangeError(`Invalid image count: ${count}`);
+  const capacity = maxBlocks * maxCells;
+  if (count > capacity) {
+    throw new RangeError(`Listing has ${count} images; vision capacity is ${capacity} (${maxBlocks} blocks x ${maxCells} cells)`);
+  }
+  if (count === 0) return [];
 
-  const base = Math.floor(n / maxBlocks);
-  const extra = n % maxBlocks;
   const blocks: number[][] = [];
-  let idx = 0;
-  for (let b = 0; b < maxBlocks; b++) {
-    const size = base + (b < extra ? 1 : 0);
-    const group: number[] = [];
-    for (let k = 0; k < size; k++) group.push(idx++);
-    blocks.push(group);
+  for (let start = 0; start < count; start += maxCells) {
+    blocks.push(Array.from({ length: Math.min(maxCells, count - start) }, (_, i) => start + i));
   }
   return blocks;
 }
@@ -74,11 +75,14 @@ function gridDims(n: number): { cols: number; rows: number } {
  * Returns null if no buffer could be decoded.
  */
 export async function stitchBuffers(buffers: Buffer[]): Promise<StitchResult | null> {
-  const usable = buffers.slice(0, MAX_CELLS);
+  if (buffers.length > MAX_CELLS) {
+    throw new RangeError(`Cannot place ${buffers.length} images in one ${MAX_CELLS}-cell grid`);
+  }
+  const usable = buffers;
   if (usable.length === 0) return null;
 
   // Cells default to CELL_TARGET_PX so the grid scales with photo count (a 2×2
-  // grid is physically smaller — and cheaper — than a 5×5). Only once the grid
+  // grid is physically smaller — and cheaper — than a 3×3). Only once the grid
   // would exceed GRID_MAX_PX do cells shrink to keep the total bounded. A lone
   // photo is allowed up to CELL_MAX_PX.
   const { cols, rows } = gridDims(usable.length);
@@ -107,6 +111,9 @@ export async function stitchBuffers(buffers: Buffer[]): Promise<StitchResult | n
 
   const valid = cells.filter((c): c is Buffer => c !== null);
   if (valid.length === 0) return null;
+  if (valid.length !== usable.length) {
+    throw new Error(`Image stitching decoded only ${valid.length} of ${usable.length} source images`);
+  }
 
   // Recompute dims in case some sources failed to decode.
   const dims = gridDims(valid.length);
@@ -148,7 +155,32 @@ export function dataUrlToBuffer(dataUrl: string): Buffer | null {
 /** Stitch from an array of data URLs (marketplace path — images already fetched). */
 export async function stitchDataUrls(dataUrls: string[]): Promise<StitchResult | null> {
   const buffers = dataUrls.map(dataUrlToBuffer).filter((b): b is Buffer => b !== null);
+  if (buffers.length !== dataUrls.length) {
+    throw new Error(`Decoded only ${buffers.length} of ${dataUrls.length} image data URLs`);
+  }
   return stitchBuffers(buffers);
+}
+
+/** Stitch every buffer into one to three grids without truncating any source image. */
+export async function stitchBufferBlocks(buffers: Buffer[]): Promise<StitchResult[]> {
+  const groups = planImageBlocks(buffers.length);
+  const grids = await Promise.all(groups.map((indices) => stitchBuffers(indices.map((i) => buffers[i]))));
+  if (grids.some((grid) => grid === null)) throw new Error("Image stitching produced an empty grid");
+  const complete = grids as StitchResult[];
+  const stitchedCount = complete.reduce((sum, grid) => sum + grid.cellCount, 0);
+  if (stitchedCount !== buffers.length) {
+    throw new Error(`Image stitching retained ${stitchedCount} of ${buffers.length} source images`);
+  }
+  return complete;
+}
+
+/** Stitch every data URL into one to three grids without truncating any source image. */
+export async function stitchDataUrlBlocks(dataUrls: string[]): Promise<StitchResult[]> {
+  const buffers = dataUrls.map(dataUrlToBuffer).filter((b): b is Buffer => b !== null);
+  if (buffers.length !== dataUrls.length) {
+    throw new Error(`Decoded only ${buffers.length} of ${dataUrls.length} image data URLs`);
+  }
+  return stitchBufferBlocks(buffers);
 }
 
 /**

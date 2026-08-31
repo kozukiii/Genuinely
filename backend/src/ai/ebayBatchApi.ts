@@ -13,7 +13,7 @@ import OpenAI, { toFile } from "openai";
 import dotenv from "dotenv";
 import { buildEbayAnalysisMessages } from "./ebayOverview";
 import { runRawChatBatch, type RawChatBatchOpts } from "./groqBatchRun";
-import { GROQ_VISION_MODEL } from "./groqModels";
+import { buildGroqVisionRequest } from "./groqModels";
 import { extractStructuredAnalysis, validateAnalysis } from "../utils/extractStructuredAnalysis";
 
 dotenv.config({ quiet: true });
@@ -52,13 +52,7 @@ export async function submitEbayBatch(listings: any[], context?: string | null, 
     custom_id: customIdFor(i),
     method: "POST",
     url: "/v1/chat/completions",
-    body: {
-      model: GROQ_VISION_MODEL,
-      messages,
-      max_tokens: 1000,
-      temperature: 0.2,
-      response_format: { type: "json_object" },
-    },
+    body: buildGroqVisionRequest(messages, 1000, "ebay-single"),
   }));
 
   const jsonl = lines.map((l) => JSON.stringify(l)).join("\n");
@@ -177,5 +171,5 @@ export async function batchAnalyzeListingsViaBatchApi(
     return messages;
   }));
 
-  return runRawChatBatch(messagesList, "ebay-live", opts);
+  return runRawChatBatch(messagesList, "ebay-live", { ...opts, schema: "ebay-single" });
 }

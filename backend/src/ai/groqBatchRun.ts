@@ -4,10 +4,17 @@ import { buildGroqVisionRequest, type GroqVisionSchema } from "./groqModels";
 
 dotenv.config({ quiet: true });
 
-const groq = new OpenAI({
-  apiKey: process.env.GROQ_API_KEY!,
-  baseURL: "https://api.groq.com/openai/v1",
-});
+let groq: OpenAI | null = null;
+
+function groqClient() {
+  if (!groq) {
+    groq = new OpenAI({
+      apiKey: process.env.GROQ_API_KEY!,
+      baseURL: "https://api.groq.com/openai/v1",
+    });
+  }
+  return groq;
+}
 
 export interface RawChatRequestOpts {
   maxTokens?: number;
@@ -17,9 +24,38 @@ export interface RawChatRequestOpts {
 }
 
 const RETRYABLE_STATUSES = new Set([408, 409, 429, 500, 502, 503, 504]);
+const MAX_ATTEMPTS = 5;
+const DEFAULT_MAX_TOKENS = 700;
+let rateLimitBlockedUntil = 0;
 
 function sleep(ms: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
+function headerValue(error: any, name: string): string | undefined {
+  const headers = error?.headers;
+  const value = typeof headers?.get === "function"
+    ? headers.get(name)
+    : headers?.[name] ?? headers?.[name.toLowerCase()];
+  return value == null ? undefined : String(value);
+}
+
+/** Parse Groq's retry window without exposing response headers in logs. */
+export function groqRetryDelayMs(error: any, attempt: number): number {
+  const retryAfter = Number.parseFloat(headerValue(error, "retry-after") ?? "");
+  if (Number.isFinite(retryAfter) && retryAfter >= 0) {
+    return Math.ceil(retryAfter * 1000) + 250;
+  }
+
+  const messageSeconds = String(error?.message ?? "").match(/try again in\s+([\d.]+)s/i);
+  if (messageSeconds) return Math.ceil(Number(messageSeconds[1]) * 1000) + 250;
+
+  return Math.min(8_000, 500 * (2 ** Math.max(0, attempt - 1)));
+}
+
+async function waitForSharedRateLimit() {
+  const remaining = rateLimitBlockedUntil - Date.now();
+  if (remaining > 0) await sleep(remaining);
 }
 
 function schemasForRequests(
@@ -44,7 +80,7 @@ export async function runRawChatRequests(
 ): Promise<string[]> {
   if (messagesList.length === 0) return [];
   const schemas = schemasForRequests(messagesList, label, opts);
-  const maxTokens = opts?.maxTokens ?? 1500;
+  const maxTokens = opts?.maxTokens ?? DEFAULT_MAX_TOKENS;
   const concurrency = Math.max(1, Math.min(opts?.concurrency ?? 4, messagesList.length));
   const results = new Array<string>(messagesList.length);
   let nextIndex = 0;
@@ -54,9 +90,10 @@ export async function runRawChatRequests(
     while (true) {
       const index = nextIndex++;
       if (index >= messagesList.length) return;
-      for (let attempt = 1; attempt <= 3; attempt++) {
+      for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
         try {
-          const response = await groq.chat.completions.create(
+          await waitForSharedRateLimit();
+          const response = await groqClient().chat.completions.create(
             buildGroqVisionRequest(messagesList[index], maxTokens, schemas[index]),
           );
           const content = response.choices[0]?.message?.content?.trim();
@@ -65,8 +102,13 @@ export async function runRawChatRequests(
           break;
         } catch (error: any) {
           const retryable = error?.status == null || RETRYABLE_STATUSES.has(error.status);
-          if (!retryable || attempt === 3) throw error;
-          await sleep(400 * attempt);
+          if (!retryable || attempt === MAX_ATTEMPTS) throw error;
+
+          const delayMs = groqRetryDelayMs(error, attempt);
+          if (error?.status === 429) {
+            rateLimitBlockedUntil = Math.max(rateLimitBlockedUntil, Date.now() + delayMs);
+          }
+          await sleep(delayMs);
         }
       }
     }

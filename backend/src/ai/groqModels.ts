@@ -12,6 +12,17 @@ export const GROQ_FAST_TEXT_MODEL =
 export const GROQ_QUALITY_TEXT_MODEL =
   process.env.GROQ_QUALITY_TEXT_MODEL ?? "openai/gpt-oss-120b";
 
+export type GroqServiceTier = "auto" | "default" | "flex";
+
+function serviceTier(value: string | undefined): GroqServiceTier {
+  if (value === "on_demand" || value === "default") return "default";
+  return value === "flex" ? value : "auto";
+}
+
+// `auto` lets paid Groq projects use Flex's larger throughput pool when it is
+// available while retaining provider-managed fallback behavior.
+export const GROQ_SERVICE_TIER = serviceTier(process.env.GROQ_SERVICE_TIER);
+
 export type GroqVisionSchema =
   | "ebay-single"
   | "ebay-batch"
@@ -100,6 +111,7 @@ export function buildGroqVisionRequest(
 ) {
   return {
     model: GROQ_VISION_MODEL,
+    service_tier: GROQ_SERVICE_TIER,
     messages,
     max_tokens: maxTokens,
     temperature: 0.2,

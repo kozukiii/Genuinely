@@ -12,12 +12,14 @@ describe("Groq model configuration", () => {
     delete process.env.GROQ_VISION_MODEL;
     delete process.env.GROQ_FAST_TEXT_MODEL;
     delete process.env.GROQ_QUALITY_TEXT_MODEL;
+    delete process.env.GROQ_SERVICE_TIER;
 
     const models = await import("../groqModels");
 
     expect(models.GROQ_VISION_MODEL).toBe("qwen/qwen3.8-27b");
     expect(models.GROQ_FAST_TEXT_MODEL).toBe("openai/gpt-oss-20b");
     expect(models.GROQ_QUALITY_TEXT_MODEL).toBe("openai/gpt-oss-120b");
+    expect(models.GROQ_SERVICE_TIER).toBe("auto");
   });
 
   it("honors deployment overrides", async () => {
@@ -41,12 +43,29 @@ describe("Groq model configuration", () => {
     );
 
     expect(request.response_format.type).toBe("json_schema");
+    expect(request.service_tier).toBe("auto");
     expect(request.response_format.json_schema.strict).toBe(true);
     expect(request.response_format.json_schema.schema.required).toEqual([
       "scores",
       "overview",
       "highlights",
     ]);
+  });
+
+  it("accepts supported Groq service-tier overrides and rejects unknown values", async () => {
+    process.env.GROQ_SERVICE_TIER = "flex";
+    let models = await import("../groqModels");
+    expect(models.GROQ_SERVICE_TIER).toBe("flex");
+
+    vi.resetModules();
+    process.env.GROQ_SERVICE_TIER = "on_demand";
+    models = await import("../groqModels");
+    expect(models.GROQ_SERVICE_TIER).toBe("default");
+
+    vi.resetModules();
+    process.env.GROQ_SERVICE_TIER = "legacy-tier";
+    models = await import("../groqModels");
+    expect(models.GROQ_SERVICE_TIER).toBe("auto");
   });
 
   it("uses source-specific schemas for packed results", async () => {

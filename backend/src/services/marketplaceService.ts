@@ -595,19 +595,24 @@ async function searchMarketplaceListingsByLatLng({
     doc_id: "7111939778879383",
   });
 
-  const res = await raceProxiedFetch(GRAPHQL_URL, {
-    method: "POST",
-    headers: {
-      "user-agent": "Mozilla/5.0",
-      "content-type": "application/x-www-form-urlencoded",
-    },
-    body,
-  });
+  let json: any = null;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const res = await raceProxiedFetch(GRAPHQL_URL, {
+      method: "POST",
+      headers: {
+        "user-agent": "Mozilla/5.0",
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body,
+    });
 
-  const json = await parseJsonWithTimeout<any>(res, FACEBOOK_BODY_TIMEOUT_MS, "Marketplace browse API");
-  if (hasMarketplaceRateLimitError(json)) {
+    json = await parseJsonWithTimeout<any>(res, FACEBOOK_BODY_TIMEOUT_MS, "Marketplace browse API");
+    if (!hasMarketplaceRateLimitError(json)) break;
+
     markProxyRateLimited(getResponseProxyUrl(res));
-    throw new Error("Marketplace rate limit exceeded");
+    if (attempt === 3) throw new Error("Marketplace rate limit exceeded");
+    console.warn(`[marketplace] browse winner was rate-limited; re-racing (${attempt}/3)`);
+    await new Promise((resolve) => setTimeout(resolve, 250 * attempt));
   }
   const edges = json?.data?.marketplace_search?.feed_units?.edges ?? [];
 

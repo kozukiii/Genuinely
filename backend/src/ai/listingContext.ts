@@ -388,11 +388,11 @@ async function callGroupingModel(
       { role: "system", content: GROUPING_SYSTEM },
       { role: "user", content: userContent },
     ],
-    max_tokens: 1600,
+    max_tokens: 3000,
     temperature: 0.1,
-    // Grouping is a constrained classification task. Disabling hidden
-    // reasoning leaves the completion budget for the required JSON document.
-    reasoning_effort: "none",
+    // GPT-OSS requires low/medium/high reasoning. Reserve enough completion
+    // budget for both its hidden reasoning and the strict JSON document.
+    reasoning_effort: "low",
     response_format: GROUPING_RESPONSE_FORMAT,
   });
   logUsage("groq", model, response.usage);

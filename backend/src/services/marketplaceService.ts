@@ -9,9 +9,12 @@ const proxyUrls = process.env.PROXY_URL
   : [];
 
 const FETCH_TIMEOUT_MS = 12_000;   // utility calls (geocoding, etc.)
-const FACEBOOK_TIMEOUT_MS = 4_000; // FB GraphQL / HTML — bail fast on tarpits
+// Six proxy attempts are staggered 800ms apart, so a 4s outer timeout aborted
+// before the final candidates could even start. Allow the complete race plus a
+// response window while still bailing out on tarpits promptly.
+const FACEBOOK_TIMEOUT_MS = 8_000;
 const RACE_STAGGER_MS = 800;       // gap between staggered race attempts
-const FACEBOOK_BODY_TIMEOUT_MS = 4_000;
+const FACEBOOK_BODY_TIMEOUT_MS = 8_000;
 const PROXY_RACE_WIDTH = 6;
 const STICKY_PROXY_POOL_SIZE = 3;
 const STICKY_PROXY_TTL_MS = 10 * 60 * 1000;

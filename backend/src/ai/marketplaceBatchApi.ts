@@ -1,21 +1,14 @@
-// ─── Groq Batch API path for Marketplace analysis (live flow) ────────────────
-//
-// Drop-in replacement for batchAnalyzeMarketplaceListingsWithImages: returns one
-// raw JSON string per listing in input order, so scoreMarketplaceListings can
-// parse/cache/score it identically. Submits one request per listing to the async
-// Batch API (separate TPM pool, ~50% cost) instead of the synchronous packed call.
-//
-// Marketplace images are fetched + base64-embedded inside buildMarketplaceAnalysisMessages,
-// so each JSONL line carries its own image data (the Facebook CDN won't serve by URL).
+// Marketplace scoring through bounded concurrent Groq Chat Completions.
+// Images are fetched server-side because Facebook CDN URLs require auth/cookies.
 
 import { buildMarketplaceAnalysisMessages } from "./marketplaceOverview";
-import { runRawChatBatch, type RawChatBatchOpts } from "./groqBatchRun";
+import { runRawChatRequests, type RawChatRequestOpts } from "./groqBatchRun";
 
-export async function batchAnalyzeMarketplaceListingsViaBatchApi(
+export async function analyzeMarketplaceListingsViaChat(
   listings: any[],
   context?: string | null,
   systemPrompt?: string | null,
-  opts?: RawChatBatchOpts,
+  opts?: RawChatRequestOpts,
 ): Promise<string[]> {
   if (listings.length === 0) return [];
 
@@ -32,9 +25,7 @@ export async function batchAnalyzeMarketplaceListingsViaBatchApi(
     })
   );
 
-  // Base64 images make these requests large; give the queue a little more headroom.
-  return runRawChatBatch(messagesList, "marketplace-live", {
-    timeoutMs: 120_000,
+  return runRawChatRequests(messagesList, "marketplace-live", {
     ...opts,
     schema: "marketplace-single",
   });

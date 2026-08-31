@@ -179,7 +179,7 @@ function isVariationListing(listing: any): boolean {
 /**
  * Build the exact system+user message array used to analyze a single eBay listing.
  * Extracted so both the synchronous path (analyzeListingWithImages) and the
- * Groq Batch API path (ebayBatchApi.ts) score listings with an identical prompt.
+ * synchronous per-listing chat path score listings with an identical prompt.
  */
 // Collapse all of a listing's photos into up to three size-bounded grid images. eBay
 // photos are public URLs but full-resolution, so sending them raw is token-heavy;

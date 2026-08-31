@@ -1,5 +1,5 @@
 import { analyzeMarketplaceListingWithImages, batchAnalyzeMarketplaceListingsWithImages, MARKETPLACE_BATCH_SYSTEM_PROMPT } from "../../ai/marketplaceOverview";
-import { batchAnalyzeMarketplaceListingsViaBatchApi } from "../../ai/marketplaceBatchApi";
+import { analyzeMarketplaceListingsViaChat } from "../../ai/marketplaceBatchApi";
 import { extractStructuredAnalysis, validateAnalysis, EMPTY_ANALYSIS } from "../../utils/extractStructuredAnalysis";
 import { calculatePriceFairness, isAcceptsOffersPrice } from "./priceFairnessScore";
 import { setCachedAnalysis, setCachedAnalysisBatch, type PriceMeta } from "../analysisCache";
@@ -177,14 +177,13 @@ export async function scoreMarketplaceListings(listings: any[], context?: string
   if (listings.length === 0) return [];
 
   const resultMap = new Map<number, any>();
-  // Live marketplace scoring runs through Groq's async Batch API (separate TPM
-  // pool, ~50% cost); the synchronous packed call stays only as a fallback on
-  // batch timeout/error so users are never stranded.
+  // Live marketplace scoring uses bounded concurrent Groq chat completions;
+  // packed synchronous calls remain as a fallback.
   let rawStrings: string[];
   try {
-    rawStrings = await batchAnalyzeMarketplaceListingsViaBatchApi(listings, context, systemPrompt);
+    rawStrings = await analyzeMarketplaceListingsViaChat(listings, context, systemPrompt);
   } catch (err) {
-    console.error("[scoreMarketplaceListings] Groq Batch API path failed — falling back to synchronous:", err);
+    console.error("[scoreMarketplaceListings] Groq chat scoring failed — falling back to packed calls:", err);
     rawStrings = await batchAnalyzeMarketplaceListingsWithImages(listings, context, systemPrompt, { stitch: true });
   }
   const toCache: Parameters<typeof setCachedAnalysisBatch>[0] = [];

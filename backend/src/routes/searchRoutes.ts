@@ -5,7 +5,7 @@ import { groupAndContextualize, streamGroupsAndContextualize } from "../ai/listi
 import { getEbayItemByNumericId } from "../services/ebayService";
 import { getMarketplaceListingByGraphqlForAnalysis } from "../services/marketplaceService";
 import { getLocationFromIp, extractClientIp } from "../utils/geoIp";
-import { scoreGroupsInOneBatch, type ScoringGroup } from "../services/scoring/scoreGroupsBatch";
+import { scoreGroupsViaChat, type ScoringGroup } from "../services/scoring/scoreGroupsBatch";
 import { deleteCachedAnalysis, readCacheStore } from "../services/analysisCache";
 import { applyCachedAnalysis, applyCachedAnalysisFromStore } from "../services/cachedAnalysisResult";
 import { consumeAnalysisContext, issueAnalysisContext } from "../services/analysisContextStore";
@@ -219,11 +219,8 @@ router.post("/vision-debug", async (req, res) => {
 });
 
 // POST /api/search/batch-analyze-all
-// Scores EVERY product group of a search in a single Groq batch job. The client
-// gathers all groups (with their per-group contextTokens) from /context, then
-// makes this one call instead of one /batch-analyze per group — collapsing N
-// serialized batch lifecycles into one. Returns a flat array of scored listings;
-// the client matches them back by id/source.
+// Scores every product group through bounded concurrent synchronous Groq Chat
+// Completions. The route name stays stable for frontend compatibility.
 router.post("/batch-analyze-all", async (req, res) => {
   const groups = Array.isArray(req.body?.groups) ? req.body.groups : null;
   if (!groups) return res.status(400).json({ error: "groups must be an array" });
@@ -279,7 +276,7 @@ router.post("/batch-analyze-all", async (req, res) => {
       });
     }
 
-    const scored = await scoreGroupsInOneBatch(scoringGroups);
+    const scored = await scoreGroupsViaChat(scoringGroups);
 
     // Re-attach each group's price range + source to its listings, then sign.
     const out: any[] = [];
@@ -302,7 +299,7 @@ router.post("/batch-analyze-all", async (req, res) => {
     return res.json({ listings: out });
   } catch (err: any) {
     console.error("batch-analyze-all error:", err);
-    return res.status(500).json({ error: err?.message ?? "Combined batch analysis failed" });
+    return res.status(500).json({ error: err?.message ?? "Combined analysis failed" });
   }
 });
 

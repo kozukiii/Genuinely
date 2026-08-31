@@ -1,5 +1,5 @@
 import { analyzeListingWithImages, batchAnalyzeListingsWithImages, EBAY_BATCH_SYSTEM_PROMPT } from "../ai/ebayOverview";
-import { batchAnalyzeListingsViaBatchApi } from "../ai/ebayBatchApi";
+import { analyzeEbayListingsViaChat } from "../ai/ebayBatchApi";
 import { extractStructuredAnalysis, validateAnalysis, EMPTY_ANALYSIS } from "../utils/extractStructuredAnalysis";
 import { parseEbaySellerData, calculateSellerTrust } from "./scoring/sellerTrustScore";
 import { calculatePriceFairness } from "./scoring/priceFairnessScore";
@@ -12,18 +12,15 @@ const EBAY_SCORE_KEYS = new Set([
   "descriptionQuality",
 ]);
 
-// Live eBay scoring runs through Groq's async Batch API (separate TPM pool,
-// ~50% cost) so concurrent searches don't serialize against the synchronous
-// TPM bucket — all listings in ONE batch job, no chunking. The synchronous
-// packed call remains only as a safety net on timeout/error; it has a per-call
-// image cap, so the fallback still goes 8 at a time.
+// Live eBay scoring uses bounded concurrent Groq chat completions. The packed
+// path remains a safety net and stays chunked for the three-image-block cap.
 const SYNC_FALLBACK_CHUNK = 8;
 
 async function scoreAllRaw(items: any[], context?: string | null, systemPrompt?: string | null): Promise<string[]> {
   try {
-    return await batchAnalyzeListingsViaBatchApi(items, context, systemPrompt);
+    return await analyzeEbayListingsViaChat(items, context, systemPrompt);
   } catch (err) {
-    console.error("[aiService] Groq Batch API path failed — falling back to synchronous chunks:", err);
+    console.error("[aiService] Groq chat scoring failed — falling back to packed chunks:", err);
     const raw: string[] = [];
     for (let start = 0; start < items.length; start += SYNC_FALLBACK_CHUNK) {
       const chunk = items.slice(start, start + SYNC_FALLBACK_CHUNK);
@@ -199,9 +196,8 @@ function applyEbayPriceFairness(
 export async function analyzeItemsWithAI(items: any[], context?: string | null, systemPrompt?: string | null, priceLow?: number | null, priceHigh?: number | null, priceMeta?: PriceMeta) {
   if (items.length === 0) return [];
 
-  // Score EVERY listing in a single Batch API job (no per-call image cap, so no
-  // need to chunk). On timeout/error, fall back to the synchronous packed call,
-  // which DOES have an image cap and so must still go 8 at a time.
+  // Score every listing through bounded concurrent chat completions. On error,
+  // fall back to packed calls chunked for the image-block cap.
   const rawStrings = await scoreAllRaw(items, context, systemPrompt);
 
   const toCache: Parameters<typeof setCachedAnalysisBatch>[0] = [];

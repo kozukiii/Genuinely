@@ -1,17 +1,9 @@
-// ─── Combined cross-group scoring in ONE Groq Batch job ──────────────────────
-//
-// The live search splits results into product groups, each with its own context/
-// system prompt. Scoring each group as its own batch job means N batch lifecycles
-// (Groq serializes batches per account), which trickles results in over ~35s.
-//
-// This builds every listing across every group into a SINGLE batch job — each
-// listing carrying its own group's system prompt — so the whole search pays one
-// batch lifecycle. Results are parsed back per-listing with the right group's
-// context. On failure the caller falls back to the per-group path.
+// Cross-group scoring through bounded concurrent Groq Chat Completions. Each
+// request carries the listing's own product-group context and response schema.
 
 import { buildEbayAnalysisMessages } from "../../ai/ebayOverview";
 import { buildMarketplaceAnalysisMessages } from "../../ai/marketplaceOverview";
-import { runRawChatBatch } from "../../ai/groqBatchRun";
+import { runRawChatRequests } from "../../ai/groqBatchRun";
 import { scoreEbayItemFromRaw } from "../aiService";
 import { scoreMarketplaceListingFromRaw } from "./scoreMarketplaceListing";
 
@@ -34,10 +26,9 @@ interface Unit {
 }
 
 /**
- * Score every listing across all groups in one batch job. Returns the scored
- * listings flattened in group/listing order (same order they were provided).
+ * Score every listing across all groups and preserve group/listing order.
  */
-export async function scoreGroupsInOneBatch(groups: ScoringGroup[]): Promise<any[]> {
+export async function scoreGroupsViaChat(groups: ScoringGroup[]): Promise<any[]> {
   // Build each listing's messages (marketplace fetches images) — all in parallel.
   const units: Unit[] = await Promise.all(
     groups.flatMap((group) =>
@@ -58,8 +49,7 @@ export async function scoreGroupsInOneBatch(groups: ScoringGroup[]): Promise<any
 
   if (units.length === 0) return [];
 
-  const raw = await runRawChatBatch(units.map((u) => u.messages), "search-combined", {
-    timeoutMs: 120_000,
+  const raw = await runRawChatRequests(units.map((u) => u.messages), "search-combined", {
     schemas: units.map((u) => u.source === "ebay" ? "ebay-single" : "marketplace-single"),
   });
 

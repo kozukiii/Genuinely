@@ -419,9 +419,8 @@ async function runAnalysisPipeline(
     }
   }
 
-  // Combined mode: submit every collected group as ONE Groq batch job, then apply
-  // all scores together. One batch lifecycle instead of N — cheaper and scales far
-  // better with concurrency, at the cost of no group-by-group progressive fill.
+  // Combined mode: send every collected group to the backend, which scores each
+  // listing through bounded concurrent synchronous Chat Completions.
   async function runCombinedBatch(): Promise<void> {
     const payloadGroups = collectedGroups
       .map((group) => ({
@@ -457,8 +456,7 @@ async function runAnalysisPipeline(
     }
   }
 
-  // Stream context and score each group as soon as it is ready. The backend
-  // /batch-analyze route still uses Groq Batch API for each submitted group.
+  // Stream context and score each group as soon as it is ready.
   try {
     const ctxRes = await fetch(`${API_BASE}/api/search/context`, {
       method: "POST",

@@ -266,33 +266,68 @@ Set "hasReliableMarketData" to false if the product has no standardized resale m
 SOURCE RULE:
 Set "source" to "pricecharting" for trading cards (Pokémon, Magic: The Gathering, Yu-Gi-Oh, sports cards, any collectible card). Set "source" to "serper" for everything else (electronics, golf clubs, sneakers, instruments, etc.).
 
-Return ONLY a JSON array (no markdown, no backticks, no extra text):
-[
-  {
-    "canonicalName": "exact product name with key specs",
-    "indices": [0, 3],
-    "serperQuery": "targeted used resale price search query",
-    "hasReliableMarketData": true,
-    "source": "serper"
-  }
-]
+Return a JSON object with a "groups" array.
 `.trim();
+
+const GROUPING_RESPONSE_FORMAT = {
+  type: "json_schema" as const,
+  json_schema: {
+    name: "listing_groups",
+    strict: true,
+    schema: {
+      type: "object",
+      properties: {
+        groups: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              canonicalName: { type: "string" },
+              indices: { type: "array", items: { type: "integer" } },
+              serperQuery: { type: "string" },
+              hasReliableMarketData: { type: "boolean" },
+              source: { type: "string", enum: ["serper", "pricecharting"] },
+            },
+            required: ["canonicalName", "indices", "serperQuery", "hasReliableMarketData", "source"],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ["groups"],
+      additionalProperties: false,
+    },
+  },
+};
 
 async function isCardQuery(query: string): Promise<boolean> {
   try {
     const response = await groq.chat.completions.create({
       model: GROQ_FAST_TEXT_MODEL,
       messages: [
-        { role: "system", content: "Reply with only 'yes' or 'no'." },
+        { role: "system", content: "Classify whether the query is for a collectible trading card." },
         { role: "user", content: `Is this search query for a trading card (Pokémon, Magic: The Gathering, Yu-Gi-Oh, sports cards, or any collectible card)?\n\nQuery: "${query}"` },
       ],
-      max_tokens: 5,
+      max_tokens: 128,
       temperature: 0,
+      reasoning_effort: "low",
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "card_query",
+          strict: true,
+          schema: {
+            type: "object",
+            properties: { isCard: { type: "boolean" } },
+            required: ["isCard"],
+            additionalProperties: false,
+          },
+        },
+      },
     });
     logUsage("groq", GROQ_FAST_TEXT_MODEL, response.usage);
-    const answer = (response.choices[0].message.content ?? "").trim().toLowerCase();
-    const isCard = answer.startsWith("yes");
-    console.log(`[isCardQuery] "${query}" → ${isCard ? "pricecharting" : "serper"} (raw: "${answer}")`);
+    const raw = response.choices[0].message.content ?? "{}";
+    const isCard = JSON.parse(raw).isCard === true;
+    console.log(`[isCardQuery] "${query}" → ${isCard ? "pricecharting" : "serper"}`);
     return isCard;
   } catch (err) {
     console.error("[isCardQuery] failed:", err);
@@ -355,15 +390,14 @@ async function callGroupingModel(
     ],
     max_tokens: 1200,
     temperature: 0.1,
+    reasoning_effort: "low",
+    response_format: GROUPING_RESPONSE_FORMAT,
   });
   logUsage("groq", model, response.usage);
 
-  const raw = (response.choices[0].message.content ?? "").trim();
-  const start = raw.indexOf("[");
-  const end = raw.lastIndexOf("]");
-  if (start === -1 || end === -1) throw new Error("No JSON array in grouping response");
-
-  const parsed = JSON.parse(raw.slice(start, end + 1));
+  const raw = response.choices[0].message.content;
+  if (!raw) throw new Error("Empty grouping response");
+  const parsed = JSON.parse(raw).groups;
   if (!Array.isArray(parsed) || parsed.length === 0) throw new Error("Empty groups array");
 
   return parsed
@@ -422,14 +456,9 @@ IMPORTANT: The provided data is PRICING ONLY. All physical inspection points, ac
 
 The AI you are writing for receives secondhand marketplace listings (title, price, condition, images, description) and scores them across five categories: priceFairness, conditionHonesty, descriptionQuality, sellerTrust, and shippingFairness.
 
-OUTPUT FORMAT — use exactly this structure, nothing else:
+OUTPUT FORMAT: Return priceLow, priceHigh, and systemPrompt using the required JSON schema.
 
-PRICE_LOW: <integer USD, e.g. 450, or null>
-PRICE_HIGH: <integer USD, e.g. 700, or null>
----
-<the full expert system prompt starts here>
-
-THE SYSTEM PROMPT (everything after ---) MUST CONTAIN ALL OF THESE IN ORDER:
+THE systemPrompt VALUE MUST CONTAIN ALL OF THESE IN ORDER:
 
 1. IDENTITY LINE
    Open with: "You are an expert evaluating secondhand marketplace listings for: [full product name and key specs]."
@@ -478,51 +507,27 @@ RULES:
 - Write in second person to the scoring AI: "You are an expert...", "Watch for...", "Check whether..."
 - Be direct and confident. Do not hedge excessively.
 - Draw on your own product knowledge where search data is thin
-- Everything after --- is plain prose and lists — no JSON, no markdown headers, no code blocks
-- PRICE_LOW and PRICE_HIGH are plain integers, e.g. 450, or the word null
+- The systemPrompt value is plain prose and lists — no JSON, markdown headers, or code blocks inside it
+- priceLow and priceHigh are integer USD values or null
 `.trim();
 
-function parsePriceValue(raw: string): number | null {
-  // Find the first integer anywhere in the string so "around $1,200" / "~45" / "approx 80" all parse
-  const match = raw.replace(/[$,]/g, "").match(/\d+/);
-  const v = match ? parseInt(match[0], 10) : NaN;
-  return isNaN(v) ? null : v;
-}
-
-function parseEngineeredOutput(raw: string): { systemPrompt: string | null; priceLow: number | null; priceHigh: number | null } {
-  const lines = raw.split("\n");
-  let priceLow: number | null = null;
-  let priceHigh: number | null = null;
-  let dividerIdx = -1;
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim().replace(/^\*{1,2}|^\_{1,2}|\*{1,2}$|\_{1,2}$/g, "").trim();
-    const upper = line.toUpperCase();
-    if (upper.startsWith("PRICE_LOW:")) {
-      priceLow = parsePriceValue(line.slice(line.indexOf(":") + 1).trim());
-    } else if (upper.startsWith("PRICE_HIGH:")) {
-      priceHigh = parsePriceValue(line.slice(line.indexOf(":") + 1).trim());
-    } else if (line === "---") {
-      dividerIdx = i;
-      break;
-    }
-  }
-
-  const systemPrompt = dividerIdx >= 0
-    ? lines.slice(dividerIdx + 1).join("\n").trim() || null
-    : null;
-
-  if (!systemPrompt) {
-    console.error("[listingContext] No system prompt found after ---. Raw output snippet:\n", raw.slice(0, 400));
-  }
-
-  if (systemPrompt && (priceLow === null || priceHigh === null)) {
-    console.warn("[listingContext] System prompt parsed but price values missing — raw header lines:\n",
-      lines.slice(0, Math.min(dividerIdx >= 0 ? dividerIdx : 5, 5)).join("\n"));
-  }
-
-  return { systemPrompt, priceLow, priceHigh };
-}
+const PROMPT_ENGINEER_RESPONSE_FORMAT = {
+  type: "json_schema" as const,
+  json_schema: {
+    name: "engineered_listing_prompt",
+    strict: true,
+    schema: {
+      type: "object",
+      properties: {
+        priceLow: { anyOf: [{ type: "integer" }, { type: "null" }] },
+        priceHigh: { anyOf: [{ type: "integer" }, { type: "null" }] },
+        systemPrompt: { type: "string" },
+      },
+      required: ["priceLow", "priceHigh", "systemPrompt"],
+      additionalProperties: false,
+    },
+  },
+};
 
 function buildTradingCardSystemPrompt(canonicalName: string, priceLow: number | null, priceHigh: number | null, priceSource: string | null): string {
   const priceLabel = priceLow != null && priceHigh != null
@@ -557,12 +562,23 @@ async function engineerPrompt(
         { role: "system", content: PROMPT_ENGINEER_SYSTEM },
         { role: "user", content: `Product: "${canonicalName}"\n\n${marketData}` },
       ],
-      max_tokens: 2000,
+      max_tokens: 3500,
       temperature: 0.15,
+      reasoning_effort: "low",
+      response_format: PROMPT_ENGINEER_RESPONSE_FORMAT,
     });
     logUsage("groq", GROQ_FAST_TEXT_MODEL, response.usage);
 
-    const result = parseEngineeredOutput((response.choices[0].message.content ?? "").trim());
+    const raw = response.choices[0].message.content;
+    if (!raw) throw new Error("Empty prompt-engineering response");
+    const parsed = JSON.parse(raw);
+    const result = {
+      priceLow: typeof parsed.priceLow === "number" ? parsed.priceLow : null,
+      priceHigh: typeof parsed.priceHigh === "number" ? parsed.priceHigh : null,
+      systemPrompt: typeof parsed.systemPrompt === "string" && parsed.systemPrompt.trim()
+        ? parsed.systemPrompt.trim()
+        : null,
+    };
     console.log(`[engineerPrompt] ✓ "${canonicalName}" — priceLow=${result.priceLow} priceHigh=${result.priceHigh} systemPrompt=${result.systemPrompt ? result.systemPrompt.length + " chars" : "null"}`);
     return result;
   } catch (err) {

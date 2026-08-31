@@ -17,7 +17,6 @@ import { searchEbayNormalized, getEbayItemByNumericId } from "../services/ebaySe
 import { getMarketplaceListingByGraphqlForAnalysis } from "../services/marketplaceService";
 import { fetchMarketContext } from "../ai/listingContext";
 import { batchAnalyzeListingsWithImages } from "../ai/ebayOverview";
-import { submitEbayBatch, getEbayBatchStatus } from "../ai/ebayBatchApi";
 import { batchAnalyzeMarketplaceListingsWithImages } from "../ai/marketplaceOverview";
 import { extractStructuredAnalysis, validateAnalysis } from "../utils/extractStructuredAnalysis";
 
@@ -325,8 +324,6 @@ router.post("/grid-compare/run", async (req, res) => {
 
 // runId -> the fetched listings, so both parallel calls score the SAME listings.
 const ebayRunListings = new Map<string, { query: string; listings: any[]; createdAt: number }>();
-// batchId -> batch run state for status polling.
-const ebayBatchMeta = new Map<string, { query: string; submittedAt: number; completedAt: number | null }>();
 type EbayContextScheme = "serper" | "groq";
 const ebayRunContexts = new Map<string, Partial<Record<EbayContextScheme, { context: string | null; elapsedMs: number; tokens: number | null }>>>();
 
@@ -335,7 +332,6 @@ const EBAY_RUN_TTL_MS = 60 * 60 * 1000;
 function pruneEbayRuns() {
   const cutoff = Date.now() - EBAY_RUN_TTL_MS;
   for (const [k, v] of ebayRunListings) if (v.createdAt < cutoff) ebayRunListings.delete(k);
-  for (const [k, v] of ebayBatchMeta) if (v.submittedAt < cutoff) ebayBatchMeta.delete(k);
   for (const k of ebayRunContexts.keys()) if (!ebayRunListings.has(k)) ebayRunContexts.delete(k);
 }
 
@@ -451,44 +447,6 @@ router.post("/ebay-batch-test/sync-analyze", async (req, res) => {
   } catch (err: any) {
     console.error("[ebay-batch-test] sync-analyze error:", err);
     return res.status(500).json({ error: err?.message ?? "sync-analyze failed" });
-  }
-});
-
-// Step 2b — batch submit. Returns a batchId fast; the client then polls /status.
-router.post("/ebay-batch-test/batch-submit", async (req, res) => {
-  const runId = typeof req.body?.runId === "string" ? req.body.runId : "";
-  const scheme: EbayContextScheme = req.body?.scheme === "groq" ? "groq" : "serper";
-  const run = ebayRunListings.get(runId);
-  if (!run) return res.status(404).json({ error: "unknown or expired runId" });
-
-  try {
-    const context = ebayRunContexts.get(runId)?.[scheme]?.context ?? null;
-    const batchId = await submitEbayBatch(run.listings, context);
-    ebayBatchMeta.set(batchId, { query: `${run.query} (${scheme})`, submittedAt: Date.now(), completedAt: null });
-    return res.json({ batchId, scheme });
-  } catch (err: any) {
-    console.error("[ebay-batch-test] batch-submit error:", err);
-    return res.status(500).json({ error: err?.message ?? "batch-submit failed" });
-  }
-});
-
-router.get("/ebay-batch-test/status", async (req, res) => {
-  const batchId = typeof req.query.id === "string" ? req.query.id : "";
-  if (!batchId) return res.status(400).json({ error: "id is required" });
-
-  try {
-    const status = await getEbayBatchStatus(batchId);
-    const meta = ebayBatchMeta.get(batchId);
-
-    // Freeze the batch timer the first time we observe a terminal state.
-    const terminal = ["completed", "failed", "expired", "cancelled"].includes(status.status);
-    if (meta && terminal && meta.completedAt === null) meta.completedAt = Date.now();
-    const elapsedMs = meta ? (meta.completedAt ?? Date.now()) - meta.submittedAt : null;
-
-    return res.json({ ...status, query: meta?.query ?? null, elapsedMs });
-  } catch (err: any) {
-    console.error("[ebay-batch-test] status error:", err);
-    return res.status(500).json({ error: err?.message ?? "status failed" });
   }
 });
 

@@ -265,7 +265,7 @@ export async function getMarketplaceVisionImages(listing: any): Promise<string[]
  * Build the system+user message array for a single Marketplace listing.
  * Async because Marketplace images must be fetched through the proxy and
  * base64-embedded (the Facebook CDN won't serve them to Groq by URL).
- * Shared by the synchronous path and the Groq Batch API path.
+ * Shared by the packed fallback and synchronous per-listing chat path.
  */
 export async function buildMarketplaceAnalysisMessages(listing: any, context?: string | null): Promise<any[]> {
   const title = clean(listing.title) ?? "Untitled";

@@ -92,7 +92,7 @@ function responseSchema(kind: GroqVisionSchema) {
   };
 }
 
-/** Qwen 3.8 strict structured output shared by sync and async vision paths. */
+/** Qwen 3.8 strict structured output for synchronous vision requests. */
 export function buildGroqVisionRequest(
   messages: any[],
   maxTokens: number,

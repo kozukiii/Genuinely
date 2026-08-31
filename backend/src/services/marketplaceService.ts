@@ -244,10 +244,14 @@ function happyEyeballs(
   options: Parameters<typeof fetch>[1],
   timeoutMs: number,
 ): ReturnType<typeof fetch> {
-  const urls: Array<string | null> =
-    proxyUrls.length > 0
-      ? [...proxyUrls].sort(() => Math.random() - 0.5).slice(0, PROXY_RACE_WIDTH)
-      : [null];
+  const urls: Array<string | null> = proxyUrls.length > 0
+    ? [
+        ...[...proxyUrls].sort(() => Math.random() - 0.5).slice(0, PROXY_RACE_WIDTH),
+        // A stale production proxy list should not make Marketplace a total
+        // outage. Try Render's direct egress last, after every proxy candidate.
+        null,
+      ]
+    : [null];
 
   const outerController = new AbortController();
   const outerTimer = setTimeout(() => outerController.abort(), timeoutMs);

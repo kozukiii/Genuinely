@@ -388,9 +388,11 @@ async function callGroupingModel(
       { role: "system", content: GROUPING_SYSTEM },
       { role: "user", content: userContent },
     ],
-    max_tokens: 1200,
+    max_tokens: 1600,
     temperature: 0.1,
-    reasoning_effort: "low",
+    // Grouping is a constrained classification task. Disabling hidden
+    // reasoning leaves the completion budget for the required JSON document.
+    reasoning_effort: "none",
     response_format: GROUPING_RESPONSE_FORMAT,
   });
   logUsage("groq", model, response.usage);

@@ -23,8 +23,8 @@ export interface RawChatRequestOpts {
   concurrency?: number;
 }
 
-const RETRYABLE_STATUSES = new Set([408, 409, 429, 500, 502, 503, 504]);
-const MAX_ATTEMPTS = 5;
+const RETRYABLE_STATUSES = new Set([408, 409, 429, 498, 500, 502, 503, 504]);
+const MAX_ATTEMPTS = 8;
 const DEFAULT_MAX_TOKENS = 700;
 let rateLimitBlockedUntil = 0;
 
@@ -104,7 +104,10 @@ export async function runRawChatRequests(
           const retryable = error?.status == null || RETRYABLE_STATUSES.has(error.status);
           if (!retryable || attempt === MAX_ATTEMPTS) throw error;
 
-          const delayMs = groqRetryDelayMs(error, attempt);
+          // Flex capacity errors are intentionally transient. Jitter prevents
+          // concurrent listing workers from retrying in lockstep.
+          const delayMs = groqRetryDelayMs(error, attempt)
+            + (error?.status === 498 ? Math.floor(Math.random() * 750) : 0);
           if (error?.status === 429) {
             rateLimitBlockedUntil = Math.max(rateLimitBlockedUntil, Date.now() + delayMs);
           }

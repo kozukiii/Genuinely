@@ -1,6 +1,7 @@
 import fetch, { type Response } from "node-fetch";
 import { load } from "cheerio";
 import OpenAI from "openai";
+import { GROQ_QUALITY_TEXT_MODEL } from "../ai/groqModels";
 
 const groq = new OpenAI({
   apiKey: process.env.GROQ_API_KEY ?? "",
@@ -138,7 +139,7 @@ export async function fetchPriceChartingData(
 
     try {
       const response = await groq.chat.completions.create({
-        model: "llama-3.3-70b-versatile",
+        model: GROQ_QUALITY_TEXT_MODEL,
         messages: [
           {
             role: "system",
@@ -464,7 +465,7 @@ async function extractCardInfoWithGroq(input: string): Promise<CardInfo[]> {
 
   try {
     const response = await groq.chat.completions.create({
-      model: "llama-3.3-70b-versatile",
+      model: GROQ_QUALITY_TEXT_MODEL,
       messages: [
         {
           role: "system",

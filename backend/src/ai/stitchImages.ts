@@ -2,7 +2,7 @@ import sharp from "sharp";
 
 // ─── Image grid stitching ──────────────────────────────────────────────────
 //
-// Vision models (llama-4-scout on Groq) tile + downscale every image they
+// Vision models on Groq tile + downscale every image they
 // receive, and cap the number of image blocks per request. Sending a listing's
 // photos one-by-one burns that cap fast — often only one listing fits per call.
 //
@@ -26,12 +26,13 @@ const GRID_MAX_PX = 1280;     // hard ceiling on the composite's longest edge �
                               // token cost and keeps the base64 body under Groq's 4MB cap.
 const BG = { r: 255, g: 255, b: 255, alpha: 1 };
 
-// Groq caps a request at 5 image blocks. Distribute a listing's photos across up
-// to `maxBlocks` blocks, preferring raw single-photo blocks (best detail) and
+// The configured Groq vision model caps a request at 3 image blocks. Distribute
+// a listing's photos across up to `maxBlocks` blocks, preferring raw
+// single-photo blocks (best detail) and
 // only grouping into stitched grids once there are more photos than blocks — so
 // no photo is dropped. Returns index groups; a group of 1 = raw, >1 = stitched.
 // Capacity is maxBlocks × maxCells photos; anything beyond that is truncated.
-export function planImageBlocks(count: number, maxBlocks = 5, maxCells = MAX_CELLS): number[][] {
+export function planImageBlocks(count: number, maxBlocks = 3, maxCells = MAX_CELLS): number[][] {
   const n = Math.min(count, maxBlocks * maxCells);
   if (n <= 0) return [];
   if (n <= maxBlocks) return Array.from({ length: n }, (_, i) => [i]);

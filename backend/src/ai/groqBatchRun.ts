@@ -8,6 +8,7 @@
 
 import OpenAI, { toFile } from "openai";
 import dotenv from "dotenv";
+import { GROQ_VISION_MODEL } from "./groqModels";
 
 dotenv.config({ quiet: true });
 
@@ -16,7 +17,6 @@ const groq = new OpenAI({
   baseURL: "https://api.groq.com/openai/v1",
 });
 
-const MODEL = "qwen/qwen3.6-27b";
 const TERMINAL = ["completed", "failed", "expired", "cancelled"];
 
 function sleep(ms: number) { return new Promise<void>((r) => setTimeout(r, ms)); }
@@ -49,7 +49,7 @@ export async function runRawChatBatch(
       custom_id: `item-${i}`,
       method: "POST",
       url: "/v1/chat/completions",
-      body: { model: MODEL, messages, max_tokens: maxTokens, temperature: 0.2, response_format: { type: "json_object" } },
+      body: { model: GROQ_VISION_MODEL, messages, max_tokens: maxTokens, temperature: 0.2, response_format: { type: "json_object" } },
     }))
     .join("\n");
 

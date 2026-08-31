@@ -5,9 +5,10 @@ import sharp from "sharp";
 import { logUsage } from "../services/usageLogger";
 import { extractBatchObjects } from "../utils/extractBatchObjects";
 import { stitchDataUrls, gridLayoutNote, type StitchResult } from "./stitchImages";
+import { GROQ_VISION_MODEL } from "./groqModels";
 
 // Longest-edge cap for inline Marketplace photos before base64 embedding. Keeps a
-// 5-block request comfortably under Groq's 4MB base64 limit while staying legible
+// 3-block request comfortably under Groq's 4MB base64 limit while staying legible
 // for condition assessment.
 const MAX_IMAGE_PX = 1024;
 
@@ -532,13 +533,13 @@ export async function analyzeMarketplaceListingWithImages(listing: any, context?
   const messages = await buildMarketplaceAnalysisMessages(listing, context);
 
   const response = await groq.chat.completions.create({
-    model: "qwen/qwen3.6-27b",
+    model: GROQ_VISION_MODEL,
     messages,
     max_tokens: 1000,
     temperature: 0.2,
     response_format: { type: "json_object" },
   });
-  logUsage("groq", "llama-4-scout-17b", response.usage);
+  logUsage("groq", GROQ_VISION_MODEL, response.usage);
   console.log("[marketplace:single] response_format=json_object used");
 
   return response.choices[0].message.content?.trim() || "{}";
@@ -548,7 +549,7 @@ export async function analyzeMarketplaceListingWithImages(listing: any, context?
 // Batch analysis — analyzes multiple listings in a single API call
 // ---------------------------------------------------------------------------
 
-const MODEL_IMAGE_LIMIT = 5; // hard cap imposed by the vision model
+const MODEL_IMAGE_LIMIT = 3; // Qwen 3.6 hard cap per request
 
 // Appended to any generated system prompt so the output shape stays consistent
 const MARKETPLACE_BATCH_OUTPUT_FORMAT = `
@@ -726,7 +727,7 @@ async function _runMarketplaceBatch(listings: any[], allDataUrls: string[][], co
   let rawResponse: string;
   try {
     const response = await groqWithRetry(() => groq.chat.completions.create({
-      model: "meta-llama/llama-4-scout-17b-16e-instruct",
+      model: GROQ_VISION_MODEL,
       messages: [
         { role: "system", content: systemContent },
         { role: "user", content: contentParts },
@@ -735,7 +736,7 @@ async function _runMarketplaceBatch(listings: any[], allDataUrls: string[][], co
       temperature: 0.2,
       response_format: { type: "json_object" },
     }));
-    logUsage("groq", "llama-4-scout-17b", response.usage);
+    logUsage("groq", GROQ_VISION_MODEL, response.usage);
     rawResponse = response.choices[0].message.content?.trim() ?? "{}";
     console.log(`[marketplace:batch] response_format=json_object received ${rawResponse.length} chars`);
   } catch (err) {

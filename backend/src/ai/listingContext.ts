@@ -4,10 +4,11 @@ import { logUsage } from "../services/usageLogger";
 import { scrapePriceChartingUrl } from "../priceSources/priceCharting";
 import { extractPriceRange } from "../services/scoring/priceFairnessScore";
 import type { PriceSource } from "../priceSources/priceSources";
+import { GROQ_FAST_TEXT_MODEL, GROQ_QUALITY_TEXT_MODEL } from "./groqModels";
 
 dotenv.config({ quiet: true });
 
-// ─── Groq client (8b-instant — prompt engineering only, separate TPM bucket) ──
+// ─── Groq client ───────────────────────────────────────────────
 
 const groq = new OpenAI({
   apiKey: process.env.GROQ_API_KEY!,
@@ -280,7 +281,7 @@ Return ONLY a JSON array (no markdown, no backticks, no extra text):
 async function isCardQuery(query: string): Promise<boolean> {
   try {
     const response = await groq.chat.completions.create({
-      model: "llama-3.1-8b-instant",
+      model: GROQ_FAST_TEXT_MODEL,
       messages: [
         { role: "system", content: "Reply with only 'yes' or 'no'." },
         { role: "user", content: `Is this search query for a trading card (Pokémon, Magic: The Gathering, Yu-Gi-Oh, sports cards, or any collectible card)?\n\nQuery: "${query}"` },
@@ -288,7 +289,7 @@ async function isCardQuery(query: string): Promise<boolean> {
       max_tokens: 5,
       temperature: 0,
     });
-    logUsage("groq", "llama-3.1-8b-instant", response.usage);
+    logUsage("groq", GROQ_FAST_TEXT_MODEL, response.usage);
     const answer = (response.choices[0].message.content ?? "").trim().toLowerCase();
     const isCard = answer.startsWith("yes");
     console.log(`[isCardQuery] "${query}" → ${isCard ? "pricecharting" : "serper"} (raw: "${answer}")`);
@@ -303,8 +304,8 @@ async function isCardQuery(query: string): Promise<boolean> {
 // (fewer spurious overlaps/merges), and getting grouping right the first time
 // avoids duplicate batch items downstream — which nets out latency-neutral or
 // better despite the slightly slower call.
-const GROUPING_MODEL = "llama-3.3-70b-versatile";
-const GROUPING_RETRY_MODEL = "llama-3.3-70b-versatile";
+const GROUPING_MODEL = GROQ_QUALITY_TEXT_MODEL;
+const GROUPING_RETRY_MODEL = GROQ_QUALITY_TEXT_MODEL;
 
 // A listing must belong to exactly one product group. Return the indices that
 // the model placed in 2+ groups (empty array = clean).
@@ -551,7 +552,7 @@ async function engineerPrompt(
   try {
     console.log(`[engineerPrompt] → "${canonicalName}" (market data: ${marketData.length} chars)`);
     const response = await groq.chat.completions.create({
-      model: "llama-3.1-8b-instant",
+      model: GROQ_FAST_TEXT_MODEL,
       messages: [
         { role: "system", content: PROMPT_ENGINEER_SYSTEM },
         { role: "user", content: `Product: "${canonicalName}"\n\n${marketData}` },
@@ -559,7 +560,7 @@ async function engineerPrompt(
       max_tokens: 2000,
       temperature: 0.15,
     });
-    logUsage("groq", "llama-3.1-8b-instant", response.usage);
+    logUsage("groq", GROQ_FAST_TEXT_MODEL, response.usage);
 
     const result = parseEngineeredOutput((response.choices[0].message.content ?? "").trim());
     console.log(`[engineerPrompt] ✓ "${canonicalName}" — priceLow=${result.priceLow} priceHigh=${result.priceHigh} systemPrompt=${result.systemPrompt ? result.systemPrompt.length + " chars" : "null"}`);

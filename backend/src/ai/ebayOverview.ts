@@ -4,6 +4,7 @@ import { calculatePriceFairness } from "../services/scoring/priceFairnessScore";
 import { extractBatchObjects } from "../utils/extractBatchObjects";
 import { validateAnalysis, EMPTY_ANALYSIS } from "../utils/extractStructuredAnalysis";
 import { stitchBuffers, gridLayoutNote, type StitchResult } from "./stitchImages";
+import { GROQ_VISION_MODEL } from "./groqModels";
 
 export interface VisionBatchOpts {
   /** When true, each listing's photos are stitched into a single grid image (1 image/listing). */
@@ -362,7 +363,7 @@ export async function analyzeListingWithImages(listing: any, context?: string | 
   const messages = await buildEbayAnalysisMessages(listing, context);
 
   const response = await groq.chat.completions.create({
-    model: "qwen/qwen3.6-27b",
+    model: GROQ_VISION_MODEL,
     messages,
     max_tokens: 1000,
     temperature: 0.2,
@@ -480,7 +481,7 @@ OUTPUT FORMAT — return ONLY this JSON object:
 }
 `.trim();
 
-const MAX_IMAGES_PER_BATCH = 5;
+const MAX_IMAGES_PER_BATCH = 3;
 
 // In stitch mode a listing's photos are collapsed into a single composite image,
 // so each listing costs exactly 1 image block regardless of how many photos it has.
@@ -619,7 +620,7 @@ async function _runEbayBatch(entries: BatchEntry[], context?: string | null, sys
   let rawResponse: string;
   try {
     const response = await groqWithRetry(() => groq.chat.completions.create({
-      model: "meta-llama/llama-4-scout-17b-16e-instruct",
+      model: GROQ_VISION_MODEL,
       messages: [
         { role: "system", content: systemContent },
         { role: "user", content: contentParts },

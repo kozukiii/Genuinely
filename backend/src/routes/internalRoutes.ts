@@ -122,8 +122,9 @@ async function fetchSerperUsage(): Promise<ProviderUsage> {
 
 // Groq pricing: USD per 1M tokens (input / output)
 const GROQ_PRICING: Record<string, { input: number; output: number }> = {
-  "llama-3.1-8b-instant":  { input: 0.05,  output: 0.08  },
-  "llama-4-scout-17b":     { input: 0.11,  output: 0.34  },
+  "openai/gpt-oss-20b":    { input: 0.075, output: 0.30 },
+  "openai/gpt-oss-120b":   { input: 0.15,  output: 0.60 },
+  "qwen/qwen3.6-27b":      { input: 0.60,  output: 3.00 },
 };
 const GROQ_DEFAULT_PRICE = { input: 0.10, output: 0.10 };
 

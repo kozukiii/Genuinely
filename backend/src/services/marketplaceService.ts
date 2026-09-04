@@ -42,10 +42,10 @@ export function markProxyRateLimited(proxyUrl?: string | null): void {
     const before = stickyProxyPool.length;
     stickyProxyPool = stickyProxyPool.filter((entry) => entry.url !== proxyUrl);
     if (before !== stickyProxyPool.length) {
-      console.warn(`[proxy] rate limited on ${proxyUrl} — evicting from sticky pool`);
+      console.warn("[proxy] rate limited — evicting from sticky pool");
       return;
     }
-    console.warn(`[proxy] rate limited on ${proxyUrl} — proxy was not in sticky pool`);
+    console.warn("[proxy] rate limited — proxy was not in sticky pool");
     return;
   }
 
@@ -95,7 +95,7 @@ function addStickyProxyWinner(proxyUrl: string): void {
     lastSucceededAt: now,
   });
 
-  console.log(`[proxy] added ${proxyUrl} to sticky pool (${stickyProxyPool.length}/${STICKY_PROXY_POOL_SIZE})`);
+  console.log(`[proxy] added connection to sticky pool (${stickyProxyPool.length}/${STICKY_PROXY_POOL_SIZE})`);
 }
 
 function parseJsonWithTimeout<T>(
@@ -220,7 +220,7 @@ function raceStickyProxyPool(
         .catch((err: any) => {
           clearTimeout(timer);
           stickyProxyPool = stickyProxyPool.filter((candidate) => candidate.url !== entry.url);
-          console.warn(`[proxy] sticky proxy failed (${entry.url}: ${err?.message ?? "unknown error"}) — evicting`);
+          console.warn("[proxy] sticky proxy failed — evicting");
           lastError = err;
           failures += 1;
           if (!settled && failures === entries.length) {

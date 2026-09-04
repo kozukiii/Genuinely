@@ -8,6 +8,7 @@ export interface PipelineStatus {
   groupsDone?: number;
   groupsTotal?: number;
   listingsScored?: number;
+  listingsFailed?: number;
   elapsedSeconds?: number;
   // True for combined single-batch mode, where scores land all at once with no
   // per-group progress. The bar fakes forward motion (capped) + rotating labels.
@@ -159,6 +160,9 @@ export default function LoadingBar(
   let displayLabel: string;
   if (phase === "done" && summary) {
     displayLabel = `Analyzed ${summary.count} listing${summary.count !== 1 ? "s" : ""} in ${summary.elapsed}s`;
+    if (status.listingsFailed) {
+      displayLabel = `${summary.count} listings analyzed; ${status.listingsFailed} could not be scored. Search again to retry.`;
+    }
   } else if (label) {
     // Caller-supplied narration (e.g. per-source status) overrides the generic label.
     displayLabel = label;

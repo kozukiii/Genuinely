@@ -11,6 +11,8 @@ function groqClient() {
     groq = new OpenAI({
       apiKey: process.env.GROQ_API_KEY!,
       baseURL: "https://api.groq.com/openai/v1",
+      maxRetries: 0,
+      timeout: 30_000,
     });
   }
   return groq;
@@ -21,6 +23,8 @@ export interface RawChatRequestOpts {
   schema?: GroqVisionSchema;
   schemas?: GroqVisionSchema[];
   concurrency?: number;
+  /** Leave failed slots empty so callers can retain successful listing scores. */
+  allowPartial?: boolean;
 }
 
 const RETRYABLE_STATUSES = new Set([408, 409, 429, 498, 500, 502, 503, 504]);
@@ -82,7 +86,7 @@ export async function runRawChatRequests(
   const schemas = schemasForRequests(messagesList, label, opts);
   const maxTokens = opts?.maxTokens ?? DEFAULT_MAX_TOKENS;
   const concurrency = Math.max(1, Math.min(opts?.concurrency ?? 4, messagesList.length));
-  const results = new Array<string>(messagesList.length);
+  const results = new Array<string>(messagesList.length).fill("");
   let nextIndex = 0;
   const start = Date.now();
 
@@ -97,12 +101,19 @@ export async function runRawChatRequests(
             buildGroqVisionRequest(messagesList[index], maxTokens, schemas[index]),
           );
           const content = response.choices[0]?.message?.content?.trim();
+          if (response.choices[0]?.finish_reason === "length") {
+            throw Object.assign(new Error("Groq completion was truncated"), { status: 422 });
+          }
           if (!content) throw new Error(`Groq ${label} request ${index} returned empty content`);
           results[index] = content;
           break;
         } catch (error: any) {
           const retryable = error?.status == null || RETRYABLE_STATUSES.has(error.status);
-          if (!retryable || attempt === MAX_ATTEMPTS) throw error;
+          if (!retryable || attempt === MAX_ATTEMPTS) {
+            if (!opts?.allowPartial) throw error;
+            console.warn(`[groqChat:${label}] request ${index} failed (status=${error?.status ?? "network"}); preserving other results`);
+            break;
+          }
 
           // Flex capacity errors are intentionally transient. Jitter prevents
           // concurrent listing workers from retrying in lockstep.

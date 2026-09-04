@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import dotenv from "dotenv";
+import { fetchVisionImage as fetchImageBuffer } from "./fetchVisionImage";
 import { calculatePriceFairness } from "../services/scoring/priceFairnessScore";
 import { extractBatchObjects } from "../utils/extractBatchObjects";
 import { validateAnalysis, EMPTY_ANALYSIS } from "../utils/extractStructuredAnalysis";
@@ -376,7 +377,6 @@ export async function analyzeListingWithImages(listing: any, context?: string | 
   const messages = await buildEbayAnalysisMessages(listing, context);
 
   const response = await groq.chat.completions.create(buildGroqVisionRequest(messages, 1000, "ebay-single"));
-
   return response.choices[0].message.content?.trim() || "{}";
 }
 
@@ -502,22 +502,6 @@ function getListingImageUrls(listing: any): string[] {
         ? listing.images
         : []
   ).filter((u: any) => typeof u === "string" && u.trim());
-}
-
-async function fetchImageBuffer(url: string): Promise<Buffer | null> {
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 8_000);
-    const res = await fetch(url, { signal: controller.signal as any });
-    clearTimeout(timer);
-    if (!res.ok) return null;
-    const ct = res.headers.get("content-type") || "";
-    if (ct && !ct.toLowerCase().startsWith("image/")) return null;
-    const buf = Buffer.from(await res.arrayBuffer());
-    return buf.length > 0 ? buf : null;
-  } catch {
-    return null;
-  }
 }
 
 /** Fetch + stitch every listing photo into one to three grids. */

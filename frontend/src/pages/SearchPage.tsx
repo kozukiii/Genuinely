@@ -95,6 +95,7 @@ function deriveCombinedBar(statuses: PipelineStatusMap): { status: PipelineStatu
     phase: lagStatus.phase,
     combined: true,
     listingsScored: (statuses.ebay?.listingsScored ?? 0) + (statuses.marketplace?.listingsScored ?? 0),
+    listingsFailed: (statuses.ebay?.listingsFailed ?? 0) + (statuses.marketplace?.listingsFailed ?? 0),
     elapsedSeconds: Math.max(statuses.ebay?.elapsedSeconds ?? 0, statuses.marketplace?.elapsedSeconds ?? 0),
   };
 
@@ -214,6 +215,7 @@ async function runAnalysisPipeline(
   combinedBatch = false,
 ) {
   let itemsToAnalyze = items;
+  const scoredKeys = new Set<string>();
 
   try {
     const cacheRes = await fetch(`${API_BASE}/api/search/cache-lookup`, {
@@ -231,6 +233,9 @@ async function runAnalysisPipeline(
       if (cachedRows.length > 0) {
         const cachedIndexes = new Set(cachedRows.map((row) => row.index));
         const cachedListings = cachedRows.map((row) => stripQueryCategoryDebugInfo(row.listing));
+        for (const listing of cachedListings) {
+          if (listing.aiScore != null) scoredKeys.add(`${listing.source}:${listing.id}`);
+        }
 
         for (const listing of cachedListings) publishAnalysisResult(listing);
 
@@ -266,7 +271,7 @@ async function runAnalysisPipeline(
   }
 
   if (itemsToAnalyze.length === 0) {
-    onStatus?.({ phase: "done", listingsScored: items.length });
+    onStatus?.({ phase: "done", listingsScored: scoredKeys.size, listingsFailed: items.length - scoredKeys.size });
     return;
   }
 
@@ -277,8 +282,11 @@ async function runAnalysisPipeline(
     if (unresolved.length === 0) return scored;
 
     const repaired = new Map<string, Listing>();
+    let nextIndex = 0;
     await Promise.all(
-      unresolved.map(async (listing) => {
+      Array.from({ length: Math.min(3, unresolved.length) }, async () => {
+        while (nextIndex < unresolved.length && !signal.aborted) {
+        const listing = unresolved[nextIndex++];
         try {
           const res = await fetch(`${API_BASE}/api/search/analyze`, {
             method: "POST",
@@ -286,11 +294,12 @@ async function runAnalysisPipeline(
             body: JSON.stringify(listing),
             signal,
           });
-          if (!res.ok) return;
+          if (!res.ok) continue;
           const retried = await res.json() as Listing;
           repaired.set(`${retried.source}:${retried.id}`, retried);
         } catch {
           // keep original unresolved listing
+        }
         }
       }),
     );
@@ -326,6 +335,9 @@ async function runAnalysisPipeline(
   // notify any open ListingPage, and update React state. Price range/source are
   // already attached server-side by /batch-analyze-all.
   function applyScoredListings(stabilized: Listing[]) {
+    for (const listing of stabilized) {
+      if (listing.aiScore != null) scoredKeys.add(`${listing.source}:${listing.id}`);
+    }
     try {
       const raw = sessionStorage.getItem(SEARCH_LISTINGS_KEY);
       if (raw) {
@@ -497,9 +509,11 @@ async function runAnalysisPipeline(
     console.error("[analysis] context stream failed:", err);
     // Fallback: score everything as one no-context group.
     coveredIndices.clear();
+    collectedGroups.length = 0;
     groupsTotal = 1;
     onStatus?.({ phase: "scoring", groupsDone: 0, groupsTotal });
     const fallbackGroup: Group = { canonicalName: query, specificity: "broad", indices: itemsToAnalyze.map((_, i) => i), context: null };
+    fallbackGroup.indices.forEach((i) => coveredIndices.add(i));
     if (combinedBatch) collectedGroups.push(fallbackGroup);
     else scoringPromises.push(scoreGroup(fallbackGroup));
   }
@@ -519,7 +533,7 @@ async function runAnalysisPipeline(
   if (combinedBatch) await runCombinedBatch();
   else await Promise.all(scoringPromises);
 
-  onStatus?.({ phase: "done", listingsScored: items.length });
+  onStatus?.({ phase: "done", listingsScored: scoredKeys.size, listingsFailed: items.length - scoredKeys.size });
 }
 
 function applyFilters(listings: Listing[], filters: FilterState): Listing[] {

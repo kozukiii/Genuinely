@@ -30,8 +30,7 @@ export function getHighResImage(url?: string, source?: string): string {
     return url;
   }
 
-  // Only upgrade if eBay CDN URL — don't risk breaking non-eBay image URLs
-  const isEbayCdn = url.includes("ebayimg.com");
-  const upgraded = isEbayCdn ? url.replace(/s-l\d+\.jpg/i, "s-l500.jpg") : url;
-  return `${API_BASE}/api/proxy-image?url=${encodeURIComponent(upgraded)}`;
+  // Preserve the source API URL so display and stitching reuse the same
+  // temporary backend download, including its original resolution.
+  return `${API_BASE}/api/proxy-image?url=${encodeURIComponent(url)}`;
 }

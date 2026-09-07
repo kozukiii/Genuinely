@@ -1,7 +1,7 @@
 import { Router } from "express";
 import db from "../db";
 import { requireAuth } from "../middleware/auth";
-import { getEbayItemByNumericId } from "../services/ebayService";
+import { getEbayItemByEbayId } from "../services/ebayService";
 import { getMarketplaceListingByGraphqlForAnalysis } from "../services/marketplaceService";
 
 const router = Router();
@@ -84,9 +84,10 @@ router.post("/hydrate", requireAuth, async (req, res) => {
       if (!source || !id) return null;
       try {
         if (source === "ebay") {
-          const numericId = id.match(/\d{8,}/)?.[0];
-          if (!numericId) return null;
-          return await getEbayItemByNumericId(numericId, null);
+          // Preserve saved variant identity when obtaining fresh image URLs.
+          const ebayId = /^v1\|\d+\|\d+$/.test(id) ? id : /^\d{8,}$/.test(id) ? `v1|${id}|0` : null;
+          if (!ebayId) return null;
+          return await getEbayItemByEbayId(ebayId, null);
         }
         if (source === "marketplace") {
           return await getMarketplaceListingByGraphqlForAnalysis(id);

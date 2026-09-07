@@ -341,13 +341,19 @@ export async function getEbayItemsWithDetails(
 
       // Pull ONLY the fields you care about (not the whole blob)
       const description = fullJson.description || summary.description || "";
+      // Use the detail API's actual photo URLs, not the search thumbnails.
+      // Both display and stitching consume these exact URLs without rewriting.
+      const detailImages: string[] = [
+        fullJson.image?.imageUrl,
+        ...(fullJson.additionalImages?.map((image: any) => image?.imageUrl) ?? []),
+      ].filter(Boolean);
 
       return {
         ...summary,
 
         // description + images
         fullDescription: description,
-        images: [summary.image, ...(summary.additionalImages ?? [])].filter(Boolean),
+        images: detailImages.length ? detailImages : [summary.image, ...(summary.additionalImages ?? [])].filter(Boolean),
 
         // preserve extra fields for AI if present on item endpoint
         buyingOptions: fullJson.buyingOptions ?? summary.buyingOptions,

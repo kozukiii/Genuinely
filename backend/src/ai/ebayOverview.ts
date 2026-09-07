@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import dotenv from "dotenv";
 import { fetchVisionImage as fetchImageBuffer } from "./fetchVisionImage";
+import { diagnostic } from "../utils/analysisDiagnostics";
 import { calculatePriceFairness } from "../services/scoring/priceFairnessScore";
 import { extractBatchObjects } from "../utils/extractBatchObjects";
 import { validateAnalysis, EMPTY_ANALYSIS } from "../utils/extractStructuredAnalysis";
@@ -192,6 +193,7 @@ async function buildEbayImageBlocks(urls: string[]): Promise<{ blocks: any[]; st
 
   const fetched = await Promise.all(urls.map((u) => fetchImageBuffer(u)));
   const buffers = fetched.filter((b): b is Buffer => b !== null);
+  diagnostic("ebay_image_coverage", { requested: urls.length, downloaded: buffers.length, missing: urls.length - buffers.length });
   if (buffers.length !== urls.length) {
     // With at most three photos, Groq can fetch every public URL directly.
     if (urls.length <= MAX_IMAGE_BLOCKS) {
@@ -201,7 +203,9 @@ async function buildEbayImageBlocks(urls: string[]): Promise<{ blocks: any[]; st
     throw new Error(`Failed to fetch ${urls.length - buffers.length} of ${urls.length} eBay images; refusing partial analysis`);
   }
 
+  const stitchStarted = Date.now();
   const grids = await stitchBufferBlocks(buffers);
+  diagnostic("ebay_stitch", { photos: buffers.length, grids: grids.length, cells: grids.map((g) => g.cellCount), elapsedMs: Date.now() - stitchStarted });
   return {
     blocks: grids.map((grid) => ({ type: "image_url", image_url: { url: grid.dataUrl } })),
     stitchedAny: grids.some((grid) => grid.cellCount > 1),

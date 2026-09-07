@@ -6,6 +6,8 @@ import { buildMarketplaceAnalysisMessages } from "../../ai/marketplaceOverview";
 import { runRawChatRequests } from "../../ai/groqBatchRun";
 import { scoreEbayItemFromRaw } from "../aiService";
 import { scoreMarketplaceListingFromRaw } from "./scoreMarketplaceListing";
+import { randomUUID } from "node:crypto";
+import { analysisTrace, diagnostic, failureKind } from "../../utils/analysisDiagnostics";
 
 export interface ScoringGroup {
   listings: any[];
@@ -29,6 +31,9 @@ interface Unit {
  * Score every listing across all groups and preserve group/listing order.
  */
 export async function scoreGroupsViaChat(groups: ScoringGroup[]): Promise<any[]> {
+  const run = randomUUID();
+  const startedAt = Date.now();
+  diagnostic("scoring_start", { run, groups: groups.length, listings: groups.reduce((n, g) => n + g.listings.length, 0) });
   // Build each listing's messages (marketplace fetches images) — all in parallel.
   const units: Unit[] = await Promise.all(
     groups.flatMap((group) =>
@@ -36,10 +41,11 @@ export async function scoreGroupsViaChat(groups: ScoringGroup[]): Promise<any[]>
         const source: "ebay" | "marketplace" = listing.source === "marketplace" ? "marketplace" : "ebay";
         let messages: any[];
         try {
-          messages = source === "marketplace"
+          messages = await analysisTrace.run({ run, source, listing: String(listing.id) }, async () => source === "marketplace"
             ? await buildMarketplaceAnalysisMessages(listing, group.context)
-            : await buildEbayAnalysisMessages(listing, group.context);
-        } catch {
+            : await buildEbayAnalysisMessages(listing, group.context));
+        } catch (error) {
+          diagnostic("image_preparation_failed", { run, source, listing: String(listing.id), reason: failureKind(error) });
           // Never analyze silently missing photos, but do not discard the other
           // listings because one listing's image host is unavailable.
           console.warn(`[search-combined] image preparation failed for ${source} listing; preserving other results`);
@@ -58,13 +64,15 @@ export async function scoreGroupsViaChat(groups: ScoringGroup[]): Promise<any[]>
   if (units.length === 0) return [];
 
   const ready = units.filter((u) => u.messages.length > 0);
-  const raw = await runRawChatRequests(ready.map((u) => u.messages), "search-combined", {
+  diagnostic("groq_input", { run, ready: ready.length, imageFailures: units.length - ready.length,
+    listings: ready.map((u, index) => ({ index, source: u.source, id: u.listing.id })) });
+  const raw = await runRawChatRequests(ready.map((u) => u.messages), `search-combined:${run}`, {
     schemas: ready.map((u) => u.source === "ebay" ? "ebay-single" : "marketplace-single"),
     allowPartial: true,
   });
   const rawByUnit = new Map(ready.map((u, i) => [u, raw[i]]));
 
-  return units.map((u) => {
+  const results = units.map((u) => {
     const r = rawByUnit.get(u);
     if (!r) return { ...u.listing, aiScore: null, analysisPending: false };
     const priceMeta = {
@@ -76,4 +84,7 @@ export async function scoreGroupsViaChat(groups: ScoringGroup[]): Promise<any[]>
       ? scoreMarketplaceListingFromRaw(u.listing, r, u.group.context, u.group.systemPrompt, u.group.priceLow, u.group.priceHigh, priceMeta)
       : scoreEbayItemFromRaw(u.listing, r, u.group.context, u.group.systemPrompt, u.group.priceLow, u.group.priceHigh, priceMeta);
   });
+  diagnostic("scoring_complete", { run, total: results.length, scored: results.filter((r) => r.aiScore != null).length,
+    imageFailures: units.length - ready.length, generationFailures: raw.filter((r) => !r).length, elapsedMs: Date.now() - startedAt });
+  return results;
 }

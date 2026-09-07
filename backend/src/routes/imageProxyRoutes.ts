@@ -3,6 +3,7 @@ import { Router } from "express";
 import fetch from "node-fetch";
 import dns from "dns/promises";
 import net from "net";
+import { diagnostic, failureKind, imageIdentity } from "../utils/analysisDiagnostics";
 
 const router = Router();
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
@@ -108,6 +109,12 @@ async function fetchSafeImage(rawUrl: string, redirects = 0): Promise<Awaited<Re
 router.get("/", async (req, res) => {
   const url = typeof req.query.url === "string" ? req.query.url : "";
   if (!url) return res.status(400).send("Missing URL");
+  const startedAt = Date.now();
+  let bytes = 0;
+  let failure: string | undefined;
+  res.once("finish", () => diagnostic("display_image_proxy", {
+    ...imageIdentity(url), status: res.statusCode, bytes, elapsedMs: Date.now() - startedAt, failure,
+  }));
 
   try {
     const response = await fetchSafeImage(url);
@@ -127,10 +134,12 @@ router.get("/", async (req, res) => {
     }
 
     const buffer = Buffer.from(await response.arrayBuffer());
+    bytes = buffer.length;
     res.setHeader("Content-Type", contentType);
     res.setHeader("Cache-Control", "public, max-age=86400");
     res.send(buffer);
   } catch (err: any) {
+    failure = failureKind(err);
     const message = err?.message ?? "Proxy failed";
     if (/protocol|private address|host is not allowed|invalid url/i.test(message)) {
       return res.status(400).send(message);

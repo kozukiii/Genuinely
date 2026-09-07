@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import dotenv from "dotenv";
 import { buildGroqVisionRequest, type GroqVisionSchema } from "./groqModels";
+import { diagnostic, failureKind } from "../utils/analysisDiagnostics";
 
 dotenv.config({ quiet: true });
 
@@ -110,6 +111,7 @@ export async function runRawChatRequests(
         } catch (error: any) {
           const retryable = error?.status == null || RETRYABLE_STATUSES.has(error.status);
           if (!retryable || attempt === MAX_ATTEMPTS) {
+            diagnostic("groq_failure", { label, index, attempt, status: error?.status ?? null, reason: failureKind(error) });
             if (!opts?.allowPartial) throw error;
             console.warn(`[groqChat:${label}] request ${index} failed (status=${error?.status ?? "network"}); preserving other results`);
             break;
@@ -129,6 +131,7 @@ export async function runRawChatRequests(
   }
 
   await Promise.all(Array.from({ length: concurrency }, () => worker()));
-  console.log(`[groqChat:${label}] completed ${results.length} requests in ${Date.now() - start}ms (concurrency=${concurrency})`);
+  diagnostic("groq_complete", { label, total: results.length, succeeded: results.filter(Boolean).length,
+    failed: results.filter((r) => !r).length, elapsedMs: Date.now() - start, concurrency });
   return results;
 }

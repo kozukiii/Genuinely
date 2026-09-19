@@ -38,11 +38,11 @@ describe("Groq model configuration", () => {
     const { buildGroqVisionRequest } = await import("../groqModels");
     const request = buildGroqVisionRequest(
       [{ role: "user", content: "Return JSON" }],
-      1000,
       "ebay-single",
     );
 
     expect(request.response_format.type).toBe("json_schema");
+    expect(request).not.toHaveProperty("max_tokens");
     expect(request.service_tier).toBe("auto");
     expect(request.response_format.json_schema.strict).toBe(true);
     expect(request.response_format.json_schema.schema.required).toEqual([
@@ -70,7 +70,7 @@ describe("Groq model configuration", () => {
 
   it("uses source-specific schemas for packed results", async () => {
     const { buildGroqVisionRequest } = await import("../groqModels");
-    const request = buildGroqVisionRequest([], 5000, "marketplace-batch");
+    const request = buildGroqVisionRequest([], "marketplace-batch");
     const schema: any = request.response_format.json_schema.schema;
     const item = schema.properties.listings.items;
 

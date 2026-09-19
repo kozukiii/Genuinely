@@ -20,7 +20,6 @@ function groqClient() {
 }
 
 export interface RawChatRequestOpts {
-  maxTokens?: number;
   schema?: GroqVisionSchema;
   schemas?: GroqVisionSchema[];
   concurrency?: number;
@@ -30,7 +29,6 @@ export interface RawChatRequestOpts {
 
 const RETRYABLE_STATUSES = new Set([408, 409, 429, 498, 500, 502, 503, 504]);
 const MAX_ATTEMPTS = 8;
-const DEFAULT_MAX_TOKENS = 700;
 let rateLimitBlockedUntil = 0;
 
 function sleep(ms: number) {
@@ -85,7 +83,6 @@ export async function runRawChatRequests(
 ): Promise<string[]> {
   if (messagesList.length === 0) return [];
   const schemas = schemasForRequests(messagesList, label, opts);
-  const maxTokens = opts?.maxTokens ?? DEFAULT_MAX_TOKENS;
   const concurrency = Math.max(1, Math.min(opts?.concurrency ?? 4, messagesList.length));
   const results = new Array<string>(messagesList.length).fill("");
   let nextIndex = 0;
@@ -99,7 +96,7 @@ export async function runRawChatRequests(
         try {
           await waitForSharedRateLimit();
           const response = await groqClient().chat.completions.create(
-            buildGroqVisionRequest(messagesList[index], maxTokens, schemas[index]),
+            buildGroqVisionRequest(messagesList[index], schemas[index]),
           );
           const content = response.choices[0]?.message?.content?.trim();
           if (response.choices[0]?.finish_reason === "length") {

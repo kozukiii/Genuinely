@@ -380,7 +380,7 @@ HIGHLIGHTS RULES:
 export async function analyzeListingWithImages(listing: any, context?: string | null) {
   const messages = await buildEbayAnalysisMessages(listing, context);
 
-  const response = await groq.chat.completions.create(buildGroqVisionRequest(messages, 1000, "ebay-single"));
+  const response = await groq.chat.completions.create(buildGroqVisionRequest(messages, "ebay-single"));
   return response.choices[0].message.content?.trim() || "{}";
 }
 
@@ -626,7 +626,7 @@ async function _runEbayBatch(entries: BatchEntry[], context?: string | null, sys
         { role: "user", content: contentParts },
       ];
     const response = await groqWithRetry(() => groq.chat.completions.create(
-      buildGroqVisionRequest(requestMessages, Math.min(listings.length * 800, 5000), "ebay-batch"),
+      buildGroqVisionRequest(requestMessages, "ebay-batch"),
     ));
     rawResponse = response.choices[0].message.content?.trim() ?? "{}";
     console.log(`[ebay:batch] received ${rawResponse.length} chars`);

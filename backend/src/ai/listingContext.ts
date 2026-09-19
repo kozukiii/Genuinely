@@ -307,7 +307,6 @@ async function isCardQuery(query: string): Promise<boolean> {
         { role: "system", content: "Classify whether the query is for a collectible trading card." },
         { role: "user", content: `Is this search query for a trading card (Pokémon, Magic: The Gathering, Yu-Gi-Oh, sports cards, or any collectible card)?\n\nQuery: "${query}"` },
       ],
-      max_tokens: 128,
       temperature: 0,
       reasoning_effort: "low",
       response_format: {
@@ -388,10 +387,7 @@ async function callGroupingModel(
       { role: "system", content: GROUPING_SYSTEM },
       { role: "user", content: userContent },
     ],
-    max_tokens: 3000,
     temperature: 0.1,
-    // GPT-OSS requires low/medium/high reasoning. Reserve enough completion
-    // budget for both its hidden reasoning and the strict JSON document.
     reasoning_effort: "low",
     response_format: GROUPING_RESPONSE_FORMAT,
   });
@@ -564,7 +560,6 @@ async function engineerPrompt(
         { role: "system", content: PROMPT_ENGINEER_SYSTEM },
         { role: "user", content: `Product: "${canonicalName}"\n\n${marketData}` },
       ],
-      max_tokens: 3500,
       temperature: 0.15,
       reasoning_effort: "low",
       response_format: PROMPT_ENGINEER_RESPONSE_FORMAT,

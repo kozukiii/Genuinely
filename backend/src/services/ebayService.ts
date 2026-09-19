@@ -126,6 +126,12 @@ function parseItemGroupId(itemGroupHref?: string | null): string | undefined {
   }
 }
 
+function isEbayVariationItem(item: any): boolean {
+  if (item?.itemGroupHref || item?.itemGroupType || item?.itemGroupId) return true;
+  const id = String(item?.id ?? item?.itemId ?? "");
+  return /^v1\|\d+\|[1-9]\d*$/.test(id);
+}
+
 function mapEbayInternalToListing(item: any): EbayListingRich {
   const id = String(item.id ?? item.itemId ?? "");
   const title = String(item.title ?? item.name ?? "");
@@ -326,7 +332,14 @@ export async function getEbayItemsWithDetails(
     return [];
   }
 
-  const summaries = summariesRaw.map(mapEbaySummary);
+  // Browse has no server-side "exclude item groups" filter. Drop selectable
+  // color/model/size listings as soon as search identifies them, before paying
+  // for individual detail requests.
+  const summaries = summariesRaw
+    .filter((item: any) => !isEbayVariationItem(item))
+    .map(mapEbaySummary);
+
+  if (summaries.length === 0) return [];
 
   const detailedItems = await Promise.all(
     summaries.map(async (summary: any) => {
@@ -390,6 +403,7 @@ export async function searchEbayNormalized(
   const items = await getEbayItemsWithDetails(query, limit, buyerLocation, minPrice, maxPrice, sortBy, offset);
   return items
     .map(mapEbayInternalToListing)
+    .filter((listing) => !isEbayVariationItem(listing))
     .filter((l) => l.id && l.title && l.url);
 }
 

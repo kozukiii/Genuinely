@@ -327,6 +327,22 @@ async function runAnalysisPipeline(
   let groupsTotal = 0;
   const coveredIndices = new Set<number>();
   const scoringPromises: Promise<void>[] = [];
+  // Context groups arrive as a stream. Start scoring them immediately, but keep
+  // enough backpressure that a broad search cannot flood Groq with requests.
+  let activeScoringGroups = 0;
+  const scoringWaiters: Array<() => void> = [];
+  const acquireScoringSlot = async () => {
+    if (activeScoringGroups < 3) {
+      activeScoringGroups++;
+      return;
+    }
+    await new Promise<void>((resolve) => scoringWaiters.push(resolve));
+  };
+  const releaseScoringSlot = () => {
+    const next = scoringWaiters.shift();
+    if (next) next();
+    else activeScoringGroups--;
+  };
   // In combined-batch mode we don't score groups as they stream in — we collect
   // them all and fire a single /batch-analyze-all so every card populates at once.
   const collectedGroups: Group[] = [];
@@ -401,6 +417,7 @@ async function runAnalysisPipeline(
       return;
     }
 
+    await acquireScoringSlot();
     try {
       const stabilized = group.contextToken
         ? await (async () => {
@@ -428,6 +445,8 @@ async function runAnalysisPipeline(
       groupsDone++;
       onStatus?.({ phase: "scoring", groupsDone, groupsTotal });
       applyScoringFailure(groupListings);
+    } finally {
+      releaseScoringSlot();
     }
   }
 
@@ -728,7 +747,7 @@ export default function SearchPage() {
         }
       };
 
-      runAnalysisPipeline(query, sourceItems, setListings, ctrl.signal, onStatus, true).finally(() => {
+      runAnalysisPipeline(query, sourceItems, setListings, ctrl.signal, onStatus, false).finally(() => {
         analysisControllersRef.current = analysisControllersRef.current.filter((c) => c !== ctrl);
       });
     }

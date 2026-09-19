@@ -15,6 +15,7 @@ const FETCH_TIMEOUT_MS = 12_000;   // utility calls (geocoding, etc.)
 const FACEBOOK_TIMEOUT_MS = 8_000;
 const RACE_STAGGER_MS = 800;       // gap between staggered race attempts
 const FACEBOOK_BODY_TIMEOUT_MS = 8_000;
+const MARKETPLACE_PDP_BODY_TIMEOUT_MS = 20_000;
 const PROXY_RACE_WIDTH = 6;
 const STICKY_PROXY_POOL_SIZE = 3;
 const STICKY_PROXY_TTL_MS = 10 * 60 * 1000;
@@ -371,8 +372,7 @@ function raceProxiedFetch(
 }
 
 const GRAPHQL_URL = "https://www.facebook.com/api/graphql/";
-const FB_DESKTOP_USER_AGENT =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36";
+const FB_GRAPHQL_USER_AGENT = "Mozilla/5.0";
 
 
 const latLngCache = new Map<string, { lat: number; lng: number; expiresAt: number }>();
@@ -573,29 +573,88 @@ async function searchMarketplaceListingsByLatLng({
   enrichImages?: boolean;
 }) {
   const variables = {
+    buyLocation: { latitude: lat, longitude: lng },
+    contextual_data: null,
     count: limit,
+    cursor: null,
     params: {
       bqf: {
         callsite: "COMMERCE_MKTPLACE_WWW",
         query,
       },
       browse_request_params: {
+        commerce_enable_local_pickup: true,
+        commerce_enable_shipping: true,
+        commerce_search_and_rp_available: true,
+        commerce_search_and_rp_category_id: [],
+        commerce_search_and_rp_condition: null,
+        commerce_search_and_rp_ctime_days: null,
         filter_location_latitude: lat,
         filter_location_longitude: lng,
+        filter_price_lower_bound: 0,
+        filter_price_upper_bound: 214748364700,
         filter_radius_km: radiusKm,
       },
       custom_request_params: {
+        browse_context: null,
+        contextual_filters: [],
+        referral_code: null,
+        referral_ui_component: null,
+        saved_search_strid: null,
+        search_vertical: "C2C",
+        seo_url: null,
+        serp_landing_settings: { virtual_category_id: "" },
         surface: "SEARCH",
+        virtual_contextual_filters: [],
       },
     },
+    savedSearchID: null,
+    savedSearchQuery: query,
+    scale: 1,
+    shouldDeferNonCritical: false,
+    shouldIncludePopularSearches: true,
+    topicPageParams: { location_id: null, url: null },
+    __relay_internal__pv__GHLShouldChangeMarketplaceSponsoredDataFieldNamerelayprovider: false,
   };
 
   const body = new URLSearchParams({
     variables: JSON.stringify(variables),
     doc_id: "7111939778879383",
+    fb_api_caller_class: "RelayModern",
+    fb_api_req_friendly_name: "CometMarketplaceSearchContentContainerQuery",
+    server_timestamps: "true",
+    __a: "1",
+    __user: "0",
+    __comet_req: "15",
   });
 
   let json: any = null;
+  // Direct Facebook responses are usually much faster. Only accept one after
+  // the complete body has arrived and contains the expected feed; otherwise
+  // fall back to the residential pool below.
+  try {
+    const directRes = await fetchWithTimeout(GRAPHQL_URL, {
+      method: "POST",
+      headers: {
+        "user-agent": "Mozilla/5.0",
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body,
+    });
+    const directJson = directRes.status === 200
+      ? await parseJsonWithTimeout<any>(directRes, FACEBOOK_BODY_TIMEOUT_MS, "Marketplace direct browse API")
+      : null;
+    if (
+      !hasMarketplaceRateLimitError(directJson)
+      && directJson?.data?.marketplace_search?.feed_units?.edges
+    ) {
+      json = directJson;
+    }
+  } catch (err: any) {
+    console.warn(`[marketplace:browse] direct request failed: ${err?.message ?? err}`);
+  }
+
+  if (!json) {
   for (let attempt = 1; attempt <= 3; attempt++) {
     const res = await raceProxiedFetch(GRAPHQL_URL, {
       method: "POST",
@@ -613,6 +672,14 @@ async function searchMarketplaceListingsByLatLng({
     if (attempt === 3) throw new Error("Marketplace rate limit exceeded");
     console.warn(`[marketplace] browse winner was rate-limited; re-racing (${attempt}/3)`);
     await new Promise((resolve) => setTimeout(resolve, 250 * attempt));
+  }
+  }
+  if (Array.isArray(json?.errors) && json.errors.length > 0) {
+    const message = json.errors.map((error: any) => error?.message ?? "Unknown GraphQL error").join("; ");
+    throw new Error(`Marketplace search failed: ${message}`);
+  }
+  if (!json?.data?.marketplace_search?.feed_units?.edges) {
+    throw new Error("Marketplace search response did not contain listing edges");
   }
   const edges = json?.data?.marketplace_search?.feed_units?.edges ?? [];
 
@@ -903,22 +970,28 @@ function buildMarketplaceListingFromProductDetails(
 const MARKETPLACE_PDP_CONTAINER_DOC_ID = "26924013917190310";
 
 const MARKETPLACE_PDP_RELAY_PROVIDERS = {
+  "__relay_internal__pv__MarketplacePDPCometSimilarListingsrelayprovider": false,
+  "__relay_internal__pv__MarketplacePDPShouldShowRelatedSearchesrelayprovider": true,
+  "__relay_internal__pv__MarketplacePDPShouldShowLoggedOutSellerTrustrelayprovider": false,
   "__relay_internal__pv__ShouldUpdateMarketplaceBoostListingBoostedStatusrelayprovider": false,
   "__relay_internal__pv__CometUFISingleLineUFIrelayprovider": false,
   "__relay_internal__pv__CometUFIShareActionMigrationrelayprovider": true,
   "__relay_internal__pv__CometUFIReactionsEnableShortNamerelayprovider": false,
-  "__relay_internal__pv__CometUFICommentAutoTranslationTyperelayprovider": "ORIGINAL",
+  "__relay_internal__pv__CometUFICommentAutoTranslationTyperelayprovider": "AUTO_TRANSLATE",
   "__relay_internal__pv__CometUFICommentAvatarStickerAnimatedImagerelayprovider": false,
   "__relay_internal__pv__CometUFICommentActionLinksRewriteEnabledrelayprovider": false,
   "__relay_internal__pv__IsWorkUserrelayprovider": false,
   "__relay_internal__pv__GHLShouldChangeSponsoredDataFieldNamerelayprovider": false,
   "__relay_internal__pv__GHLShouldChangeAdIdFieldNamerelayprovider": false,
   "__relay_internal__pv__CometUFI_dedicated_comment_routable_dialog_gkrelayprovider": true,
+  "__relay_internal__pv__MarketplacePDPShouldShowBSGRecommendationsrelayprovider": false,
+  "__relay_internal__pv__MarketplacePDPJobShouldShowSharedGroupsSectionrelayprovider": false,
+  "__relay_internal__pv__MarketplacePDPJobIsShareToGroupsEnabledOnCometrelayprovider": false,
 };
 
 const MARKETPLACE_PDP_MEDIA_DOC_ID = "10059604367394414";
 
-function makeGraphqlRequest(
+async function makeGraphqlRequest(
   listingId: string,
   docId: string,
   friendlyName: string,
@@ -930,12 +1003,15 @@ function makeGraphqlRequest(
     server_timestamps: "true",
     fb_api_caller_class: "RelayModern",
     fb_api_req_friendly_name: friendlyName,
+    __a: "1",
+    __user: "0",
+    __comet_req: "15",
   });
 
-  return raceProxiedFetch(GRAPHQL_URL, {
+  const options = {
     method: "POST",
     headers: {
-      "user-agent": FB_DESKTOP_USER_AGENT,
+      "user-agent": FB_GRAPHQL_USER_AGENT,
       "content-type": "application/x-www-form-urlencoded",
       "accept": "*/*",
       "accept-language": "en-US,en;q=0.9",
@@ -947,7 +1023,25 @@ function makeGraphqlRequest(
       "sec-fetch-site": "same-origin",
     },
     body,
-  });
+  };
+
+  // Read the full response before accepting a connection. Some residential
+  // exits deliver headers promptly and then stall on the large PDP payload.
+  try {
+    const directRes = await fetchWithTimeout(GRAPHQL_URL, options);
+    if (directRes.status === 200) {
+      const json = await parseJsonWithTimeout<any>(directRes, MARKETPLACE_PDP_BODY_TIMEOUT_MS, friendlyName);
+      if (!hasMarketplaceRateLimitError(json)) return { status: directRes.status, json, proxyUrl: null };
+    }
+  } catch (err: any) {
+    console.warn(`[marketplace:${friendlyName}] direct request failed: ${err?.message ?? err}`);
+  }
+
+  const proxyRes = await raceProxiedFetch(GRAPHQL_URL, options);
+  const json = proxyRes.status === 200
+    ? await parseJsonWithTimeout<any>(proxyRes, MARKETPLACE_PDP_BODY_TIMEOUT_MS, friendlyName)
+    : null;
+  return { status: proxyRes.status, json, proxyUrl: getResponseProxyUrl(proxyRes) };
 }
 
 async function fetchMarketplaceListingByContainerQuery(listingId: string): Promise<{ details: any; media: any } | null> {
@@ -957,10 +1051,7 @@ async function fetchMarketplaceListingByContainerQuery(listingId: string): Promi
     feedbackSource: 56,
     scale: 1,
     useDefaultActor: false,
-    enableJobEmployerActionBar: false,
-    enableJobSeekerActionBar: false,
-    referralCode: null,
-    referralSurfaceString: null,
+    referralSurfaceString: "search",
     ...MARKETPLACE_PDP_RELAY_PROVIDERS,
   };
 
@@ -977,13 +1068,9 @@ async function fetchMarketplaceListingByContainerQuery(listingId: string): Promi
         return null;
       }
 
-      const containerJson = await parseJsonWithTimeout<any>(
-        containerRes,
-        FACEBOOK_BODY_TIMEOUT_MS,
-        `Marketplace container query ${listingId}`
-      );
+      const containerJson = containerRes.json;
       if (hasMarketplaceRateLimitError(containerJson)) {
-        markProxyRateLimited(getResponseProxyUrl(containerRes));
+        markProxyRateLimited(containerRes.proxyUrl);
         throw new Error("Marketplace rate limit exceeded");
       }
       const details = containerJson?.data?.viewer?.marketplace_product_details_page ?? null;
@@ -1002,13 +1089,9 @@ async function fetchMarketplaceListingByContainerQuery(listingId: string): Promi
       // whole fetch on a fresh one rather than silently returning a partial.
       let media: any = null;
       if (mediaRes.status === 200) {
-        const mediaJson = await parseJsonWithTimeout<any>(
-          mediaRes,
-          FACEBOOK_BODY_TIMEOUT_MS,
-          `Marketplace media query ${listingId}`
-        );
+        const mediaJson = mediaRes.json;
         if (hasMarketplaceRateLimitError(mediaJson)) {
-          markProxyRateLimited(getResponseProxyUrl(mediaRes));
+          markProxyRateLimited(mediaRes.proxyUrl);
           throw new Error("Marketplace rate limit exceeded");
         }
         media = mediaJson?.data?.viewer?.marketplace_product_details_page ?? null;
@@ -1016,7 +1099,7 @@ async function fetchMarketplaceListingByContainerQuery(listingId: string): Promi
 
       if (!media) {
         console.warn(`[marketplace:mediaQuery] no media for listing ${listingId} (HTTP ${mediaRes.status}) — treating as throttle, will reroute`);
-        markProxyRateLimited(getResponseProxyUrl(mediaRes));
+        if (mediaRes.proxyUrl) markProxyRateLimited(mediaRes.proxyUrl);
         if (attempt < 1) continue;
         // Out of retries: return the degraded listing rather than dropping it entirely.
       }

@@ -1,5 +1,5 @@
 import "./styles/ListingCard.css";
-import RatingRing from "./RatingRing";
+import { AutoScoreRevealRing } from "./ScoreRevealRing";
 import { Link } from "react-router-dom";
 import { useEffect, useRef, useState } from "react";
 import type { Listing } from "../types/Listing";
@@ -294,24 +294,9 @@ export default function ListingCard({ data }: { data: Listing }) {
           </div>
 
           <div className="card-badges">
-            {data.aiScore !== undefined ? (
+            {(typeof data.aiScore === "number" || data.analysisPending) ? (
               <div className="badge-ring">
-                <RatingRing value={data.aiScore} size={75} />
-              </div>
-            ) : data.analysisPending ? (
-              <div className="badge-ring">
-                <svg className="ring-pending" width="75" height="75" viewBox="0 0 75 75">
-                  <circle cx="37.5" cy="37.5" r="27.75" stroke="#374151" strokeWidth="7.5" fill="none" />
-                  <circle
-                    cx="37.5" cy="37.5" r="27.75"
-                    stroke="rgba(77,166,255,0.6)"
-                    strokeWidth="7.5"
-                    fill="none"
-                    strokeDasharray="43.5 130.5"
-                    strokeLinecap="round"
-                    transform="rotate(-90 37.5 37.5)"
-                  />
-                </svg>
+                <AutoScoreRevealRing value={data.aiScore} pending={data.analysisPending === true} size={75} />
               </div>
             ) : null}
           </div>

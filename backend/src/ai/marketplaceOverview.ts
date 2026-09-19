@@ -40,12 +40,6 @@ const _proxyUrls = process.env.PROXY_URL
   ? process.env.PROXY_URL.split(",").map((s) => s.trim()).filter(Boolean)
   : [];
 
-function _getProxyAgent() {
-  if (_proxyUrls.length === 0) return undefined;
-  const url = _proxyUrls[Math.floor(Math.random() * _proxyUrls.length)];
-  return new HttpsProxyAgent(url);
-}
-
 const groq = new OpenAI({
   apiKey: process.env.GROQ_API_KEY!,
   baseURL: "https://api.groq.com/openai/v1",
@@ -175,51 +169,75 @@ function getMarketplaceImageUrls(listing: any): string[] {
   return urls;
 }
 
-async function fetchImageAsDataUrl(url: string): Promise<string | null> {
-  for (let attempt = 0; attempt < 2; attempt++) {
+async function fetchImageThroughRoute(url: string, proxyUrl: string | null): Promise<string | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10_000);
+  try {
+    const agent = proxyUrl ? new HttpsProxyAgent(proxyUrl) : undefined;
+    const res = await fetch(url, {
+      headers: MARKETPLACE_IMAGE_FETCH_HEADERS,
+      signal: controller.signal as any,
+      ...(agent ? { agent } : {}),
+    });
+    if (!res.ok) return null;
+
+    const contentType = res.headers.get("content-type") || "image/jpeg";
+    if (!contentType.toLowerCase().startsWith("image/")) return null;
+    const raw = Buffer.from(await res.arrayBuffer());
+    if (raw.length === 0) return null;
+
     try {
-      const agent = _getProxyAgent();
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 8_000);
-      const res = await fetch(url, {
-        headers: MARKETPLACE_IMAGE_FETCH_HEADERS,
-        signal: controller.signal as any,
-        ...(agent ? { agent } : {}),
-      });
-      clearTimeout(timer);
-
-      if (!res.ok) {
-        if (attempt < 1) continue;
-        return null;
-      }
-
-      const contentType = res.headers.get("content-type") || "image/jpeg";
-      if (!contentType.toLowerCase().startsWith("image/")) return null;
-
-      const raw = Buffer.from(await res.arrayBuffer());
-      if (raw.length === 0) return null;
-
-      // Downscale to a fixed max dimension and re-encode as JPEG. Groq caps a
-      // base64-image request at 4MB total; full-res Facebook photos (sent inline,
-      // since the FB CDN won't serve them to Groq by URL) blow that on photo-heavy
-      // listings. A fixed cap keeps every image visible without dropping any.
-      try {
-        const jpeg = await sharp(raw)
-          .rotate()
-          .resize(MAX_IMAGE_PX, MAX_IMAGE_PX, { fit: "inside", withoutEnlargement: true })
-          .jpeg({ quality: 80 })
-          .toBuffer();
-        return `data:image/jpeg;base64,${jpeg.toString("base64")}`;
-      } catch {
-        // If re-encoding fails, fall back to the original bytes.
-        return `data:${contentType};base64,${raw.toString("base64")}`;
-      }
-    } catch (err: any) {
-      if (attempt < 1 && err?.type !== "aborted") continue;
-      return null;
+      const jpeg = await sharp(raw)
+        .rotate()
+        .resize(MAX_IMAGE_PX, MAX_IMAGE_PX, { fit: "inside", withoutEnlargement: true })
+        .jpeg({ quality: 80 })
+        .toBuffer();
+      return `data:image/jpeg;base64,${jpeg.toString("base64")}`;
+    } catch {
+      return `data:${contentType};base64,${raw.toString("base64")}`;
     }
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
   }
-  return null;
+}
+
+async function fetchImageAsDataUrl(url: string): Promise<string | null> {
+  const shuffled = [..._proxyUrls].sort(() => Math.random() - 0.5);
+
+  // Give one residential exit the first attempt. A direct request is a cheap
+  // second route; if both fail, race every remaining exit rather than waiting
+  // for slow or dead proxies one at a time.
+  const firstProxy = shuffled.shift() ?? null;
+  const first = await fetchImageThroughRoute(url, firstProxy);
+  if (first) return first;
+
+  if (firstProxy !== null) {
+    const direct = await fetchImageThroughRoute(url, null);
+    if (direct) return direct;
+  }
+
+  if (shuffled.length === 0) return null;
+  return new Promise<string | null>((resolve) => {
+    let pending = shuffled.length;
+    let settled = false;
+    for (const proxyUrl of shuffled) {
+      fetchImageThroughRoute(url, proxyUrl).then((result) => {
+        if (settled) return;
+        if (result) {
+          settled = true;
+          resolve(result);
+          return;
+        }
+        pending--;
+        if (pending === 0) {
+          settled = true;
+          resolve(null);
+        }
+      });
+    }
+  });
 }
 
 async function fetchMarketplaceImageDataUrls(imageUrls: string[]): Promise<string[]> {
@@ -227,7 +245,7 @@ async function fetchMarketplaceImageDataUrls(imageUrls: string[]): Promise<strin
   const results = await Promise.all(imageUrls.map(fetchImageAsDataUrl));
   const dataUrls = results.filter((u): u is string => u !== null);
   if (dataUrls.length !== imageUrls.length) {
-    throw new Error(`Failed to fetch ${imageUrls.length - dataUrls.length} of ${imageUrls.length} Marketplace images; refusing partial analysis`);
+    console.warn(`[marketplace:images] ${imageUrls.length - dataUrls.length} of ${imageUrls.length} images remained unavailable after exhausting the proxy pool; continuing with ${dataUrls.length}`);
   }
   return dataUrls;
 }
@@ -539,7 +557,7 @@ HIGHLIGHTS RULES:
 export async function analyzeMarketplaceListingWithImages(listing: any, context?: string | null) {
   const messages = await buildMarketplaceAnalysisMessages(listing, context);
 
-  const response = await groq.chat.completions.create(buildGroqVisionRequest(messages, 1000, "marketplace-single"));
+  const response = await groq.chat.completions.create(buildGroqVisionRequest(messages, "marketplace-single"));
   logUsage("groq", GROQ_VISION_MODEL, response.usage);
   console.log("[marketplace:single] completion received");
 
@@ -734,7 +752,7 @@ async function _runMarketplaceBatch(listings: any[], allDataUrls: string[][], co
         { role: "user", content: contentParts },
       ];
     const response = await groqWithRetry(() => groq.chat.completions.create(
-      buildGroqVisionRequest(requestMessages, Math.min(listings.length * 800, 5000), "marketplace-batch"),
+      buildGroqVisionRequest(requestMessages, "marketplace-batch"),
     ));
     logUsage("groq", GROQ_VISION_MODEL, response.usage);
     rawResponse = response.choices[0].message.content?.trim() ?? "{}";

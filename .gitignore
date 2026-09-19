@@ -39,3 +39,4 @@ Thumbs.db
 # runtime cache
 .cache/
 backend/data/
+data/

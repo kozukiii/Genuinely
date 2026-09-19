@@ -1,0 +1,6 @@
+.score-reveal-ring__track { stroke: #374151; }
+.score-reveal-ring__arc { stroke: #3b82f6; vector-effect: non-scaling-stroke; transition: stroke-dashoffset 40ms linear; }
+.score-reveal-ring--loading { animation: scoreRevealRotate 1.2s linear infinite; will-change: transform; }
+.score-reveal-ring__arc--compressing { stroke: var(--score-reveal-color, #3b82f6); }
+
+@keyframes scoreRevealRotate { to { transform: rotate(360deg); } }

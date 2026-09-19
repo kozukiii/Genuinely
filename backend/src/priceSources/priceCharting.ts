@@ -172,7 +172,6 @@ Respond only as JSON in this exact shape:
           },
           { role: "user", content: input },
         ],
-        max_tokens: 512,
         temperature: 0,
         reasoning_effort: "low",
       });
@@ -481,7 +480,6 @@ Respond ONLY as JSON: {"candidates":[{"cardName":"Vaporeon EX","number":"23","se
         },
         { role: "user", content: input },
       ],
-      max_tokens: 800,
       temperature: 0,
       reasoning_effort: "low",
     });

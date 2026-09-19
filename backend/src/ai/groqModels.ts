@@ -106,14 +106,12 @@ function responseSchema(kind: GroqVisionSchema) {
 /** Qwen 3.8 strict structured output for synchronous vision requests. */
 export function buildGroqVisionRequest(
   messages: any[],
-  maxTokens: number,
   schema: GroqVisionSchema,
 ) {
   return {
     model: GROQ_VISION_MODEL,
     service_tier: GROQ_SERVICE_TIER,
     messages,
-    max_tokens: maxTokens,
     temperature: 0.2,
     reasoning_effort: "none" as const,
     stream: false as const,

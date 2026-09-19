@@ -415,7 +415,6 @@ router.post("/ebay-batch-test/context/groq", async (req, res) => {
         },
       ],
       temperature: 0,
-      max_tokens: 700,
     });
     const context = response.choices[0]?.message?.content?.trim() || null;
     const payload = {

@@ -2,12 +2,22 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import { useAuth } from "../context/AuthContext";
 import type { Listing } from "../types/Listing";
-import RatingRing from "../components/RatingRing";
 import ListingCard from "../components/ListingCard";
+import {
+  ScoreRevealRing,
+  type ScoreRevealPhase,
+  COMPRESS_DURATION_MS,
+  COMPRESS_HOLD_MS,
+  FILL_DURATION_MS,
+  FILL_HOLD_MS,
+  LOADING_PERIOD_MS,
+  easeInOutQuad,
+  easeOutCubic,
+} from "../components/ScoreRevealRing";
 import VariantSelector from "../components/VariantSelector";
 import type { EbayVariant } from "../utils/ebayApi";
 import "./styles/ListingPage.css";
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { getHighResImage, isDisplayableListingImage, PLACEHOLDER_IMAGE } from "../utils/imageHelpers";
 import { hasEbayCustomizableOptions } from "../utils/ebayVariations";
 import { availabilityLabel, formatDeliveryType, getPriceBadge, getPriceBadgeTitle } from "../utils/listingPresentation";
@@ -20,6 +30,10 @@ function sourceLabel(source?: Listing["source"]) {
   if (source === "marketplace") return "Marketplace";
   return "eBay";
 }
+
+// Variation listings are excluded by the backend. Keep the existing selector
+// implementation dormant so it can be restored without rebuilding it.
+const EBAY_VARIATIONS_ENABLED = false;
 
 function looksLikeDebugPayload(value?: string | null) {
   if (!value) return false;
@@ -73,25 +87,6 @@ function buildPriceBarProps(priceLow: number, priceHigh: number, listingPrice: n
 }
 
 // ─── Animation ───────────────────────────────────────────────────────────────
-
-const COMPRESS_DURATION_MS        = 1000;
-const COMPRESS_AFTER_TOP_PROGRESS = 0.12;
-const COMPRESS_HOLD_MS            = 90;
-const FILL_DURATION_MS            = 700;
-const FILL_HOLD_MS                = 120;
-const LOADING_ARC_FRACTION        = 0.32;
-const LOADING_SCORE               = LOADING_ARC_FRACTION * 100;
-const HUE_SHIFT_DELAY_MS          = 400;
-const LOADING_PERIOD_MS           = 1200; // must match CSS animation duration
-
-const easeInOutQuad = (t: number) => t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
-const easeOutCubic  = (t: number) => 1 - (1 - t) ** 3;
-
-function scoreColor(score: number) {
-  if (score >= 67) return "#22c55e";
-  if (score >= 33) return "#facc15";
-  return "#ef4444";
-}
 
 function computePriceFairness(price: number, low: number, high: number): number {
   if (price <= 0 || low <= 0 || high <= 0 || high <= low) return 50;
@@ -176,76 +171,6 @@ function GoodStarSparkles() {
   );
 }
 
-type AnalysisPhase = "idle" | "loading" | "compressing" | "filling" | "done";
-
-function AnimatedRing({
-  phase, fillProgress, compressProgress, compressStartFrac, targetValue, size,
-}: {
-  phase: AnalysisPhase;
-  fillProgress: number;
-  compressProgress: number;
-  compressStartFrac: number;
-  targetValue: number;
-  size: number;
-}) {
-  const [colorReady, setColorReady] = useState(false);
-
-  useEffect(() => {
-    if (phase !== "done") { setColorReady(false); return; }
-    const t = window.setTimeout(() => setColorReady(true), HUE_SHIFT_DELAY_MS);
-    return () => window.clearTimeout(t);
-  }, [phase]);
-
-  const center        = size / 2;
-  const radius        = size * 0.37;
-  const strokeW       = size * 0.10;
-  const circumference = 2 * Math.PI * radius;
-  const loadingOffset = circumference * (1 - LOADING_ARC_FRACTION);
-
-  const compressBlend  = Math.min(
-    Math.max((compressProgress - COMPRESS_AFTER_TOP_PROGRESS) / (1 - COMPRESS_AFTER_TOP_PROGRESS), 0), 1,
-  );
-  const compressScore  = LOADING_SCORE * (1 - compressBlend);
-  const compressOffset = circumference - (compressScore / 100) * circumference;
-
-  const fillColor    = scoreColor(targetValue);
-  const displayValue = fillProgress * targetValue;
-
-  if (phase === "loading" || phase === "compressing") {
-    return (
-      <svg
-        className={phase === "loading" ? "page-pending-ring--loading" : undefined}
-        style={{
-          width: size, height: size,
-          overflow: "visible",
-          transformBox: "fill-box",
-          transformOrigin: "center",
-          flexShrink: 0,
-          "--demo-fill-color": fillColor,
-          transform: phase === "compressing" ? `rotate(${(compressStartFrac + compressProgress * (1 - compressStartFrac)) * 360}deg)` : undefined,
-        } as CSSProperties}
-        width={size} height={size}
-        viewBox={`0 0 ${size} ${size}`}
-      >
-        <circle className="page-pending-ring__track"
-          cx={center} cy={center} r={radius} strokeWidth={strokeW} fill="none" />
-        <circle
-          className={`page-pending-ring__arc ${
-            phase === "loading" ? "page-pending-ring__arc--loading" : "page-pending-ring__arc--compressing"
-          }`}
-          cx={center} cy={center} r={radius}
-          strokeWidth={strokeW} fill="none" strokeLinecap="round"
-          transform={`rotate(-90 ${center} ${center})`}
-          style={{ strokeDasharray: circumference, strokeDashoffset: phase === "loading" ? loadingOffset : compressOffset }}
-        />
-      </svg>
-    );
-  }
-
-  const ringColor = colorReady ? fillColor : "#3b82f6";
-  return <RatingRing value={displayValue} size={size} color={ringColor} />;
-}
-
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function ListingPage() {
@@ -316,7 +241,7 @@ export default function ListingPage() {
     && isPendingFromSearch
     && listing?.acceptsOffers !== true
     && listing?.price === 0;
-  const [analysisPhase,    setAnalysisPhase]    = useState<AnalysisPhase>(
+  const [analysisPhase,    setAnalysisPhase]    = useState<ScoreRevealPhase>(
     hasInitialScore ? "filling" : isPendingFromSearch ? "loading" : "idle"
   );
   const [compressProgress,  setCompressProgress]  = useState(0);
@@ -524,7 +449,9 @@ export default function ListingPage() {
     const currency = activeVariant?.currency ?? listing?.currency ?? "USD";
     try {
       return new Intl.NumberFormat(undefined, {
-        style: "currency", currency, maximumFractionDigits: 0,
+        style: "currency", currency,
+        minimumFractionDigits: Number.isInteger(price) ? 0 : 2,
+        maximumFractionDigits: 2,
       }).format(price);
     } catch { return `$${price}`; }
   }, [activeVariant, listing?.price, listing?.currency]);
@@ -766,7 +693,7 @@ export default function ListingPage() {
             )}
 
             {/* Variant selector — only for real eBay item groups */}
-            {listing.source === "ebay" && listing.itemGroupId && (
+            {EBAY_VARIATIONS_ENABLED && listing.source === "ebay" && listing.itemGroupId && (
               <VariantSelector
                 itemGroupId={listing.itemGroupId}
                 onVariantChange={setActiveVariant}
@@ -933,7 +860,7 @@ export default function ListingPage() {
                 {showRing && (
                   <div className="ring-main-container" style={{ position: "relative", width: "100px", height: "100px", flexShrink: 0, left: "12px" }}>
                     <div className="page-rating-ring demo-ring" style={{ position: "absolute", top: 0, left: 0 }}>
-                      <AnimatedRing
+                      <ScoreRevealRing
                         phase={analysisPhase}
                         fillProgress={fillProgress}
                         compressProgress={compressProgress}
@@ -1008,7 +935,7 @@ export default function ListingPage() {
                       className="ai-score-item"
                       style={dimmed ? { opacity: 0.35, transition: "opacity 0.2s" } : undefined}
                     >
-                      <AnimatedRing
+                      <ScoreRevealRing
                         phase={analysisPhase}
                         fillProgress={fillProgress}
                         compressProgress={compressProgress}

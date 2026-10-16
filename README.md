@@ -111,13 +111,13 @@ AI is used to explain and summarize listing quality, while deterministic logic i
 
 ## 🔀 Marketplace Proxy Strategy
 
-Marketplace fetches use a hybrid **sticky/racing** approach to maximize reliability and minimize latency when multiple proxies are configured.
+Marketplace search and listing-detail requests use the first proxy configured in `PROXY_URL` from the initial request. Direct egress is used only when no proxy is configured. Requests do not race other proxies or fall back to a different route after failure.
 
-On the first request, all available proxies are raced simultaneously using a happy-eyeballs-style strategy: attempts are staggered 800ms apart so the fastest proxy wins without blasting them all at once. The winning proxy is then **committed**, meaning all subsequent requests go directly to it without re-racing.
+Use a complete HTTP(S) URL such as `http://USERNAME:PASSWORD@HOST:PORT`, with reserved characters in the credentials URL-encoded. Legacy `HOST:PORT:USERNAME:PASSWORD` strings are invalid. Startup diagnostics report URL validity and credential presence without printing credentials.
 
-If the committed proxy returns a rate-limit signal in the response body, or fails on a subsequent request, the system drops back to racing mode and picks a new winner on the next call. This lets the app recover automatically from tarpitted or blocked proxies without any manual intervention.
+HTTP 401, 403, 407, 429 and GraphQL rate-limit code 1675004 stop requests and apply a shared cooldown across search and listing details. `Retry-After` is honored, with a 60-second default. Authorization and proxy-authentication failures require configuration review; changing routes is not used to work around them.
 
-Proxies are configured via the `PROXY_URL` environment variable as a comma-separated list. This is a **production-only** variable — local development runs without it and requests go out directly.
+`PROXY_URL` is a **production-only** variable — local development normally runs without it. A comma-separated list remains accepted, but only its first entry is used.
 
 ---
 

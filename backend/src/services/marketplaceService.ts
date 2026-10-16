@@ -22,377 +22,76 @@ console.info("[marketplace:proxy-config]", JSON.stringify({
   }),
 }));
 
-const FETCH_TIMEOUT_MS = 12_000;   // utility calls (geocoding, etc.)
-// Six proxy attempts are staggered 800ms apart, so a 4s outer timeout aborted
-// before the final candidates could even start. Allow the complete race plus a
-// response window while still bailing out on tarpits promptly.
+const FETCH_TIMEOUT_MS = 12_000;
 const FACEBOOK_TIMEOUT_MS = 8_000;
-const RACE_STAGGER_MS = 800;       // gap between staggered race attempts
 const FACEBOOK_BODY_TIMEOUT_MS = 8_000;
 const MARKETPLACE_PDP_BODY_TIMEOUT_MS = 20_000;
-const PROXY_RACE_WIDTH = 6;
-const STICKY_PROXY_POOL_SIZE = 3;
-const STICKY_PROXY_TTL_MS = 10 * 60 * 1000;
-const STICKY_RACE_STAGGER_MS = 350;
-const POST_WIN_RACE_GRACE_MS = 1_500;
-
-type StickyProxyEntry = {
-  url: string;
-  inflight: number;
-  lastUsedAt: number;
-  lastSucceededAt: number;
-};
-
-type ProxyTaggedResponse = Awaited<ReturnType<typeof fetch>> & {
-  __proxyUrl?: string | null;
-  __cancelPending?: () => void;
-};
-
-// Sticky proxy pool — empty means we're in racing mode.
-// The race seeds up to three winners, then later requests spread over the pool.
-let stickyProxyPool: StickyProxyEntry[] = [];
-let marketplaceBrowseRetryAt = 0;
-let marketplaceBrowseDenialReason: "rate-limited" | "access-denied" = "rate-limited";
-
-// Called by callers that detect a rate-limit signal in the response body.
-export function markProxyRateLimited(proxyUrl?: string | null): void {
-  if (proxyUrl) {
-    const before = stickyProxyPool.length;
-    stickyProxyPool = stickyProxyPool.filter((entry) => entry.url !== proxyUrl);
-    if (before !== stickyProxyPool.length) {
-      console.warn("[proxy] rate limited — evicting from sticky pool");
-      return;
-    }
-    console.warn("[proxy] rate limited — proxy was not in sticky pool");
-    return;
-  }
-
-  if (stickyProxyPool.length > 0) {
-    console.warn("[proxy] rate limited without proxy attribution — clearing sticky pool");
-  }
-  stickyProxyPool = [];
-}
-
-function fetchWithTimeout(url: string, options: Parameters<typeof fetch>[1]): ReturnType<typeof fetch> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  return fetch(url, { ...options, signal: controller.signal as any }).finally(() => clearTimeout(timer));
-}
-
-function getResponseProxyUrl(res: Awaited<ReturnType<typeof fetch>> | null | undefined): string | null {
-  const proxyUrl = (res as ProxyTaggedResponse | null | undefined)?.__proxyUrl;
-  return typeof proxyUrl === "string" && proxyUrl.trim().length > 0 ? proxyUrl : null;
-}
-
-function hasMarketplaceRateLimitError(json: any): boolean {
-  return Array.isArray(json?.errors) && json.errors.some((e: any) => e?.code === 1675004);
-}
-
-function pruneStickyProxyPool(now = Date.now()): void {
-  stickyProxyPool = stickyProxyPool.filter((entry) => now - entry.lastSucceededAt < STICKY_PROXY_TTL_MS);
-}
-
-function addStickyProxyWinner(proxyUrl: string): void {
-  const now = Date.now();
-  pruneStickyProxyPool(now);
-
-  const existing = stickyProxyPool.find((entry) => entry.url === proxyUrl);
-  if (existing) {
-    existing.lastSucceededAt = now;
-    return;
-  }
-
-  if (stickyProxyPool.length >= STICKY_PROXY_POOL_SIZE) {
-    return;
-  }
-
-  stickyProxyPool.push({
-    url: proxyUrl,
-    inflight: 0,
-    lastUsedAt: 0,
-    lastSucceededAt: now,
-  });
-
-  console.log(`[proxy] added connection to sticky pool (${stickyProxyPool.length}/${STICKY_PROXY_POOL_SIZE})`);
-}
-
-function parseJsonWithTimeout<T>(
-  res: Awaited<ReturnType<typeof fetch>>,
-  timeoutMs: number,
-  label: string,
-): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timeoutError = Object.assign(new Error(`${label} response body timed out`), {
-      name: "AbortError",
-      type: "aborted",
-    });
-
-    const timer = setTimeout(() => {
-      const body = (res as any)?.body;
-      if (body && typeof body.destroy === "function") {
-        body.destroy(timeoutError);
-      }
-      reject(timeoutError);
-    }, timeoutMs);
-
-    res.json()
-      .then((json) => {
-        clearTimeout(timer);
-        resolve(json as T);
-      })
-      .catch((err) => {
-        clearTimeout(timer);
-        reject(err);
-      });
-  });
-}
-
-function raceStickyProxyPool(
-  url: string,
-  options: Parameters<typeof fetch>[1],
-  timeoutMs: number,
-): ReturnType<typeof fetch> {
-  pruneStickyProxyPool();
-
-  const entries = stickyProxyPool
-    .slice()
-    .sort((a, b) => {
-      if (a.inflight !== b.inflight) return a.inflight - b.inflight;
-      return a.lastUsedAt - b.lastUsedAt;
-    })
-    .slice(0, STICKY_PROXY_POOL_SIZE);
-
-  if (entries.length === 0) {
-    return Promise.reject(new Error("Sticky proxy pool is empty"));
-  }
-
-  const outerController = new AbortController();
-  const outerTimer = setTimeout(() => outerController.abort(), timeoutMs);
-  const childControllers: AbortController[] = [];
-  const staggerTimers: NodeJS.Timeout[] = [];
-  let cleanupTimer: NodeJS.Timeout | null = null;
-
-  return new Promise<Awaited<ReturnType<typeof fetch>>>((resolve, reject) => {
-    let settled = false;
-    let cleanedUp = false;
-    let failures = 0;
-    let winnerCtrl: AbortController | null = null;
-    let lastError: unknown = null;
-
-    const cleanup = () => {
-      if (cleanedUp) return;
-      cleanedUp = true;
-      clearTimeout(outerTimer);
-      if (cleanupTimer) clearTimeout(cleanupTimer);
-      for (const t of staggerTimers) clearTimeout(t);
-      for (const ctrl of childControllers) {
-        if (ctrl !== winnerCtrl) ctrl.abort();
-      }
-    };
-
-    const finish = (
-      winner: Awaited<ReturnType<typeof fetch>> | null,
-      ctrl?: AbortController,
-      err?: unknown,
-    ) => {
-      if (settled) return;
-      settled = true;
-      winnerCtrl = ctrl ?? null;
-      if (winner) {
-        clearTimeout(outerTimer);
-        resolve(winner);
-        cleanupTimer = setTimeout(() => cleanup(), POST_WIN_RACE_GRACE_MS);
-      } else {
-        cleanup();
-        reject(err ?? new Error("Sticky proxy pool exhausted"));
-      }
-    };
-
-    outerController.signal.addEventListener("abort", () =>
-      finish(
-        null,
-        undefined,
-        Object.assign(new Error("Marketplace fetch timed out"), { name: "AbortError", type: "aborted" })
-      )
-    );
-
-    const tryEntry = (entry: StickyProxyEntry) => {
-      if (cleanedUp || settled) return;
-
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-      childControllers.push(ctrl);
-      outerController.signal.addEventListener("abort", () => ctrl.abort());
-
-      entry.inflight += 1;
-      entry.lastUsedAt = Date.now();
-
-      const reqOptions: any = { ...options, signal: ctrl.signal, agent: new HttpsProxyAgent(entry.url) };
-      fetch(url, reqOptions)
-        .then((res) => {
-          clearTimeout(timer);
-          entry.lastSucceededAt = Date.now();
-          (res as ProxyTaggedResponse).__proxyUrl = entry.url;
-          (res as ProxyTaggedResponse).__cancelPending = cleanup;
-          finish(res, ctrl);
-        })
-        .catch((err: any) => {
-          clearTimeout(timer);
-          stickyProxyPool = stickyProxyPool.filter((candidate) => candidate.url !== entry.url);
-          console.warn("[proxy] sticky proxy failed — evicting");
-          lastError = err;
-          failures += 1;
-          if (!settled && failures === entries.length) {
-            finish(null, undefined, lastError ?? err);
-          }
-        })
-        .finally(() => {
-          entry.inflight = Math.max(0, entry.inflight - 1);
-        });
-    };
-
-    tryEntry(entries[0]);
-    for (let i = 1; i < entries.length; i++) {
-      staggerTimers.push(setTimeout(() => tryEntry(entries[i]), i * STICKY_RACE_STAGGER_MS));
-    }
-  });
-}
-
-function happyEyeballs(
-  url: string,
-  options: Parameters<typeof fetch>[1],
-  timeoutMs: number,
-): ReturnType<typeof fetch> {
-  const urls: Array<string | null> = proxyUrls.length > 0
-    ? [
-        ...[...proxyUrls].sort(() => Math.random() - 0.5).slice(0, PROXY_RACE_WIDTH),
-        // A stale production proxy list should not make Marketplace a total
-        // outage. Try Render's direct egress last, after every proxy candidate.
-        null,
-      ]
-    : [null];
-
-  const outerController = new AbortController();
-  const outerTimer = setTimeout(() => outerController.abort(), timeoutMs);
-  const childControllers: AbortController[] = [];
-  const staggerTimers: NodeJS.Timeout[] = [];
-  let cleanupTimer: NodeJS.Timeout | null = null;
-
-  return new Promise<Awaited<ReturnType<typeof fetch>>>((resolve, reject) => {
-    let primarySettled = false;
-    let cleanedUp = false;
-    let failures = 0;
-    let winners = 0;
-    let primaryWinnerCtrl: AbortController | null = null;
-
-    const cleanup = () => {
-      if (cleanedUp) return;
-      cleanedUp = true;
-      clearTimeout(outerTimer);
-      if (cleanupTimer) clearTimeout(cleanupTimer);
-      for (const t of staggerTimers) clearTimeout(t);
-      for (const c of childControllers) {
-        if (c !== primaryWinnerCtrl) c.abort();
-      }
-    };
-
-    const finishPrimary = (
-      winner: Awaited<ReturnType<typeof fetch>> | null,
-      winnerCtrl?: AbortController,
-      err?: unknown
-    ) => {
-      if (primarySettled) return;
-      primarySettled = true;
-      primaryWinnerCtrl = winnerCtrl ?? null;
-      if (winner) {
-        clearTimeout(outerTimer);
-        resolve(winner);
-        if (winners >= STICKY_PROXY_POOL_SIZE) {
-          cleanup();
-        } else {
-          cleanupTimer = setTimeout(() => cleanup(), POST_WIN_RACE_GRACE_MS);
-        }
-      } else {
-        cleanup();
-        reject(err ?? new Error("All marketplace fetch attempts failed"));
-      }
-    };
-
-    outerController.signal.addEventListener("abort", () =>
-      finishPrimary(
-        null,
-        undefined,
-        Object.assign(new Error("Marketplace fetch timed out"), { name: "AbortError", type: "aborted" })
-      )
-    );
-
-    const tryUrl = (proxyUrl: string | null) => {
-      if (cleanedUp) return;
-      const ctrl = new AbortController();
-      childControllers.push(ctrl);
-      outerController.signal.addEventListener("abort", () => ctrl.abort());
-      const reqOptions: any = { ...options, signal: ctrl.signal };
-      if (proxyUrl) reqOptions.agent = new HttpsProxyAgent(proxyUrl);
-      fetch(url, reqOptions)
-        .then((res) => {
-          (res as ProxyTaggedResponse).__proxyUrl = proxyUrl;
-          (res as ProxyTaggedResponse).__cancelPending = cleanup;
-          if (proxyUrl) {
-            addStickyProxyWinner(proxyUrl);
-            winners += 1;
-          }
-          finishPrimary(res, ctrl);
-          if (primarySettled && (winners >= STICKY_PROXY_POOL_SIZE || failures + winners >= urls.length)) {
-            cleanup();
-          }
-        })
-        .catch(() => {
-          if (cleanedUp) return;
-          failures += 1;
-          if (!primarySettled && failures === urls.length) {
-            finishPrimary(null);
-            return;
-          }
-          if (primarySettled && failures + winners >= urls.length) {
-            cleanup();
-          }
-        });
-    };
-
-    tryUrl(urls[0]);
-    for (let i = 1; i < urls.length; i++) {
-      staggerTimers.push(setTimeout(() => tryUrl(urls[i]), i * RACE_STAGGER_MS));
-    }
-  });
-}
-
-// Sticky-pool mode: prefer known-good proxies and only re-race when the pool is empty or exhausted.
-// Failure or timeout evicts the bad proxy and falls back to the next pool member or a new race.
-function raceProxiedFetch(
-  url: string,
-  options: Parameters<typeof fetch>[1],
-  timeoutMs = FACEBOOK_TIMEOUT_MS,
-): ReturnType<typeof fetch> {
-  return (async () => {
-    pruneStickyProxyPool();
-
-    if (stickyProxyPool.length > 0) {
-      try {
-        return await raceStickyProxyPool(url, options, timeoutMs);
-      } catch (err) {
-        console.warn(
-          `[proxy] sticky pool exhausted${err ? ` (${(err as any)?.message ?? "unknown error"})` : ""} — re-racing`
-        );
-      }
-    }
-
-    return happyEyeballs(url, options, timeoutMs);
-  })();
-}
-
 const GRAPHQL_URL = "https://www.facebook.com/api/graphql/";
 const FB_GRAPHQL_USER_AGENT = "Mozilla/5.0";
 
+let marketplaceRetryAt = 0;
+let marketplaceDenialReason: "rate-limited" | "access-denied" = "rate-limited";
+
+function fetchWithTimeout(
+  url: string,
+  options: Parameters<typeof fetch>[1],
+  timeoutMs = FETCH_TIMEOUT_MS,
+): ReturnType<typeof fetch> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...options, signal: controller.signal as any }).finally(() => clearTimeout(timer));
+}
+
+async function requestMarketplaceGraphql(
+  options: Parameters<typeof fetch>[1],
+  bodyTimeoutMs = FACEBOOK_BODY_TIMEOUT_MS,
+) {
+  if (Date.now() < marketplaceRetryAt) {
+    const retryAfterMs = marketplaceRetryAt - Date.now();
+    console.warn("[marketplace:backoff]", JSON.stringify({ reason: marketplaceDenialReason, retryAfterSeconds: Math.ceil(retryAfterMs / 1000), configurationReviewRequired: marketplaceDenialReason === "access-denied" }));
+    throw new MarketplaceResponseError("Marketplace is backing off after an upstream denial", true, retryAfterMs);
+  }
+
+  // Honor the configured transport on the first request. Never race another
+  // proxy or direct egress after a denial; the first configured proxy is used.
+  const proxyUrl = proxyUrls[0] ?? null;
+  let agent;
+  let proxyAuthorizationConfigured = false;
+  if (proxyUrl) {
+    try {
+      const parsed = new URL(proxyUrl);
+      if (!["http:", "https:"].includes(parsed.protocol) || !parsed.hostname) throw new Error();
+      proxyAuthorizationConfigured = Boolean(parsed.username || parsed.password);
+      agent = new HttpsProxyAgent(proxyUrl);
+    } catch {
+      throw new MarketplaceResponseError("Marketplace proxy configuration requires a valid HTTP(S) URL", false);
+    }
+  }
+  const metadata = {
+    requestId: randomUUID().slice(0, 12), phase: "initial" as const,
+    route: proxyUrl ? "proxy" as const : "direct" as const,
+    proxyIndex: proxyUrl ? 1 : null,
+    configuredProxyCount: proxyUrls.length, proxyAuthorizationConfigured,
+  };
+  try {
+    const response = await fetchWithTimeout(GRAPHQL_URL, { ...options, ...(agent ? { agent } : {}) }, FACEBOOK_TIMEOUT_MS);
+    const json = await readMarketplaceResponse<any>(response, metadata, bodyTimeoutMs);
+    return { status: response.status, json };
+  } catch (error) {
+    if (error instanceof MarketplaceResponseError) {
+      if (error.accessDenied) {
+        const retryAt = Date.now() + (error.retryAfterMs || 60_000);
+        if (retryAt > marketplaceRetryAt) {
+          marketplaceRetryAt = retryAt;
+          marketplaceDenialReason = error.retryAfterMs > 0 ? "rate-limited" : "access-denied";
+        }
+      }
+      throw error;
+    }
+    console.warn("[marketplace:request]", JSON.stringify({ ...metadata, outcome: "transport-error" }));
+    throw new MarketplaceResponseError("Marketplace request transport failed", false);
+  }
+}
 
 const latLngCache = new Map<string, { lat: number; lng: number; expiresAt: number }>();
 
@@ -591,43 +290,6 @@ async function searchMarketplaceListingsByLatLng({
   radiusKm?: number;
   enrichImages?: boolean;
 }) {
-  if (Date.now() < marketplaceBrowseRetryAt) {
-    const retryAfterMs = marketplaceBrowseRetryAt - Date.now();
-    console.warn("[marketplace:backoff]", JSON.stringify({ reason: marketplaceBrowseDenialReason, retryAfterSeconds: Math.ceil(retryAfterMs / 1000), configurationReviewRequired: marketplaceBrowseDenialReason === "access-denied" }));
-    throw new MarketplaceResponseError("Marketplace is backing off after an upstream denial", true, retryAfterMs);
-  }
-  const requestId = randomUUID().slice(0, 12);
-  const parseBrowseResponse = async (response: Awaited<ReturnType<typeof fetch>>, phase: "initial" | "fallback") => {
-    const proxyUrl = getResponseProxyUrl(response);
-    let proxyAuthorizationConfigured = false;
-    if (proxyUrl) {
-      try {
-        const parsed = new URL(proxyUrl);
-        proxyAuthorizationConfigured = Boolean(parsed.username || parsed.password);
-      } catch { /* Invalid configuration is reported without echoing the URL. */ }
-    }
-    if ([401, 403, 407, 429].includes(response.status)) {
-      (response as ProxyTaggedResponse).__cancelPending?.();
-    }
-    try {
-      return await readMarketplaceResponse<any>(response, {
-        requestId, phase, route: proxyUrl ? "proxy" : "direct",
-        proxyIndex: proxyUrl ? proxyUrls.indexOf(proxyUrl) + 1 : null,
-        configuredProxyCount: proxyUrls.length, proxyAuthorizationConfigured,
-      }, FACEBOOK_BODY_TIMEOUT_MS);
-    } catch (error) {
-      if (error instanceof MarketplaceResponseError && error.accessDenied) {
-        const retryAt = Date.now() + (error.retryAfterMs || 60_000);
-        if (retryAt > marketplaceBrowseRetryAt) {
-          marketplaceBrowseRetryAt = retryAt;
-          marketplaceBrowseDenialReason = error.retryAfterMs > 0 ? "rate-limited" : "access-denied";
-        }
-        // Stop pending candidates after an explicit denial; do not reroute it.
-        (response as ProxyTaggedResponse).__cancelPending?.();
-      }
-      throw error;
-    }
-  };
   const variables = {
     buyLocation: { latitude: lat, longitude: lng },
     contextual_data: null,
@@ -684,43 +346,14 @@ async function searchMarketplaceListingsByLatLng({
     __comet_req: "15",
   });
 
-  let json: any = null;
-  // Direct Facebook responses are usually much faster. Only accept one after
-  // the complete body has arrived and contains the expected feed; otherwise
-  // fall back to the residential pool below.
-  try {
-    const directRes = await fetchWithTimeout(GRAPHQL_URL, {
-      method: "POST",
-      headers: {
-        "user-agent": "Mozilla/5.0",
-        "content-type": "application/x-www-form-urlencoded",
-      },
-      body,
-    });
-    const directJson = await parseBrowseResponse(directRes, "initial");
-    if (
-      !hasMarketplaceRateLimitError(directJson)
-      && directJson?.data?.marketplace_search?.feed_units?.edges
-    ) {
-      json = directJson;
-    }
-  } catch (err: any) {
-    if (err instanceof MarketplaceResponseError && err.accessDenied) throw err;
-    console.warn("[marketplace:browse] direct request failed", { requestId, kind: err instanceof MarketplaceResponseError ? "invalid-response" : "transport-error" });
-  }
-
-  if (!json) {
-    const res = await raceProxiedFetch(GRAPHQL_URL, {
-      method: "POST",
-      headers: {
-        "user-agent": "Mozilla/5.0",
-        "content-type": "application/x-www-form-urlencoded",
-      },
-      body,
-    });
-
-    json = await parseBrowseResponse(res, "fallback");
-  }
+  const { json } = await requestMarketplaceGraphql({
+    method: "POST",
+    headers: {
+      "user-agent": FB_GRAPHQL_USER_AGENT,
+      "content-type": "application/x-www-form-urlencoded",
+    },
+    body,
+  });
   if (Array.isArray(json?.errors) && json.errors.length > 0) {
     throw new MarketplaceResponseError(`Marketplace GraphQL search failed (${json.errors.length} errors; see safe response diagnostics)`, false);
   }
@@ -1071,23 +704,7 @@ async function makeGraphqlRequest(
     body,
   };
 
-  // Read the full response before accepting a connection. Some residential
-  // exits deliver headers promptly and then stall on the large PDP payload.
-  try {
-    const directRes = await fetchWithTimeout(GRAPHQL_URL, options);
-    if (directRes.status === 200) {
-      const json = await parseJsonWithTimeout<any>(directRes, MARKETPLACE_PDP_BODY_TIMEOUT_MS, friendlyName);
-      if (!hasMarketplaceRateLimitError(json)) return { status: directRes.status, json, proxyUrl: null };
-    }
-  } catch (err: any) {
-    console.warn(`[marketplace:${friendlyName}] direct request failed: ${err?.message ?? err}`);
-  }
-
-  const proxyRes = await raceProxiedFetch(GRAPHQL_URL, options);
-  const json = proxyRes.status === 200
-    ? await parseJsonWithTimeout<any>(proxyRes, MARKETPLACE_PDP_BODY_TIMEOUT_MS, friendlyName)
-    : null;
-  return { status: proxyRes.status, json, proxyUrl: getResponseProxyUrl(proxyRes) };
+  return requestMarketplaceGraphql(options, MARKETPLACE_PDP_BODY_TIMEOUT_MS);
 }
 
 async function fetchMarketplaceListingByContainerQuery(listingId: string): Promise<{ details: any; media: any } | null> {
@@ -1115,10 +732,6 @@ async function fetchMarketplaceListingByContainerQuery(listingId: string): Promi
       }
 
       const containerJson = containerRes.json;
-      if (hasMarketplaceRateLimitError(containerJson)) {
-        markProxyRateLimited(containerRes.proxyUrl);
-        throw new Error("Marketplace rate limit exceeded");
-      }
       const details = containerJson?.data?.viewer?.marketplace_product_details_page ?? null;
 
       if (!details?.target?.marketplace_listing_title) {
@@ -1129,23 +742,17 @@ async function fetchMarketplaceListingByContainerQuery(listingId: string): Promi
 
       // The media query carries the full photo gallery; the container only has
       // the primary thumbnail. Anything other than a 200 with a populated media
-      // payload means we'd build a "successful" listing with just 1 image. A
-      // real listing always returns media on a 200, so a non-200 OR an empty
-      // media payload both mean we got throttled — evict the proxy and retry the
-      // whole fetch on a fresh one rather than silently returning a partial.
+      // payload would leave only the primary image. Retry incomplete data on
+      // the same configured transport; explicit denials already stop in the
+      // shared response handler and must never trigger another route.
       let media: any = null;
       if (mediaRes.status === 200) {
         const mediaJson = mediaRes.json;
-        if (hasMarketplaceRateLimitError(mediaJson)) {
-          markProxyRateLimited(mediaRes.proxyUrl);
-          throw new Error("Marketplace rate limit exceeded");
-        }
         media = mediaJson?.data?.viewer?.marketplace_product_details_page ?? null;
       }
 
       if (!media) {
-        console.warn(`[marketplace:mediaQuery] no media for listing ${listingId} (HTTP ${mediaRes.status}) — treating as throttle, will reroute`);
-        if (mediaRes.proxyUrl) markProxyRateLimited(mediaRes.proxyUrl);
+        console.warn(`[marketplace:mediaQuery] no media for listing ${listingId} (HTTP ${mediaRes.status})`);
         if (attempt < 1) continue;
         // Out of retries: return the degraded listing rather than dropping it entirely.
       }
@@ -1153,6 +760,7 @@ async function fetchMarketplaceListingByContainerQuery(listingId: string): Promi
       return { details, media };
     } catch (err: any) {
       console.warn(`[marketplace:containerQuery] Failed for ${listingId} (attempt ${attempt + 1}):`, err);
+      if (err instanceof MarketplaceResponseError && err.accessDenied) return null;
       if (attempt < 1 && err?.type !== "aborted") continue;
       return null;
     }

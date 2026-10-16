@@ -50,6 +50,28 @@ describe("Marketplace browse response handling", () => {
     const messages = JSON.stringify([...vi.mocked(console.info).mock.calls, ...vi.mocked(console.log).mock.calls, ...vi.mocked(console.warn).mock.calls]);
     expect(messages).not.toMatch(/fixture-user|fixture-password|proxy\.test|temporary upstream failure/);
   });
+  it("keeps the longest cooldown and its reason when in-flight requests fail concurrently", async () => {
+    vi.useFakeTimers();
+    const { searchMarketplaceNormalized } = await import("../marketplaceService");
+    let firstResponse!: (response: Response) => void;
+    let secondResponse!: (response: Response) => void;
+    vi.mocked(fetch)
+      .mockReturnValueOnce(new Promise(resolve => { firstResponse = resolve; }))
+      .mockReturnValueOnce(new Promise(resolve => { secondResponse = resolve; }));
+    const first = searchMarketplaceNormalized(searchOptions).catch(error => error);
+    const second = searchMarketplaceNormalized(searchOptions).catch(error => error);
+    firstResponse(new Response(null, { status: 429, headers: { "retry-after": "120" } }));
+    await first;
+    secondResponse(new Response(null, { status: 401 }));
+    await second;
+    await vi.advanceTimersByTimeAsync(60_001);
+    await expect(searchMarketplaceNormalized(searchOptions)).rejects.toThrow("backing off");
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(String(vi.mocked(console.warn).mock.calls.at(-1)?.[1]))).toMatchObject({ reason: "rate-limited", retryAfterSeconds: 60 });
+    await vi.advanceTimersByTimeAsync(60_000);
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ data: { marketplace_search: { feed_units: { edges: [] } } } })));
+    await expect(searchMarketplaceNormalized(searchOptions)).resolves.toEqual([]);
+  });
   it("preserves real listing data and the normal View on Marketplace destination", async () => {
     const { searchMarketplaceNormalized } = await import("../marketplaceService");
     vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ data: { marketplace_search: { feed_units: { edges: [

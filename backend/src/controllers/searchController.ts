@@ -24,7 +24,7 @@ function dedupe(items: Listing[]) {
   return out;
 }
 
-function parseAnalyzeFlag(v: unknown): boolean {
+function parseFlag(v: unknown): boolean {
   const s = String(v ?? "0").trim().toLowerCase();
   return s === "1" || s === "true" || s === "yes" || s === "on";
 }
@@ -34,7 +34,8 @@ export async function searchAll(req: Request, res: Response) {
   if (!query) return res.status(400).json({ error: "Missing query" });
 
   const limit = clampInt(Number(req.query.limit ?? 15), 1, 200);
-  const analyze = parseAnalyzeFlag(req.query.analyze);
+  const analyze = parseFlag(req.query.analyze);
+  const continuation = parseFlag(req.query.continuation);
 
   const sourcesRaw = String(req.query.sources ?? "ebay,marketplace")
     .split(",")
@@ -48,7 +49,7 @@ export async function searchAll(req: Request, res: Response) {
 
   const useEbay = wantsEbay || (!wantsEbay && !wantsMarketplace);
   // Skip marketplace on offset pages — the client already has those from the first fetch
-  const useMarketplace = wantsMarketplace && offset === 0;
+  const useMarketplace = wantsMarketplace && offset === 0 && !continuation;
 
   const sourceCount = (useEbay ? 1 : 0) + (useMarketplace ? 1 : 0);
   const perSource = Math.max(1, Math.floor(limit / Math.max(1, sourceCount)));
@@ -110,13 +111,19 @@ export async function searchAll(req: Request, res: Response) {
         })()
     : Promise.resolve([] as Listing[]);
 
-  const marketplace = await marketplacePromise;
-  // Marketplace is fetched once. Fill the remaining space from eBay without
-  // re-fetching a larger batch at the same offset or discarding consumed rows.
+  // Reserve space for Marketplace, but start both source requests together.
+  const ebayPromise = useEbay
+    ? searchEbayPage(query, ebayTarget, buyerLocation, minPrice, maxPrice, sortBy, offset)
+    : Promise.resolve({ items: [] as Listing[], hasMore: false, nextOffset: offset, unavailable: false, remainingWindows: 0 });
+  const [marketplace, initialEbay] = await Promise.all([marketplacePromise, ebayPromise]);
   const validMarketplace = dedupe(marketplace.filter((l: Listing) => l.price !== null)).slice(0, marketplaceTarget);
-  const ebay = useEbay
-    ? await searchEbayPage(query, limit - validMarketplace.length, buyerLocation, minPrice, maxPrice, sortBy, offset)
-    : { items: [], hasMore: false, nextOffset: offset, unavailable: false };
+  let ebay = initialEbay;
+  const remaining = limit - validMarketplace.length - ebay.items.length;
+  if (useEbay && remaining > 0 && ebay.hasMore && !ebay.unavailable && ebay.remainingWindows > 0) {
+    // Refill from the returned raw cursor without exceeding the request's scan budget.
+    const extra = await searchEbayPage(query, remaining, buyerLocation, minPrice, maxPrice, sortBy, ebay.nextOffset, ebay.remainingWindows);
+    ebay = { ...extra, items: dedupe([...ebay.items, ...extra.items]) };
+  }
   const ebayUnavailable = ebay.unavailable;
   const merged = dedupe([...ebay.items, ...validMarketplace]);
   res.setHeader("X-Search-Has-More", String(ebay.hasMore));
@@ -125,7 +132,7 @@ export async function searchAll(req: Request, res: Response) {
   // Shuffle only on the first page so eBay and marketplace are interleaved.
   // Skip when sorting by price (preserve eBay's native order) or when offset > 0
   // (incremental pages should come in stable eBay order so appending is consistent).
-  if (!sortBy && offset === 0) {
+  if (!sortBy && offset === 0 && !continuation) {
     for (let i = merged.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [merged[i], merged[j]] = [merged[j], merged[i]];

@@ -407,6 +407,7 @@ export type EbaySearchPage = {
   nextOffset: number;
   hasMore: boolean;
   unavailable: boolean;
+  remainingWindows: number;
 };
 
 /** A cursor counts raw eBay summaries, never accepted listings or Marketplace rows.
@@ -415,15 +416,17 @@ export type EbaySearchPage = {
  */
 export async function searchEbayPage(
   query: string, limit: number, buyerLocation?: { country: string; zip: string } | null,
-  minPrice?: number, maxPrice?: number, sortBy?: "price_asc" | "price_desc", offset = 0
+  minPrice?: number, maxPrice?: number, sortBy?: "price_asc" | "price_desc", offset = 0, maxWindows = 5
 ): Promise<EbaySearchPage> {
   const windowSize = 50;
   const items: Listing[] = [];
   const seen = new Set<string>();
   let nextOffset = offset;
   let hasMore = offset < 10000;
+  let remainingWindows = maxWindows;
   try {
-    for (let scanned = 0; scanned < 5 && hasMore && items.length < limit; scanned++) {
+    while (remainingWindows > 0 && hasMore && items.length < limit) {
+      remainingWindows--;
       const start = Math.floor(nextOffset / windowSize) * windowSize;
       const window = await getEbaySearchWindow(query, windowSize, buyerLocation, minPrice, maxPrice, sortBy, start);
       const raw = window.summariesRaw;
@@ -456,10 +459,10 @@ export async function searchEbayPage(
         }
       }
     }
-    return { items, nextOffset, hasMore, unavailable: false };
+    return { items, nextOffset, hasMore, unavailable: false, remainingWindows };
   } catch (err) {
     console.error("eBay pagination failed", err);
-    return { items, nextOffset, hasMore: true, unavailable: true };
+    return { items, nextOffset, hasMore: true, unavailable: true, remainingWindows };
   }
 }
 

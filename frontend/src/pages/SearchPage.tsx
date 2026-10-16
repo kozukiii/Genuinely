@@ -146,7 +146,8 @@ async function fetchFromApi(
   query: string,
   targetTotal: number,
   filters: FilterState,
-  offset = 0
+  offset = 0,
+  continuation = false
 ): Promise<{ items: Listing[]; pagination: SearchPagination; warning: string | null }> {
   const activeSources =
     (["ebay", "marketplace"] as const).filter((s) => filters.sources[s]).join(",") ||
@@ -172,6 +173,7 @@ async function fetchFromApi(
     url += `&radiusKm=${radiusKm}`;
   }
   if (offset > 0) url += `&offset=${offset}`;
+  if (continuation) url += "&continuation=1";
 
   const res = await fetch(url);
   const text = await res.text();
@@ -951,7 +953,8 @@ export default function SearchPage() {
           queryRef.current,
           PAGE_SIZE,
           filtersRef.current,
-          offset
+          offset,
+          true
         );
 
         if (request !== searchRequestRef.current) return;

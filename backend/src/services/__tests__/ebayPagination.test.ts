@@ -43,10 +43,16 @@ describe("raw eBay pagination", () => {
   it("keeps a fully filtered scan budget resumable, then finds the later item", async () => {
     source(Array.from({ length: 251 }, (_, i) => summary(i, i < 250)));
     const first = await searchEbayPage("nintendo", 12);
-    expect(first).toMatchObject({ items: [], nextOffset: 250, hasMore: true, unavailable: false });
+    expect(first).toMatchObject({ items: [], nextOffset: 250, hasMore: true, unavailable: false, remainingWindows: 0 });
     const last = await searchEbayPage("nintendo", 12, null, undefined, undefined, undefined, 250);
     expect(last.items).toHaveLength(1);
     expect(last).toMatchObject({ nextOffset: 251, hasMore: false });
+  });
+  it("honors a smaller remaining budget when refilling an aggregate request", async () => {
+    source(Array.from({ length: 151 }, (_, i) => summary(i, i < 150)));
+    const page = await searchEbayPage("nintendo", 12, null, undefined, undefined, undefined, 0, 2);
+    expect(page).toMatchObject({ items: [], nextOffset: 100, hasMore: true, unavailable: false, remainingWindows: 0 });
+    expect(fetch).toHaveBeenCalledTimes(2);
   });
   it("refills detail-only variations and invalid listings, without counting them as exhaustion", async () => {
     const rows = Array.from({ length: 25 }, (_, i) => summary(i));

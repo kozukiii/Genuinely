@@ -617,8 +617,11 @@ async function searchMarketplaceListingsByLatLng({
       }, FACEBOOK_BODY_TIMEOUT_MS);
     } catch (error) {
       if (error instanceof MarketplaceResponseError && error.accessDenied) {
-        marketplaceBrowseRetryAt = Date.now() + (error.retryAfterMs || 60_000);
-        marketplaceBrowseDenialReason = error.retryAfterMs > 0 ? "rate-limited" : "access-denied";
+        const retryAt = Date.now() + (error.retryAfterMs || 60_000);
+        if (retryAt > marketplaceBrowseRetryAt) {
+          marketplaceBrowseRetryAt = retryAt;
+          marketplaceBrowseDenialReason = error.retryAfterMs > 0 ? "rate-limited" : "access-denied";
+        }
         // Stop pending candidates after an explicit denial; do not reroute it.
         (response as ProxyTaggedResponse).__cancelPending?.();
       }

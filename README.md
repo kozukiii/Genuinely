@@ -257,3 +257,26 @@ Planned improvements include broader category-specific pricing, stronger marketp
 **Built by Zach Higdon.**
 
 Software Development student focused on full-stack development, product thinking, marketplace systems, and practical AI integrations.
+
+## Search pagination
+
+`GET /api/search` keeps its listing-array response and returns continuation headers:
+`X-Search-Has-More` and `X-Search-Next-Offset`. The next request must use the returned
+raw eBay offset, not the number of displayed listings. These headers and the two
+source-status headers are exposed through CORS. Continuation requests also send
+`continuation=1`, including retries at offset zero, so Marketplace is fetched only
+for the initial request. Deploy this backend contract before
+the updated frontend; a frontend served against an older backend shows a retryable
+pagination error rather than guessing that results are exhausted.
+
+Search scans fixed 50-summary eBay windows, excluding variations before detail
+requests and validating again after details. It stops after five windows per request;
+a short or empty filtered batch can therefore still have more results. Initial
+source searches run concurrently; if Marketplace returns fewer rows, eBay refills
+from its cursor within the same scan budget. Marketplace never contributes to the
+eBay cursor. Source failures retain a retry cursor and are reported separately from
+normal exhaustion.
+The browser saves continuation state with the cached search; caches predating this
+contract restart the search because their listing counts cannot reconstruct a cursor.
+
+Pagination checks: `npm test --prefix backend` and `npm test --prefix frontend`.

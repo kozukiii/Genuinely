@@ -279,7 +279,7 @@ function mapEbayInternalToListing(item: any): EbayListingRich {
   };
 }
 
-export async function getEbayItemsWithDetails(
+async function getEbaySearchWindow(
   query: string,
   limit: number = 8,
   buyerLocation?: { country: string; zip: string } | null,
@@ -326,21 +326,25 @@ export async function getEbayItemsWithDetails(
   }
 
   const searchJson: any = await searchRes.json();
-  const summariesRaw = searchJson.itemSummaries || [];
-
-  if (!Array.isArray(summariesRaw) || summariesRaw.length === 0) {
-    return [];
+  if (searchJson.errors?.length) throw new Error("eBay returned search errors");
+  if (typeof searchJson.offset === "number" && searchJson.offset !== Math.floor(offset / limit) * limit) {
+    throw new Error("eBay returned an unexpected search offset");
   }
+  const summariesRaw = searchJson.itemSummaries ?? [];
+  if (searchJson.itemSummaries == null && searchJson.total !== 0) {
+    throw new Error("eBay omitted search results without confirming exhaustion");
+  }
+  if (!Array.isArray(summariesRaw)) throw new Error("Invalid eBay search response");
+  // An empty page cannot advance, even if upstream sends an inconsistent total.
+  const end = offset + summariesRaw.length;
+  const hasMore = summariesRaw.length > 0 && end < 10000 && (
+    typeof searchJson.total === "number" ? end < searchJson.total
+      : Boolean(searchJson.next) || summariesRaw.length === limit
+  );
+  return { summariesRaw, ebayHeaders, hasMore };
+}
 
-  // Browse has no server-side "exclude item groups" filter. Drop selectable
-  // color/model/size listings as soon as search identifies them, before paying
-  // for individual detail requests.
-  const summaries = summariesRaw
-    .filter((item: any) => !isEbayVariationItem(item))
-    .map(mapEbaySummary);
-
-  if (summaries.length === 0) return [];
-
+async function enrichEbaySummaries(summaries: any[], ebayHeaders: Record<string, string>) {
   const detailedItems = await Promise.all(
     summaries.map(async (summary: any) => {
       const fullRes = await fetch(`${EBAY_ITEM}/${summary.id}`, {
@@ -390,7 +394,79 @@ export async function getEbayItemsWithDetails(
   return detailedItems;
 }
 
-// ✅ Used by /api/search aggregator
+export async function getEbayItemsWithDetails(
+  query: string, limit = 8, buyerLocation?: { country: string; zip: string } | null,
+  minPrice?: number, maxPrice?: number, sortBy?: "price_asc" | "price_desc", offset = 0
+) {
+  const window = await getEbaySearchWindow(query, limit, buyerLocation, minPrice, maxPrice, sortBy, offset);
+  return enrichEbaySummaries(window.summariesRaw.filter((item: any) => !isEbayVariationItem(item)).map(mapEbaySummary), window.ebayHeaders);
+}
+
+export type EbaySearchPage = {
+  items: Listing[];
+  nextOffset: number;
+  hasMore: boolean;
+  unavailable: boolean;
+  remainingWindows: number;
+};
+
+/** A cursor counts raw eBay summaries, never accepted listings or Marketplace rows.
+ * Fixed windows keep eBay offsets aligned even when the requested UI size changes.
+ * Stop after five windows; a scan budget is not proof of source exhaustion.
+ */
+export async function searchEbayPage(
+  query: string, limit: number, buyerLocation?: { country: string; zip: string } | null,
+  minPrice?: number, maxPrice?: number, sortBy?: "price_asc" | "price_desc", offset = 0, maxWindows = 5
+): Promise<EbaySearchPage> {
+  const windowSize = 50;
+  const items: Listing[] = [];
+  const seen = new Set<string>();
+  let nextOffset = offset;
+  let hasMore = offset < 10000;
+  let remainingWindows = maxWindows;
+  try {
+    while (remainingWindows > 0 && hasMore && items.length < limit) {
+      remainingWindows--;
+      const start = Math.floor(nextOffset / windowSize) * windowSize;
+      const window = await getEbaySearchWindow(query, windowSize, buyerLocation, minPrice, maxPrice, sortBy, start);
+      const raw = window.summariesRaw;
+      let index = nextOffset - start;
+      while (index < raw.length && items.length < limit) {
+        const candidates: any[] = [];
+        let endIndex = index;
+        while (endIndex < raw.length && candidates.length < limit - items.length) {
+          const item = raw[endIndex++];
+          if (!isEbayVariationItem(item)) candidates.push(mapEbaySummary(item));
+        }
+        // Commit the cursor only once this batch succeeds, so failures can retry it.
+        const detailed = await enrichEbaySummaries(candidates, window.ebayHeaders);
+        for (const item of detailed) {
+          const listing = mapEbayInternalToListing(item);
+          if (isEbayVariationItem(listing) || !listing.id || !listing.title || !listing.url || seen.has(listing.id)) continue;
+          seen.add(listing.id);
+          items.push(listing);
+        }
+        index = endIndex;
+        nextOffset = start + index;
+      }
+      hasMore = nextOffset < 10000 && (index < raw.length || window.hasMore);
+      if (index >= raw.length) {
+        // Only move to another aligned window after consuming this one.
+        nextOffset = Math.max(nextOffset, start + raw.length);
+        if (hasMore && raw.length < windowSize) {
+          // A sparse upstream window cannot safely advance to another aligned page.
+          throw new Error("Incomplete eBay search window");
+        }
+      }
+    }
+    return { items, nextOffset, hasMore, unavailable: false, remainingWindows };
+  } catch (err) {
+    console.error("eBay pagination failed", err);
+    return { items, nextOffset, hasMore: true, unavailable: true, remainingWindows };
+  }
+}
+
+// Array-only convenience API for featured listings and internal callers.
 export async function searchEbayNormalized(
   query: string,
   limit: number = 1,

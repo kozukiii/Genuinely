@@ -32,6 +32,7 @@ app.use(cors({
     else callback(new Error("Not allowed by CORS"));
   },
   credentials: true,
+  exposedHeaders: ["X-Search-Has-More", "X-Search-Next-Offset", "X-Ebay-Search-Status", "X-Marketplace-Search-Status"],
 }));
 
 app.use(helmet({

@@ -1,7 +1,7 @@
 import type { Request, Response } from "express";
 import type { Listing } from "../types/listing";
 
-import { searchEbayNormalized } from "../services/ebayService";
+import { searchEbayPage } from "../services/ebayService";
 import { searchMarketplaceNormalized } from "../services/marketplaceService";
 import { scoreListings } from "../services/scoring/scoreListing";
 import { fetchMarketContext } from "../ai/listingContext";
@@ -9,7 +9,7 @@ import { getLocationFromIp, extractClientIp, getMarketplaceSearchLocation } from
 import { signListingForAnalysis } from "../services/listingAnalysisProof";
 
 function clampInt(n: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, n));
+  return Number.isFinite(n) ? Math.max(min, Math.min(max, Math.floor(n))) : min;
 }
 
 function dedupe(items: Listing[]) {
@@ -51,7 +51,7 @@ export async function searchAll(req: Request, res: Response) {
   const useMarketplace = wantsMarketplace && offset === 0;
 
   const sourceCount = (useEbay ? 1 : 0) + (useMarketplace ? 1 : 0);
-  const perSource = Math.floor(limit / sourceCount);
+  const perSource = Math.max(1, Math.floor(limit / Math.max(1, sourceCount)));
 
   const ebayTarget = useEbay ? perSource : 0;
   const marketplaceTarget = useMarketplace ? limit - ebayTarget : 0;
@@ -89,17 +89,6 @@ export async function searchAll(req: Request, res: Response) {
   // Start market context fetch in parallel with API searches (only when analyze=1)
   const contextPromise = analyze ? fetchMarketContext(query) : Promise.resolve(null);
 
-  let ebayUnavailable = false;
-  const runEbaySearch = async (target: number) => {
-    try {
-      return await searchEbayNormalized(query, target, buyerLocation, minPrice, maxPrice, sortBy, offset);
-    } catch (err) {
-      ebayUnavailable = true;
-      console.error("searchEbayNormalized failed", err);
-      return [] as Listing[];
-    }
-  };
-
   let marketplaceUnavailable = false;
   const marketplacePromise = useMarketplace
     ? marketplaceSearchLocation
@@ -121,22 +110,17 @@ export async function searchAll(req: Request, res: Response) {
         })()
     : Promise.resolve([] as Listing[]);
 
-  const [marketplace, ebay] = await Promise.all([
-    marketplacePromise,
-    useEbay && ebayTarget > 0 ? runEbaySearch(ebayTarget) : Promise.resolve([]),
-  ]);
-
-  // Drop marketplace listings where price is null — that means the price field
-  // was absent from the API response (e.g. cross-platform partner listings).
-  // price===0 is valid and means "Accepts Offers".
-  const validMarketplace = marketplace.filter((l: Listing) => l.price !== null);
-  let merged = dedupe([...ebay, ...validMarketplace]);
-
-  if (merged.length < limit && useEbay && !ebayUnavailable) {
-    const need = limit - merged.length;
-    const extra = await runEbaySearch(ebayTarget + need);
-    merged = dedupe([...merged, ...extra]);
-  }
+  const marketplace = await marketplacePromise;
+  // Marketplace is fetched once. Fill the remaining space from eBay without
+  // re-fetching a larger batch at the same offset or discarding consumed rows.
+  const validMarketplace = dedupe(marketplace.filter((l: Listing) => l.price !== null)).slice(0, marketplaceTarget);
+  const ebay = useEbay
+    ? await searchEbayPage(query, limit - validMarketplace.length, buyerLocation, minPrice, maxPrice, sortBy, offset)
+    : { items: [], hasMore: false, nextOffset: offset, unavailable: false };
+  const ebayUnavailable = ebay.unavailable;
+  const merged = dedupe([...ebay.items, ...validMarketplace]);
+  res.setHeader("X-Search-Has-More", String(ebay.hasMore));
+  res.setHeader("X-Search-Next-Offset", String(ebay.nextOffset));
 
   // Shuffle only on the first page so eBay and marketplace are interleaved.
   // Skip when sorting by price (preserve eBay's native order) or when offset > 0

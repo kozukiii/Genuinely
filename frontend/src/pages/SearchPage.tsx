@@ -1,3 +1,4 @@
+import { pageAfterAppend, readSearchPagination, restoreSearchPagination, SEARCH_PAGINATION_KEY, type SearchPagination } from "../utils/searchPagination";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigationType } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
@@ -146,7 +147,7 @@ async function fetchFromApi(
   targetTotal: number,
   filters: FilterState,
   offset = 0
-): Promise<Listing[]> {
+): Promise<{ items: Listing[]; pagination: SearchPagination; warning: string | null }> {
   const activeSources =
     (["ebay", "marketplace"] as const).filter((s) => filters.sources[s]).join(",") ||
     "ebay,marketplace";
@@ -178,7 +179,15 @@ async function fetchFromApi(
 
   const data = JSON.parse(text);
   if (!Array.isArray(data)) throw new Error("Response was not an array");
-  return data as Listing[];
+  const pagination = readSearchPagination(res.headers, offset);
+  const unavailable = [
+    res.headers.get("X-Ebay-Search-Status") === "unavailable" ? "eBay" : null,
+    res.headers.get("X-Marketplace-Search-Status") === "unavailable" ? "Marketplace" : null,
+  ].filter(Boolean);
+  return {
+    items: data as Listing[], pagination,
+    warning: unavailable.length ? `${unavailable.join(" and ")} is temporarily unavailable. ${pagination.hasMore ? "Use Next to retry eBay, or search again to retry all sources." : "Search again to retry."}` : null,
+  };
 }
 
 
@@ -586,6 +595,13 @@ export default function SearchPage() {
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const [listings, setListings] = useState<Listing[]>([]);
   const [hasMore, setHasMore] = useState(false);
+  const nextOffsetRef = useRef(0);
+  const searchRequestRef = useRef(0);
+  function applyPagination(pagination: SearchPagination, warning: string | null) {
+    nextOffsetRef.current = pagination.nextOffset;
+    setHasMore(pagination.hasMore);
+    sessionStorage.setItem(SEARCH_PAGINATION_KEY, JSON.stringify({ ...pagination, warning }));
+  }
   const [page, setPage] = useState(1);
   const [currentQuery, setCurrentQuery] = useState("");
   const [loading, setLoading] = useState(false);
@@ -858,6 +874,10 @@ export default function SearchPage() {
       const q = query.trim();
       if (!q) return;
 
+      const request = ++searchRequestRef.current;
+      setHasMore(false);
+      nextOffsetRef.current = 0;
+      sessionStorage.removeItem(SEARCH_PAGINATION_KEY);
       // Commit whatever filters were active (draft or explicit) so sidebar stays in sync
       setFilters(activeFilters);
       sessionStorage.setItem(SEARCH_FILTERS_KEY, JSON.stringify(activeFilters));
@@ -887,13 +907,15 @@ export default function SearchPage() {
       const parsedLimit = activeFilters.limit !== "" ? Math.max(1, parseInt(activeFilters.limit, 10)) : undefined;
       const fetchSize = parsedLimit ?? PAGE_SIZE;
       try {
-        const items = await fetchFromApi(q, fetchSize, activeFilters);
+        const { items, pagination, warning } = await fetchFromApi(q, fetchSize, activeFilters);
+        if (request !== searchRequestRef.current) return;
+        setError(warning);
 
         const withPending = items.map((l: Listing) => ({ ...l, analysisPending: true }));
         setListings(withPending);
         setFetchingNew(false);
         setResultKey((k) => k + 1);
-        setHasMore(items.length >= fetchSize);
+        applyPagination(pagination, warning);
 
         sessionStorage.setItem(SEARCH_QUERY_KEY, q);
         sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(items.map(stripQueryCategoryDebugInfo)));
@@ -902,10 +924,11 @@ export default function SearchPage() {
 
         startAnalysis(q, items);
       } catch (err) {
+        if (request !== searchRequestRef.current) return;
         setFetchingNew(false);
         setError(`Failed to load listings: ${err instanceof Error ? err.message : String(err)}`);
       } finally {
-        setLoading(false);
+        if (request === searchRequestRef.current) setLoading(false);
       }
     },
     []
@@ -915,6 +938,7 @@ export default function SearchPage() {
   const handleNextPage = useCallback(async () => {
     if (!canGoNext || loading) return;
 
+    const request = searchRequestRef.current;
     const nextPage = page + 1;
     const needed = nextPage * PAGE_SIZE;
 
@@ -922,33 +946,37 @@ export default function SearchPage() {
       setLoading(true);
       try {
         // Fetch only the next batch of NEW items starting at the current end
-        const offset = listingsRef.current.length;
-        const newItems = await fetchFromApi(
+        const offset = nextOffsetRef.current;
+        const { items: newItems, pagination, warning } = await fetchFromApi(
           queryRef.current,
           PAGE_SIZE,
           filtersRef.current,
           offset
         );
 
-        const pendingNew = newItems.map((l: Listing) => ({ ...l, analysisPending: true }));
+        if (request !== searchRequestRef.current) return;
+        setError(warning);
+        const existing = new Set(listingsRef.current.map((l) => `${l.source}:${l.id}`));
+        const uniqueNew = newItems.filter((l) => !existing.has(`${l.source}:${l.id}`));
+        const pendingNew = uniqueNew.map((l: Listing) => ({ ...l, analysisPending: true }));
         const combined = dedupeListings([...listingsRef.current, ...pendingNew]);
         setListings(combined);
-        setHasMore(newItems.length >= PAGE_SIZE);
+        applyPagination(pagination, warning);
 
         // Clamp to last valid page so we never land on an empty page
         const newFiltered = applyFilters(combined, filtersRef.current);
-        const newTotalPages = Math.max(1, Math.ceil(newFiltered.length / PAGE_SIZE));
-        const targetPage = Math.min(nextPage, newTotalPages);
+        const targetPage = pageAfterAppend(page, filtered.length, newFiltered.length, PAGE_SIZE);
         setPage(targetPage);
         sessionStorage.setItem(SEARCH_PAGE_KEY, String(targetPage));
         sessionStorage.setItem(SEARCH_LISTINGS_KEY, JSON.stringify(combined.map(stripQueryCategoryDebugInfo)));
 
-        startAnalysis(queryRef.current, newItems);
+        startAnalysis(queryRef.current, uniqueNew);
       } catch (err) {
+        if (request !== searchRequestRef.current) return;
         setError(`Failed to load more listings: ${err instanceof Error ? err.message : String(err)}`);
         return;
       } finally {
-        setLoading(false);
+        if (request === searchRequestRef.current) setLoading(false);
       }
     } else {
       setPage(nextPage);
@@ -1007,6 +1035,15 @@ export default function SearchPage() {
         const parsed = (JSON.parse(savedRaw) as Listing[]).map(stripQueryCategoryDebugInfo);
         if (Array.isArray(parsed)) {
           setListings(parsed);
+          const pagination = restoreSearchPagination(sessionStorage.getItem(SEARCH_PAGINATION_KEY));
+          if (pagination) {
+            nextOffsetRef.current = pagination.nextOffset;
+            setHasMore(pagination.hasMore);
+            setError(pagination.warning ?? null);
+          } else if (savedQuery) {
+            // Legacy caches cannot reconstruct a raw source cursor from listing count.
+            sessionStorage.setItem(SEARCH_PENDING_KEY, "1");
+          }
           // Re-subscribe to analysis results for items that had no score when we
           // navigated away. The module-level analysisStore survives route changes,
           // so any group that finished while SearchPage was unmounted will fire the
@@ -1224,10 +1261,13 @@ export default function SearchPage() {
                 {pageItems.map((item) => (
                   <ListingCard key={`${item.source}:${item.id}`} data={item} />
                 ))}
+                {!loading && !error && listings.length === 0 && currentQuery && (
+                  <p className="empty-message">{hasMore ? "No eligible listings in this batch. Select Next to keep searching." : "No listings found."}</p>
+                )}
                 {!loading && listings.length > 0 && pageItems.length === 0 && (
                   <p className="empty-message">No listings match the current filters.</p>
                 )}
-                {!loading && !hasMore && pageItems.length > 0 && page === totalPages && (
+                {!loading && !error && !hasMore && pageItems.length > 0 && page === totalPages && (
                   <p className="end-of-results">You've reached the end of results.</p>
                 )}
                 {!loading && scamCount > 0 && (
@@ -1242,7 +1282,7 @@ export default function SearchPage() {
             )}
           </div>
 
-          {listings.length > 0 && (
+          {(listings.length > 0 || hasMore) && (
             <div className="page-nav">
               <button
                 className="page-btn"

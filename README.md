@@ -61,7 +61,7 @@ The app searches supported marketplaces, organizes listing data, analyzes price 
 | **Marketplace Data** | eBay Browse API, marketplace integration services |
 | **Search Fallback** | Serper API |
 | **Price Sources** | Category-specific pricing integrations |
-| **Geocoding** | OpenStreetMap Nominatim |
+| **Marketplace location lookup** | Local US ZIP/city coordinates |
 | **Deployment** | Vercel, Render |
 | **Analytics** | Vercel Analytics, Speed Insights |
 
@@ -294,3 +294,13 @@ a 60-second cooldown and a configuration-review diagnostic. HTTP 429 and the
 observed GraphQL rate-limit code honor `Retry-After` or use a 60-second cooldown;
 requests during that interval do not call the upstream service. Diagnostics are
 single-line JSON. Pagination and source-status headers are unchanged.
+
+## Marketplace location lookup
+
+US ZIP and listing-city centers are resolved locally with the pinned
+[`zipcodes` 8.0.0 dataset](https://github.com/davglass/zipcodes) (BSD license,
+included with the dependency). This removes runtime Nominatim requests, including
+parallel per-listing city lookups. Leading-zero ZIPs and ZIP+4 inputs are supported;
+unknown ZIPs fail clearly without guessing the user's location. Coordinates are
+approximate ZIP/city centers; actual listing coordinates take precedence for
+radius filtering. Newly introduced ZIPs may require a dataset update.

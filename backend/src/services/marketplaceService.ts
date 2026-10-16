@@ -1,5 +1,7 @@
 import fetch from "node-fetch";
 import type { Listing } from "../types/listing";
+import { randomUUID } from "node:crypto";
+import { MarketplaceResponseError, readMarketplaceResponse } from "./marketplaceResponse";
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { HttpsProxyAgent } = require("https-proxy-agent");
@@ -7,6 +9,18 @@ const { HttpsProxyAgent } = require("https-proxy-agent");
 const proxyUrls = process.env.PROXY_URL
   ? process.env.PROXY_URL.split(",").map((s) => s.trim()).filter(Boolean)
   : [];
+
+console.info("[marketplace:proxy-config]", JSON.stringify({
+  configuredProxyCount: proxyUrls.length,
+  proxies: proxyUrls.map((value, index) => {
+    try {
+      const parsed = new URL(value);
+      return { index: index + 1, validHttpUrl: ["http:", "https:"].includes(parsed.protocol) && Boolean(parsed.hostname), usernamePresent: Boolean(parsed.username), passwordPresent: Boolean(parsed.password) };
+    } catch {
+      return { index: index + 1, validHttpUrl: false, usernamePresent: false, passwordPresent: false };
+    }
+  }),
+}));
 
 const FETCH_TIMEOUT_MS = 12_000;   // utility calls (geocoding, etc.)
 // Six proxy attempts are staggered 800ms apart, so a 4s outer timeout aborted
@@ -31,11 +45,14 @@ type StickyProxyEntry = {
 
 type ProxyTaggedResponse = Awaited<ReturnType<typeof fetch>> & {
   __proxyUrl?: string | null;
+  __cancelPending?: () => void;
 };
 
 // Sticky proxy pool — empty means we're in racing mode.
 // The race seeds up to three winners, then later requests spread over the pool.
 let stickyProxyPool: StickyProxyEntry[] = [];
+let marketplaceBrowseRetryAt = 0;
+let marketplaceBrowseDenialReason: "rate-limited" | "access-denied" = "rate-limited";
 
 // Called by callers that detect a rate-limit signal in the response body.
 export function markProxyRateLimited(proxyUrl?: string | null): void {
@@ -216,6 +233,7 @@ function raceStickyProxyPool(
           clearTimeout(timer);
           entry.lastSucceededAt = Date.now();
           (res as ProxyTaggedResponse).__proxyUrl = entry.url;
+          (res as ProxyTaggedResponse).__cancelPending = cleanup;
           finish(res, ctrl);
         })
         .catch((err: any) => {
@@ -318,6 +336,7 @@ function happyEyeballs(
       fetch(url, reqOptions)
         .then((res) => {
           (res as ProxyTaggedResponse).__proxyUrl = proxyUrl;
+          (res as ProxyTaggedResponse).__cancelPending = cleanup;
           if (proxyUrl) {
             addStickyProxyWinner(proxyUrl);
             winners += 1;
@@ -572,6 +591,40 @@ async function searchMarketplaceListingsByLatLng({
   radiusKm?: number;
   enrichImages?: boolean;
 }) {
+  if (Date.now() < marketplaceBrowseRetryAt) {
+    const retryAfterMs = marketplaceBrowseRetryAt - Date.now();
+    console.warn("[marketplace:backoff]", JSON.stringify({ reason: marketplaceBrowseDenialReason, retryAfterSeconds: Math.ceil(retryAfterMs / 1000), configurationReviewRequired: marketplaceBrowseDenialReason === "access-denied" }));
+    throw new MarketplaceResponseError("Marketplace is backing off after an upstream denial", true, retryAfterMs);
+  }
+  const requestId = randomUUID().slice(0, 12);
+  const parseBrowseResponse = async (response: Awaited<ReturnType<typeof fetch>>, phase: "initial" | "fallback") => {
+    const proxyUrl = getResponseProxyUrl(response);
+    let proxyAuthorizationConfigured = false;
+    if (proxyUrl) {
+      try {
+        const parsed = new URL(proxyUrl);
+        proxyAuthorizationConfigured = Boolean(parsed.username || parsed.password);
+      } catch { /* Invalid configuration is reported without echoing the URL. */ }
+    }
+    if ([401, 403, 407, 429].includes(response.status)) {
+      (response as ProxyTaggedResponse).__cancelPending?.();
+    }
+    try {
+      return await readMarketplaceResponse<any>(response, {
+        requestId, phase, route: proxyUrl ? "proxy" : "direct",
+        proxyIndex: proxyUrl ? proxyUrls.indexOf(proxyUrl) + 1 : null,
+        configuredProxyCount: proxyUrls.length, proxyAuthorizationConfigured,
+      }, FACEBOOK_BODY_TIMEOUT_MS);
+    } catch (error) {
+      if (error instanceof MarketplaceResponseError && error.accessDenied) {
+        marketplaceBrowseRetryAt = Date.now() + (error.retryAfterMs || 60_000);
+        marketplaceBrowseDenialReason = error.retryAfterMs > 0 ? "rate-limited" : "access-denied";
+        // Stop pending candidates after an explicit denial; do not reroute it.
+        (response as ProxyTaggedResponse).__cancelPending?.();
+      }
+      throw error;
+    }
+  };
   const variables = {
     buyLocation: { latitude: lat, longitude: lng },
     contextual_data: null,
@@ -641,9 +694,7 @@ async function searchMarketplaceListingsByLatLng({
       },
       body,
     });
-    const directJson = directRes.status === 200
-      ? await parseJsonWithTimeout<any>(directRes, FACEBOOK_BODY_TIMEOUT_MS, "Marketplace direct browse API")
-      : null;
+    const directJson = await parseBrowseResponse(directRes, "initial");
     if (
       !hasMarketplaceRateLimitError(directJson)
       && directJson?.data?.marketplace_search?.feed_units?.edges
@@ -651,11 +702,11 @@ async function searchMarketplaceListingsByLatLng({
       json = directJson;
     }
   } catch (err: any) {
-    console.warn(`[marketplace:browse] direct request failed: ${err?.message ?? err}`);
+    if (err instanceof MarketplaceResponseError && err.accessDenied) throw err;
+    console.warn("[marketplace:browse] direct request failed", { requestId, kind: err instanceof MarketplaceResponseError ? "invalid-response" : "transport-error" });
   }
 
   if (!json) {
-  for (let attempt = 1; attempt <= 3; attempt++) {
     const res = await raceProxiedFetch(GRAPHQL_URL, {
       method: "POST",
       headers: {
@@ -665,18 +716,10 @@ async function searchMarketplaceListingsByLatLng({
       body,
     });
 
-    json = await parseJsonWithTimeout<any>(res, FACEBOOK_BODY_TIMEOUT_MS, "Marketplace browse API");
-    if (!hasMarketplaceRateLimitError(json)) break;
-
-    markProxyRateLimited(getResponseProxyUrl(res));
-    if (attempt === 3) throw new Error("Marketplace rate limit exceeded");
-    console.warn(`[marketplace] browse winner was rate-limited; re-racing (${attempt}/3)`);
-    await new Promise((resolve) => setTimeout(resolve, 250 * attempt));
-  }
+    json = await parseBrowseResponse(res, "fallback");
   }
   if (Array.isArray(json?.errors) && json.errors.length > 0) {
-    const message = json.errors.map((error: any) => error?.message ?? "Unknown GraphQL error").join("; ");
-    throw new Error(`Marketplace search failed: ${message}`);
+    throw new MarketplaceResponseError(`Marketplace GraphQL search failed (${json.errors.length} errors; see safe response diagnostics)`, false);
   }
   if (!json?.data?.marketplace_search?.feed_units?.edges) {
     throw new Error("Marketplace search response did not contain listing edges");

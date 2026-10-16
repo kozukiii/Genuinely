@@ -280,3 +280,17 @@ The browser saves continuation state with the cached search; caches predating th
 contract restart the search because their listing counts cannot reconstruct a cursor.
 
 Pagination checks: `npm test --prefix backend` and `npm test --prefix frontend`.
+
+## Marketplace response diagnostics
+
+`[marketplace:response]` records a request ID, direct/proxy route, nonsecret proxy
+index, configured proxy count, authentication-presence flags, HTTP status, media
+type, and response classification. It never logs proxy URLs, credentials, cookie
+or challenge-header values, GraphQL error messages, or response bodies.
+
+Explicit access denials stop the current request and pending race candidates;
+they do not trigger another proxy or direct attempt. Authentication denials trigger
+a 60-second cooldown and a configuration-review diagnostic. HTTP 429 and the
+observed GraphQL rate-limit code honor `Retry-After` or use a 60-second cooldown;
+requests during that interval do not call the upstream service. Diagnostics are
+single-line JSON. Pagination and source-status headers are unchanged.

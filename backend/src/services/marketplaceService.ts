@@ -2,6 +2,7 @@ import fetch from "node-fetch";
 import type { Listing } from "../types/listing";
 import { randomUUID } from "node:crypto";
 import { MarketplaceResponseError, readMarketplaceResponse } from "./marketplaceResponse";
+import { lookupMarketplaceCity, lookupMarketplaceZip } from "./marketplaceLocation";
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { HttpsProxyAgent } = require("https-proxy-agent");
@@ -93,8 +94,6 @@ async function requestMarketplaceGraphql(
   }
 }
 
-const latLngCache = new Map<string, { lat: number; lng: number; expiresAt: number }>();
-
 function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
@@ -105,50 +104,6 @@ function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): nu
       Math.cos((lat2 * Math.PI) / 180) *
       Math.sin(dLng / 2) ** 2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
-async function geocodeCity(city: string, state: string): Promise<{ lat: number; lng: number } | null> {
-  const key = `${city}, ${state}`.toLowerCase();
-  const cached = latLngCache.get(key);
-  if (cached && cached.expiresAt > Date.now()) return { lat: cached.lat, lng: cached.lng };
-
-  const url = `https://nominatim.openstreetmap.org/search?city=${encodeURIComponent(city)}&state=${encodeURIComponent(state)}&countrycodes=us&format=json&limit=1`;
-  try {
-    const res = await fetchWithTimeout(url, { headers: { "user-agent": "Genuinely/1.0" } });
-    const json = await res.json() as Array<{ lat: string; lon: string }>;
-    const first = json?.[0];
-    if (!first) return null;
-    const result = { lat: parseFloat(first.lat), lng: parseFloat(first.lon) };
-    latLngCache.set(key, { lat: result.lat, lng: result.lng, expiresAt: Date.now() + 24 * 60 * 60 * 1000 });
-    return result;
-  } catch {
-    return null;
-  }
-}
-
-async function getLatLng(zip: string) {
-  const key = zip.trim();
-  const cached = latLngCache.get(key);
-  if (cached && cached.expiresAt > Date.now()) return { lat: cached.lat, lng: cached.lng };
-
-  const url = `https://nominatim.openstreetmap.org/search?postalcode=${encodeURIComponent(key)}&countrycodes=us&format=json&limit=1`;
-  const res = await fetchWithTimeout(url, {
-    headers: { "user-agent": "Genuinely/1.0" },
-  });
-
-  const json = await res.json() as Array<{ lat: string; lon: string; display_name: string }>;
-  const first = json?.[0];
-;
-  const result = {
-    lat: first ? parseFloat(first.lat) : undefined,
-    lng: first ? parseFloat(first.lon) : undefined,
-  };
-
-  if (result.lat != null && result.lng != null) {
-    latLngCache.set(key, { lat: result.lat, lng: result.lng, expiresAt: Date.now() + 60 * 60 * 1000 });
-  }
-
-  return result;
 }
 
 function normalizeMarketplaceImageUrl(url: unknown): string | null {
@@ -397,24 +352,25 @@ async function searchMarketplaceListingsByLatLng({
     };
   });
 
-  // Pre-geocode unique city/state combos in parallel (results cached 24h)
+  // Resolve fallback city centers locally; listings with coordinates need no lookup.
   const cityKeys = new Map<string, { lat: number; lng: number } | null>();
   for (const l of listings) {
+    if (l.raw?.location?.latitude != null && l.raw?.location?.longitude != null &&
+        Number.isFinite(Number(l.raw.location.latitude)) && Number.isFinite(Number(l.raw.location.longitude))) continue;
     const city = l.raw?.location?.reverse_geocode?.city;
     const state = l.raw?.location?.reverse_geocode?.state;
     if (city && state) cityKeys.set(`${city}|${state}`, null);
   }
-  await Promise.all(
-    [...cityKeys.keys()].map(async (key) => {
-      const [city, state] = key.split("|");
-      cityKeys.set(key, await geocodeCity(city, state));
-    })
-  );
+  for (const key of cityKeys.keys()) {
+    const [city, state] = key.split("|");
+    cityKeys.set(key, lookupMarketplaceCity(city, state));
+  }
 
   const filtered = listings.filter((l: any) => {
     const listingLat = Number(l.raw?.location?.latitude);
     const listingLng = Number(l.raw?.location?.longitude);
-    if (Number.isFinite(listingLat) && Number.isFinite(listingLng)) {
+    if (l.raw?.location?.latitude != null && l.raw?.location?.longitude != null &&
+        Number.isFinite(listingLat) && Number.isFinite(listingLng)) {
       return haversineKm(lat, lng, listingLat, listingLng) <= radiusKm;
     }
     const city = l.raw?.location?.reverse_geocode?.city;
@@ -923,10 +879,11 @@ export async function searchMarketplaceListings({
     throw new Error("Location lookup failed");
   }
 
-  const resolved = await getLatLng(locationText);
+  const resolved = lookupMarketplaceZip(locationText);
 
-  if (resolved.lat == null || resolved.lng == null) {
-    throw new Error("Location lookup failed");
+  if (!resolved) {
+    console.warn("[marketplace:location]", JSON.stringify({ source: "local-us-zip", outcome: "not-found" }));
+    throw new Error("Location lookup failed: enter a supported US ZIP code");
   }
 
   return searchMarketplaceListingsByLatLng({

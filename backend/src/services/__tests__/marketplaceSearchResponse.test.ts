@@ -16,6 +16,31 @@ const diagnostics = () => vi.mocked(console.info).mock.calls
   .map(([, message]) => JSON.parse(String(message)));
 
 describe("Marketplace browse response handling", () => {
+  it("runs the reported ZIP search without any external geocoder and preserves the radius", async () => {
+    const { searchMarketplaceNormalized } = await import("../marketplaceService");
+    const listing = (id: string, location: object) => ({ node: { listing: {
+      id, marketplace_listing_title: "Golf clubs", listing_price: { amount: "25" }, location,
+    } } });
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ data: { marketplace_search: { feed_units: { edges: [
+      listing("near", { latitude: 44.8, longitude: -91.5, reverse_geocode: { city: "Los Angeles", state: "California" } }),
+      listing("far", { latitude: 34.1, longitude: -118.4 }),
+      listing("city", { latitude: null, longitude: null, reverse_geocode: { city: "Eau Claire", state: "Wisconsin" } }),
+    ] } } } }), { headers: { "content-type": "application/json" } }));
+    const listings = await searchMarketplaceNormalized({ query: "golf clubs", location: "54701", radiusKm: 161, enrichImages: false });
+    expect(listings.map(listing => listing.id)).toEqual(["near", "city"]);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(String(vi.mocked(fetch).mock.calls[0][0])).toBe("https://www.facebook.com/api/graphql/");
+    const body = vi.mocked(fetch).mock.calls[0][1]?.body as URLSearchParams;
+    const variables = JSON.parse(body.get("variables")!);
+    expect(variables.buyLocation).toEqual({ latitude: 44.784, longitude: -91.4877 });
+    expect(variables.params.browse_request_params.filter_radius_km).toBe(161);
+  });
+  it("fails an unknown ZIP before sending any upstream request", async () => {
+    const { searchMarketplaceNormalized } = await import("../marketplaceService");
+    await expect(searchMarketplaceNormalized({ query: "golf clubs", location: "00000", enrichImages: false }))
+      .rejects.toThrow("supported US ZIP code");
+    expect(fetch).not.toHaveBeenCalled();
+  });
   it("uses direct egress only when no proxy is configured and stops after denial", async () => {
     vi.stubEnv("PROXY_URL", "");
     const { searchMarketplaceNormalized } = await import("../marketplaceService");
